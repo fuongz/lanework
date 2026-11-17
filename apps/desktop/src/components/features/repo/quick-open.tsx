@@ -1,12 +1,14 @@
 // ⌘P in Repository › Files (FE-66/D8): a file by name, fuzzily.
 //
-// - Over git's list only: what is tracked or untracked, not what is ignored.
-//   `node_modules` is not read until somebody opens it, and a search that
-//   walked it would answer every query with a thousand copies of `index.js`.
-//   An editor leaves it out of Quick Open for the same reason.
-// - Scored here, not by cmdk (`shouldFilter={false}`): cmdk ranks every item
-//   it is handed on each keystroke, and a repository holds tens of thousands.
-import { useMemo, useState } from "react";
+// - Main finds the files (FE-151): fff's index of the folder, honouring
+//   `.gitignore`, so `node_modules` never answers a query with a thousand
+//   copies of `index.js`. Scoring the whole list here cost a frame per
+//   keystroke on a big repository; main answers in a few milliseconds.
+// - Asked per keystroke, after {@link DEBOUNCE_MS}; an answer to a query
+//   since replaced is dropped, so the latest one wins.
+// - With no query, the first files of the tree's list, as before.
+// - Ranked by main, not by cmdk (`shouldFilter={false}`).
+import { useEffect, useMemo, useState } from "react";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import {
   Command,
@@ -20,69 +22,64 @@ import { useFiles } from "#/stores/files";
 
 /** Results drawn. Past this nobody scrolls; they type another letter. */
 const LIMIT = 50;
-
-/**
- * How well `query` matches `path` as a subsequence, or -1 for not at all.
- *
- * Letters in the file's name, at the start of a word, and in a run count for
- * more: `fv` finds `file-view.tsx` before `features/views/index.ts`.
- */
-function score(path: string, query: string): number {
-  const lower = path.toLowerCase();
-  const nameAt = lower.lastIndexOf("/") + 1;
-  let at = 0;
-  let total = 0;
-  let run = 0;
-  for (const char of query) {
-    const found = lower.indexOf(char, at);
-    if (found === -1) return -1;
-    run = found === at ? run + 1 : 0;
-    total += 1 + run * 2;
-    if (found >= nameAt) total += 3;
-    const before = lower[found - 1];
-    if (
-      found === 0 ||
-      before === "/" ||
-      before === "-" ||
-      before === "_" ||
-      before === "."
-    )
-      total += 4;
-    at = found + 1;
-  }
-  // Shorter paths first among equals: `src/index.ts` over a deep one.
-  return total - path.length / 100;
-}
+/** How long typing must pause before main is asked. */
+const DEBOUNCE_MS = 60;
 
 export function QuickOpen({ paths }: { paths: string[] }) {
   const open = useFiles((state) => state.quickOpen);
   const setOpen = useFiles((state) => state.setQuickOpen);
   const openFile = useFiles((state) => state.openFile);
+  const slug = useFiles((state) => state.slug);
+  const folder = useFiles((state) => state.folder);
   const [query, setQuery] = useState("");
+  /** Main's answer, with the query it answers. */
+  const [found, setFound] = useState<{ query: string; paths: string[] }>({
+    query: "",
+    paths: [],
+  });
 
-  const files = useMemo(
-    () => paths.filter((path) => !path.endsWith("/")),
+  const needle = query.trim();
+  const first = useMemo(
+    () => paths.filter((path) => !path.endsWith("/")).slice(0, LIMIT),
     [paths],
   );
 
-  const matched = useMemo(() => {
-    const needle = query.replace(/\s+/g, "").toLowerCase();
-    if (!needle) return files.slice(0, LIMIT);
-    const ranked: { path: string; score: number }[] = [];
-    for (const path of files) {
-      const value = score(path, needle);
-      if (value >= 0) ranked.push({ path, score: value });
-    }
-    ranked.sort((a, b) => b.score - a.score);
-    return ranked.slice(0, LIMIT).map((item) => item.path);
-  }, [files, query]);
+  useEffect(() => {
+    if (!open || !needle || !slug) return;
+    const api = window.desktop?.fsSearch;
+    if (!api) return;
+    let current = true;
+    const timer = setTimeout(() => {
+      api
+        .findFiles(slug, folder, needle, LIMIT)
+        .then((hits) => {
+          if (current)
+            setFound({ query: needle, paths: hits.map((hit) => hit.path) });
+        })
+        .catch(() => {
+          if (current) setFound({ query: needle, paths: [] });
+        });
+    }, DEBOUNCE_MS);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [open, needle, slug, folder]);
+
+  // The last answer stays up while the next query is out, so the list does
+  // not flash empty between keystrokes.
+  const matched = needle ? found.paths : first;
+  const pending = Boolean(needle) && found.query !== needle;
 
   return (
     <CommandDialog
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (!next) setQuery("");
+        if (!next) {
+          setQuery("");
+          setFound({ query: "", paths: [] });
+        }
       }}
       title="Go to File"
       description="Find a file in this repository by name"
@@ -94,7 +91,7 @@ export function QuickOpen({ paths }: { paths: string[] }) {
           onValueChange={setQuery}
         />
         <CommandList className="max-h-96">
-          <CommandEmpty>No files match.</CommandEmpty>
+          {!pending && <CommandEmpty>No files match.</CommandEmpty>}
           {matched.map((path) => {
             const cut = path.lastIndexOf("/");
             return (
@@ -105,6 +102,7 @@ export function QuickOpen({ paths }: { paths: string[] }) {
                   openFile(path, true);
                   setOpen(false);
                   setQuery("");
+                  setFound({ query: "", paths: [] });
                 }}
               >
                 <FileTypeIcon path={path} className="size-4 shrink-0" />

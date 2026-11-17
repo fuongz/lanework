@@ -25,7 +25,6 @@
 // engines and the broadcast, so a script can drive it in a temp folder.
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { type FSWatcher, watch } from "node:fs";
 import {
   chmod,
   mkdir,
@@ -89,6 +88,7 @@ import {
 import { redact } from "../../hook/redact";
 import type { Outgoing } from "../conversation/queue";
 import { JUDGE_TIMEOUT_MS } from "../jev/judge";
+import { type Watch, watchPath } from "../watch";
 import type { EngineResult, EngineTarget, EngineWrite } from "./engine-tap";
 import {
   checkoutTop,
@@ -530,7 +530,7 @@ function stampTimes(tasks: readonly OrchestrationTask[], now: number): void {
 export class Orchestrator {
   private records = new Map<string, RunRecord>();
   /** The runs folder, watched while another instance drives (FE-138). */
-  private watcher: FSWatcher | null = null;
+  private watcher: Watch | null = null;
   private loading: Promise<void> | null = null;
   /** Token hash → run id. */
   private tokens = new Map<string, string>();
@@ -675,21 +675,30 @@ export class Orchestrator {
     if (this.watcher) return;
     const dir = join(this.deps.dataDir, "runs");
     const due = new Map<string, ReturnType<typeof setTimeout>>();
-    try {
-      this.watcher = watch(dir, (_event, name) => {
-        if (!name?.endsWith(".json")) return;
-        clearTimeout(due.get(name));
-        due.set(
-          name,
-          setTimeout(() => {
-            due.delete(name);
-            void this.reread(join(dir, name));
-          }, 150),
-        );
-      });
-    } catch (error) {
-      console.error("Unable to follow the orchestration runs", error);
-    }
+    this.watcher = watchPath(
+      dir,
+      {
+        onError: (error) => {
+          this.watcher = null;
+          console.error("Stopped following the orchestration runs", error);
+        },
+      },
+      (events) => {
+        for (const { name } of events) {
+          if (!name?.endsWith(".json")) continue;
+          clearTimeout(due.get(name));
+          due.set(
+            name,
+            setTimeout(() => {
+              due.delete(name);
+              void this.reread(join(dir, name));
+            }, 150),
+          );
+        }
+      },
+    );
+    if (!this.watcher)
+      console.error(`Unable to follow the orchestration runs: no ${dir}`);
   }
 
   private async reread(file: string): Promise<void> {

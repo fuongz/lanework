@@ -1,5 +1,8 @@
 // A folder's file list (FE-149): `rg --files` with the bundled ripgrep, or
 // an fdir walk when rg cannot run.
+import { readFileSync } from "node:fs";
+import { join, relative } from "node:path";
+import ignore, { type Ignore } from "ignore";
 import { RipgrepMissingError, runRg } from "./rg";
 
 // NOTE: `require`, not `import`. esbuild resolves an `import` through fdir's
@@ -23,11 +26,14 @@ export interface FileList {
   files: string[];
   /** Cut at `maxFiles` or by the timeout. */
   truncated: boolean;
-  /** `rg` honoured `.gitignore`; `walk` is fdir with {@link WALK_SKIP} only. */
+  /**
+   * `rg` honoured `.gitignore`; `walk` is fdir with the `.gitignore` files
+   * and {@link WALK_SKIP}.
+   */
   source: "rg" | "walk";
 }
 
-/** The folders a walk never enters: no `.gitignore` is read there. */
+/** The folders a walk never enters, whatever `.gitignore` says. */
 export const WALK_SKIP: ReadonlySet<string> = new Set([
   ".git",
   "node_modules",
@@ -41,9 +47,8 @@ export const WALK_SKIP: ReadonlySet<string> = new Set([
  * Every file under `root` that `rg` would search: `.gitignore` respected,
  * hidden files skipped unless `hidden`.
  *
- * When `rg` is missing or fails, fdir walks the folder instead, skipping
- * {@link WALK_SKIP}, which is the most a walk can do without reading ignore
- * files.
+ * When `rg` is missing or fails, fdir walks the folder instead, honouring
+ * the `.gitignore` files ({@link gitignored}) and skipping {@link WALK_SKIP}.
  *
  * @throws The signal's reason when aborted; the child is killed first.
  */
@@ -89,6 +94,51 @@ async function listWithRg(
   };
 }
 
+/**
+ * Whether a path under `root` is ignored by the `.gitignore` files on its
+ * way down: the root's and every nested one's, read once each, the deepest
+ * rule that matches winning, as git decides it (FE-151).
+ *
+ * NOTE: In any folder, not only a repository: a walk is the fallback for a
+ * folder rg cannot list, git or not. `.git/info/exclude` and the global
+ * excludes file are not read.
+ *
+ * @returns A check taking a relative, `/`-separated path and whether it is a
+ *   folder.
+ */
+function gitignored(root: string): (path: string, isDir: boolean) => boolean {
+  const rules = new Map<string, Ignore | null>();
+  const rulesIn = (dir: string): Ignore | null => {
+    const known = rules.get(dir);
+    if (known !== undefined) return known;
+    let text = "";
+    try {
+      text = readFileSync(join(root, dir, ".gitignore"), "utf8");
+    } catch {
+      // No `.gitignore` here, or none readable.
+    }
+    const found = text.trim() ? ignore().add(text) : null;
+    rules.set(dir, found);
+    return found;
+  };
+  return (path, isDir) => {
+    const parts = path.split("/").filter(Boolean);
+    let ignored = false;
+    let dir = "";
+    for (let at = 0; at < parts.length; at++) {
+      const here = rulesIn(dir);
+      if (here) {
+        const below = parts.slice(at).join("/") + (isDir ? "/" : "");
+        const { ignored: hit, unignored } = here.test(below);
+        if (hit) ignored = true;
+        else if (unignored) ignored = false;
+      }
+      dir = dir ? `${dir}/${parts[at]}` : (parts[at] as string);
+    }
+    return ignored;
+  };
+}
+
 async function listWithWalk(
   root: string,
   maxFiles: number,
@@ -99,13 +149,23 @@ async function listWithWalk(
     ? AbortSignal.any([options.signal, timeout])
     : timeout;
   const hidden = options.hidden === true;
+  const ignored = gitignored(root);
   const found = await new fdir()
     .withRelativePaths()
     .withPathSeparator("/")
     .withMaxFiles(maxFiles + 1)
     .withAbortSignal(signal)
-    .exclude((name) => WALK_SKIP.has(name) || (!hidden && name.startsWith(".")))
-    .filter((path) => hidden || !path.split("/").at(-1)?.startsWith("."))
+    .exclude(
+      (name, dirPath) =>
+        WALK_SKIP.has(name) ||
+        (!hidden && name.startsWith(".")) ||
+        ignored(relative(root, dirPath).replaceAll("\\", "/"), true),
+    )
+    .filter(
+      (path) =>
+        (hidden || !path.split("/").at(-1)?.startsWith(".")) &&
+        !ignored(path, false),
+    )
     .crawl(root)
     .withPromise();
   if (options.signal?.aborted) throw options.signal.reason;

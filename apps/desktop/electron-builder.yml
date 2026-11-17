@@ -14,6 +14,8 @@ directories:
 #   packaged release build only), so esbuild never inlines it.
 # - node-pty, which main also loads unbundled, stays a devDependency: its
 #   native binary is staged into dist/ by scripts/electron-bundle.mjs.
+#   So do the FE-151 natives (@ff-labs/fff-node, @parcel/watcher,
+#   @ast-grep/napi and @ast-grep/lang-*).
 files:
   - dist/electron/**/*
   - dist/client/**/*
@@ -23,6 +25,12 @@ files:
 # dist/electron/node_modules by `scripts/electron-bundle.mjs`.
 asarUnpack:
   - "**/node_modules/@lydell/**"
+  # FE-151: the coding-search natives (fff, @parcel/watcher, ast-grep and its
+  # parsers) and their run-time dependencies, also staged by
+  # `scripts/electron-bundle.mjs`. fff dlopen()s its dylib and ast-grep its
+  # parsers by path, which only works on a real file, so
+  # `electron/main/native/` requires them from app.asar.unpacked.
+  - "dist/electron/node_modules/**"
   # FE-28: the Stop hook is run by path from ~/.claude/settings.json under
   # ELECTRON_RUN_AS_NODE, a plain Node that is not asar-aware.
   - "dist/electron/hook/**"

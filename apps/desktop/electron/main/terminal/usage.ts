@@ -6,7 +6,6 @@
 // projects the rail follows and which conversations Lanework's session store
 // lists for each (FE-112), which are that module's to answer, so
 // `registerUsage` is handed them rather than importing it.
-import { type FSWatcher, watch } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { app } from "electron";
@@ -25,6 +24,7 @@ import { broadcast, handle } from "../ipc";
 import { arity, slug } from "../ipc-args";
 import { appHomeDir } from "../paths";
 import { isTestRun, testAgentHome } from "../test-seams";
+import { type Watch, watchPath } from "../watch";
 import { claudeAuth, claudeAuthOf } from "./agents";
 import {
   type ClaudeOAuthOptions,
@@ -184,7 +184,7 @@ let lastClaudePlan: string | null | undefined;
 let lastClaudeIdentity: string | null | undefined;
 let lastClaudeMode: string | undefined;
 let claudeAccountChangedAt = 0;
-let quotaWatch: FSWatcher | null = null;
+let quotaWatch: Watch | null = null;
 /**
  * Tell every followed project to ask `codexUsage` again.
  *
@@ -206,19 +206,20 @@ function notifyClaudeUsage(): void {
 }
 function watchClaudeQuota(): void {
   if (quotaWatch) return;
-  try {
-    quotaWatch = watch(appHomeDir(), (_event, file) => {
-      if (file?.toString() !== CLAUDE_USAGE_FILE) return;
-      notifyClaudeUsage();
-    });
-    quotaWatch.on("error", () => {
-      quotaWatch?.close();
-      quotaWatch = null;
-    });
-    quotaWatch.unref();
-  } catch {
-    // A later read retries once the application home exists.
-  }
+  // Null: a later read retries once the application home exists.
+  quotaWatch = watchPath(
+    appHomeDir(),
+    {
+      persistent: false,
+      onError: () => {
+        quotaWatch = null;
+      },
+    },
+    (events) => {
+      if (events.some((event) => event.name === CLAUDE_USAGE_FILE))
+        notifyClaudeUsage();
+    },
+  );
 }
 
 /**

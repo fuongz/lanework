@@ -988,7 +988,8 @@ const projects: DesktopProjectsApi = {
 
 /**
  * Content search (FE-149): a project's folder by slug and folder index, and
- * the agents' transcripts. Main runs ripgrep; the page gets matches.
+ * the agents' transcripts. Main runs ripgrep; the page gets matches. FE-151
+ * adds fuzzy file finding and structural search, on the same terms.
  *
  * NOTE: `folder` and `opts` are sent as `null` and `{}` when absent, never
  * omitted: a handler that checks its argument count sees the same count
@@ -1005,6 +1006,23 @@ const fsSearch: DesktopFsSearchApi = {
     ),
   searchSessions: (query, opts) =>
     ipcRenderer.invoke(fsSearchChannels.sessions, query, opts ?? {}),
+  // FE-151: `limit` is sent as `null` when absent, for the same reason.
+  findFiles: (slug, folder, query, limit) =>
+    ipcRenderer.invoke(
+      fsSearchChannels.files,
+      slug,
+      folder ?? null,
+      query,
+      limit ?? null,
+    ),
+  searchStructural: (slug, folder, pattern, opts) =>
+    ipcRenderer.invoke(
+      fsSearchChannels.structural,
+      slug,
+      folder ?? null,
+      pattern,
+      opts ?? {},
+    ),
 };
 
 const desktop: DesktopApi = {

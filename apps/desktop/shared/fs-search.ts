@@ -1,7 +1,8 @@
 // Content search across a project's folder (⌘⇧F) and across the agents'
 // transcripts (FE-149). Main runs the bundled ripgrep through
 // `electron/main/fs-kit/`; the page gets matches, never a path it can open
-// on its own.
+// on its own. FE-151 adds fuzzy file finding (fff) and structural search
+// (ast-grep), both run in main.
 import type { ConversationAgent } from "./conversation";
 
 export const fsSearchChannels = {
@@ -9,7 +10,39 @@ export const fsSearchChannels = {
   text: "fsSearch:text",
   /** Search the agents' session transcripts. */
   sessions: "fsSearch:sessions",
+  /** FE-151: fuzzy-find files by name in a project folder. */
+  files: "fsSearch:files",
+  /** FE-151: structural (ast-grep) search in a project folder. */
+  structural: "fsSearch:structural",
 } as const;
+
+/** A file whose path matches a fuzzy query (FE-151). */
+export interface FileHit {
+  /** Relative to the searched folder, `/`-separated. */
+  path: string;
+  /** Higher is a better match. Only comparable within one answer. */
+  score: number;
+  /** The matched characters as `[start, end)` UTF-16 offsets into `path`. */
+  ranges?: [number, number][];
+}
+
+/** Languages a structural pattern can be written in (FE-151). */
+export type StructuralLang =
+  | "ts"
+  | "tsx"
+  | "js"
+  | "jsx"
+  | "json"
+  | "css"
+  | "html"
+  | "python"
+  | "rust"
+  | "go";
+
+export interface SearchStructuralOptions {
+  /** The pattern's language; inferred from each file's extension when unset. */
+  lang?: StructuralLang;
+}
 
 /** One matching line. */
 export interface MatchLine {
@@ -79,4 +112,25 @@ export interface DesktopFsSearchApi {
     query: string,
     opts?: SearchSessionsOptions,
   ) => Promise<SessionMatch[]>;
+  /**
+   * FE-151: fuzzy-find files by path in one of project `slug`'s folders
+   * (folder as in {@link DesktopFsSearchApi.searchText}), best match first,
+   * at most `limit` of them.
+   */
+  findFiles: (
+    slug: string,
+    folder: number | null,
+    query: string,
+    limit?: number,
+  ) => Promise<FileHit[]>;
+  /**
+   * FE-151: structural search with an ast-grep `pattern` in one of project
+   * `slug`'s folders. Each match's lines come back as in `searchText`.
+   */
+  searchStructural: (
+    slug: string,
+    folder: number | null,
+    pattern: string,
+    opts?: SearchStructuralOptions,
+  ) => Promise<FileMatch[]>;
 }

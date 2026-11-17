@@ -36,7 +36,7 @@ const watched = new WeakSet<WebContents>();
  * @throws When the project is unknown, links no such folder, or the folder
  *   is gone.
  */
-async function folderAt(key: string, index: number): Promise<string> {
+export async function folderAt(key: string, index: number): Promise<string> {
   const { record, project } = await knownProject(key);
   const path = (await readFolders(record))[project.slug]?.[index];
   if (!path) throw new Error("That is not one of this project's folders.");

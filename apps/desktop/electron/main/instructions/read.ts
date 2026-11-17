@@ -4,7 +4,7 @@
 // NOTE: Read-only, and nothing here imports Electron. Main calls it, and a
 // spec drives it under plain Node against a fake home folder.
 import { createHash } from "node:crypto";
-import { constants, type FSWatcher, watch } from "node:fs";
+import { constants } from "node:fs";
 import { open, readdir, realpath, stat } from "node:fs/promises";
 import {
   basename,
@@ -32,6 +32,7 @@ import {
 import { splitFrontmatter } from "../frontmatter";
 import { gitReadOut } from "../git/runner";
 import { readsAllowed } from "../git/trust-gate";
+import { type Watch, watchPath } from "../watch";
 
 /** The most of one file a read takes. Instruction files are a few KB. */
 export const INSTRUCTION_READ_MAX = 256 * 1024;
@@ -1115,23 +1116,21 @@ export function watchInstructions(
 ): () => void {
   let stopped = false;
   let timer: NodeJS.Timeout | null = null;
-  const watchers: FSWatcher[] = [];
-  const changed = (_event: string, name: string | Buffer | null) => {
-    if (stopped || timer || !relevant(name === null ? null : String(name)))
-      return;
+  const watchers: Watch[] = [];
+  const changed = (name: string | null) => {
+    if (stopped || timer || !relevant(name)) return;
     timer = setTimeout(() => {
       timer = null;
       if (!stopped) onChange();
     }, SETTLE_MS);
   };
-  for (const dir of dirs)
-    try {
-      const watcher = watch(dir, changed);
-      watcher.on("error", () => watcher.close());
-      watchers.push(watcher);
-    } catch {
-      // Not there yet: the next listing watches it if it appears.
-    }
+  for (const dir of dirs) {
+    const watcher = watchPath(dir, {}, (events) => {
+      for (const event of events) changed(event.name);
+    });
+    // Null: not there yet. The next listing watches it if it appears.
+    if (watcher) watchers.push(watcher);
+  }
   return () => {
     stopped = true;
     if (timer) clearTimeout(timer);

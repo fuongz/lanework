@@ -1,7 +1,8 @@
 // What `/` and `@` offer in the composer (FE-62/D8): slash commands and
 // skills, or files in the project's folder, fuzzy-matched. A conversation
 // on OpenCode is offered OpenCode's, read from its config folders, no
-// OpenCode service needed (FE-105/D3). Nothing here imports Electron.
+// OpenCode service needed (FE-105/D3). Files come from fff's index when it
+// is ready (FE-151). Nothing here imports Electron.
 import { constants } from "node:fs";
 import { open, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -12,6 +13,8 @@ import {
   commandLabel,
   type Suggestion,
 } from "../../../shared/conversation";
+import type { FileHit } from "../../../shared/fs-search";
+import { findEntries } from "../file-finder/finder";
 import { listFiles } from "../fs-kit";
 import { gitReadOut } from "../git/runner";
 import { readsAllowed } from "../git/trust-gate";
@@ -90,6 +93,23 @@ function fuzzyScore(text: string, query: string): number | null {
     from = found + 1;
   }
   return 300 - gaps - hay.length / 10;
+}
+
+/**
+ * The best `limit` of `files` for `query`, best first: what `fsSearch:files`
+ * answers when fff cannot (FE-151).
+ */
+export function rankFiles(
+  files: readonly string[],
+  query: string,
+  limit: number,
+): FileHit[] {
+  const hits: FileHit[] = [];
+  for (const path of files) {
+    const score = fuzzyScore(path, query);
+    if (score !== null) hits.push({ path, score });
+  }
+  return hits.sort((a, b) => b.score - a.score).slice(0, limit);
 }
 
 /** The best {@link LIMIT} matches of `query`, best first. */
@@ -419,35 +439,41 @@ function foldersOf(files: string[]): string[] {
   return folders;
 }
 
+/** `path`'s folder, or null at the top. */
+const parentOf = (path: string) =>
+  dirname(path) === "." ? null : dirname(path);
+
+/** A file as `@path`, or a folder as `@path/`. */
+function fileSuggestion(path: string, kind: "file" | "folder"): Suggestion {
+  return {
+    value: kind === "folder" ? `@${path}/` : `@${path}`,
+    detail: parentOf(path),
+    label: basename(path),
+    kind,
+  };
+}
+
 /**
  * The project's files and folders that match `query`: `@path`, and a
  * folder as `@path/` (FE-93/D2).
+ *
+ * fff's index answers when it is ready (FE-151); until then, the folder's
+ * file list is ranked here.
  */
 export async function suggestFiles(
   folder: string,
   query: string,
 ): Promise<Suggestion[]> {
-  const files = await projectFiles(folder);
   const clean = query.replace(/^@/, "");
-  const parent = (path: string) =>
-    dirname(path) === "." ? null : dirname(path);
+  const found = await findEntries(folder, clean, LIMIT);
+  if (found)
+    return found.map((hit) =>
+      fileSuggestion(hit.path.replace(/\/$/, ""), hit.kind),
+    );
+  const files = await projectFiles(folder);
   const items: Suggestion[] = [
-    ...foldersOf(files).map(
-      (dir): Suggestion => ({
-        value: `@${dir}/`,
-        detail: parent(dir),
-        label: basename(dir),
-        kind: "folder",
-      }),
-    ),
-    ...files.map(
-      (path): Suggestion => ({
-        value: `@${path}`,
-        detail: parent(path),
-        label: basename(path),
-        kind: "file",
-      }),
-    ),
+    ...foldersOf(files).map((dir) => fileSuggestion(dir, "folder")),
+    ...files.map((path) => fileSuggestion(path, "file")),
   ];
   return rank(items, clean, (item) => item.value.slice(1).replace(/\/$/, ""));
 }

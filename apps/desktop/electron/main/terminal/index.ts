@@ -1,7 +1,6 @@
 // The main process's side of the terminal: starting the pty host, answering
 // the panel's requests, and handing windows a port to it.
 import { execFile } from "node:child_process";
-import { type FSWatcher, watch } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -67,6 +66,7 @@ import {
 } from "../sessions";
 import { agentHomeDir } from "../test-seams";
 import { STALE_MS, SUBAGENT_STALE_MS } from "../transcripts/activity";
+import { type Watch, watchPath } from "../watch";
 import { ingestSession, watchAgentActivity } from "./agent-activity";
 import {
   archiveAgentTranscript,
@@ -714,7 +714,7 @@ function rebind(project: string): void {
     });
 }
 
-let movesWatch: FSWatcher | null = null;
+let movesWatch: Watch | null = null;
 let movesTimer: NodeJS.Timeout | null = null;
 /**
  * Watch Claude's own record of which conversation each of its processes is
@@ -725,21 +725,22 @@ let movesTimer: NodeJS.Timeout | null = null;
  */
 function watchMoves(): void {
   if (movesWatch) return;
-  try {
-    movesWatch = watch(join(agentHome(), ".claude", "sessions"), () => {
+  // Null: no Claude on this machine, or it has never run. Nothing to follow.
+  movesWatch = watchPath(
+    join(agentHome(), ".claude", "sessions"),
+    {
+      onError: () => {
+        movesWatch = null;
+      },
+    },
+    () => {
       if (movesTimer) return;
       movesTimer = setTimeout(() => {
         movesTimer = null;
         for (const project of watching.keys()) rebind(project);
       }, 300);
-    });
-    movesWatch.on("error", () => {
-      movesWatch?.close();
-      movesWatch = null;
-    });
-  } catch {
-    // No Claude on this machine, or it has never run: nothing to follow.
-  }
+    },
+  );
 }
 
 /** The pty pids of `project`'s open terminals; none before any started. */

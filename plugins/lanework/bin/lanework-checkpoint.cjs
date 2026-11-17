@@ -1883,6 +1883,693 @@ var init_agent_home = __esm(() => {
   CONFIG_MAX_BYTES = 512 * 1024;
 });
 
+// node_modules/.bun/ignore@7.0.14/node_modules/ignore/index.js
+var require_ignore = __commonJS(function(exports2, module2) {
+  function makeArray(subject) {
+    return Array.isArray(subject) ? subject : [subject];
+  }
+  var UNDEFINED = undefined;
+  var EMPTY = "";
+  var SPACE = " ";
+  var ESCAPE = "\\";
+  var REGEX_LITERAL_SPECIAL = /[.*+?()[\]{}^$|\\/]/;
+  var BOM = "\uFEFF";
+  var REGEX_INVALID_TRAILING_BACKSLASH = /(?:[^\\]|^)\\$/;
+  var REGEX_ANCHORED_GLOBSTAR = /^\/\*{2,}$/;
+  var REGEX_REPLACE_LEADING_EXCAPED_EXCLAMATION = /^\\!/;
+  var REGEX_REPLACE_LEADING_EXCAPED_HASH = /^\\#/;
+  var REGEX_SPLITALL_CRLF = /\r?\n/g;
+  var DOUBLE_SLASH = "//";
+  var SLASH_CODE = 47;
+  var DOT_CODE = 46;
+  var SLASH = "/";
+  var TMP_KEY_IGNORE = "node-ignore";
+  if (typeof Symbol !== "undefined") {
+    TMP_KEY_IGNORE = Symbol.for("node-ignore");
+  }
+  var KEY_IGNORE = TMP_KEY_IGNORE;
+  var define = (object, key, value) => {
+    Object.defineProperty(object, key, { value });
+    return value;
+  };
+  var RETURN_FALSE = () => false;
+  var POSIX_CLASSES = {
+    alnum: "0-9A-Za-z",
+    alpha: "A-Za-z",
+    blank: " \\t",
+    cntrl: "\\x00-\\x1f\\x7f",
+    digit: "0-9",
+    graph: "!-.0-~",
+    lower: "a-z",
+    print: " -.0-~",
+    punct: "!-.:-@\\[-`{-~",
+    space: " \\t\\n\\r",
+    upper: "A-Z",
+    xdigit: "0-9A-Fa-f"
+  };
+  var CLASS_MEMBERS_TO_ESCAPE = "\\]^-[";
+  var escapeMember = (char) => CLASS_MEMBERS_TO_ESCAPE.indexOf(char) < 0 ? char : ESCAPE + char;
+  var NON_SLASH = "(?!\\/)";
+  var classSource = (negated, body) => {
+    if (negated) {
+      return `[^\\/${body}]`;
+    }
+    const source = `[${body}]`;
+    return new RegExp(source).test("/") ? NON_SLASH + source : source;
+  };
+  var scanBracket = (pattern, start) => {
+    const { length } = pattern;
+    let index = start + 1;
+    let negated = EMPTY;
+    const lead = pattern[index];
+    if (lead === "!" || lead === "^") {
+      negated = "^";
+      index++;
+    }
+    let body = EMPTY;
+    let prev = EMPTY;
+    for (;; ) {
+      const char = pattern[index];
+      if (char === UNDEFINED) {
+        return null;
+      }
+      if (char === ESCAPE) {
+        const escaped = pattern[index + 1];
+        if (escaped === UNDEFINED) {
+          return null;
+        }
+        body += escapeMember(escaped);
+        prev = escaped;
+        index++;
+      } else if (char === "-" && prev && index + 1 < length && pattern[index + 1] !== "]") {
+        index++;
+        let to = pattern[index];
+        if (to === ESCAPE) {
+          to = pattern[index += 1];
+        }
+        if (prev <= to) {
+          body += `-${escapeMember(to)}`;
+        }
+        prev = EMPTY;
+      } else if (char === "[" && pattern[index + 1] === ":") {
+        const nameStart = index + 2;
+        let end = nameStart;
+        while (end < length && pattern[end] !== "]") {
+          end++;
+        }
+        if (end === length) {
+          return null;
+        }
+        if (end > nameStart && pattern[end - 1] === ":") {
+          const name = pattern.slice(nameStart, end - 1);
+          if (!Object.prototype.hasOwnProperty.call(POSIX_CLASSES, name)) {
+            return null;
+          }
+          body += POSIX_CLASSES[name];
+          prev = EMPTY;
+          index = end;
+        } else {
+          body += escapeMember("[");
+          prev = "[";
+          index = nameStart - 2;
+        }
+      } else {
+        body += escapeMember(char);
+        prev = char;
+      }
+      index++;
+      if (pattern[index] === "]") {
+        return {
+          end: index,
+          source: classSource(negated, body)
+        };
+      }
+    }
+  };
+  var NEVER_MATCH = "[]";
+  var PLACEHOLDER = "\x00";
+  var REGEX_RESTORE_PLACEHOLDER = new RegExp(`${PLACEHOLDER}(\\d+)${PLACEHOLDER}`, "g");
+  var TRAILING_WILDCARD = "";
+  var TRAILING_DOUBLESTAR = "";
+  var isReserved = (char) => char === PLACEHOLDER || char === TRAILING_WILDCARD || char === TRAILING_DOUBLESTAR;
+  var extractBrackets = (pattern) => {
+    const sources = [];
+    const hold = (source) => `${PLACEHOLDER}${sources.push(source) - 1}${PLACEHOLDER}`;
+    const { length } = pattern;
+    let out = EMPTY;
+    let index = 0;
+    while (index < length) {
+      const char = pattern[index];
+      if (char === ESCAPE) {
+        const escaped = pattern[index + 1];
+        if (escaped === UNDEFINED || escaped === SLASH && index + 2 === length) {
+          out += hold(NEVER_MATCH);
+        } else if (escaped === "*" || escaped === "[" || escaped === SPACE) {
+          out += pattern.slice(index, index + 2);
+        } else {
+          out += hold(REGEX_LITERAL_SPECIAL.test(escaped) ? ESCAPE + escaped : isReserved(escaped) ? `[${escaped}]` : escaped);
+        }
+        index += 2;
+      } else if (isReserved(char)) {
+        out += hold(`[${char}]`);
+        index++;
+      } else if (char === "[") {
+        const scanned = scanBracket(pattern, index);
+        if (scanned === null) {
+          out += hold(NEVER_MATCH);
+          index = length;
+        } else {
+          out += hold(scanned.source);
+          index = scanned.end + 1;
+        }
+      } else {
+        out += char;
+        index++;
+      }
+    }
+    return {
+      source: out,
+      sources
+    };
+  };
+  var DIRECT = null;
+  var REGEX_INNER_SLASH = /\/(?!$)/;
+  var REPLACERS = [
+    [
+      /(\\+)( ?)/g,
+      (_, run, space) => space ? run.slice(0, run.length - run.length % 2) + SPACE : run,
+      ESCAPE + SPACE
+    ],
+    [
+      /(^|\/)\*{3,}(?=\/|$)/g,
+      (_, start) => `${start}**`,
+      "*"
+    ],
+    [
+      /[\\$.|*+(){^]/g,
+      (match) => `\\${match}`
+    ],
+    [
+      /(?!\\)\?/g,
+      () => "[^/]",
+      "?"
+    ],
+    [
+      /^\//,
+      () => "^",
+      SLASH
+    ],
+    [
+      /\//g,
+      () => "\\/",
+      SLASH
+    ],
+    [
+      /^\^*(?:\\\*\\\*\\\/)+/,
+      () => "^(?:.*\\/)?",
+      "*"
+    ],
+    [
+      DIRECT,
+      (source, pattern) => {
+        if (!source || source[0] === "^") {
+          return source;
+        }
+        const anchor = !REGEX_INNER_SLASH.test(pattern) ? "(?:^|\\/)" : "^";
+        return anchor + source;
+      }
+    ],
+    [
+      /\\\/\\\*\\\*(?=\\\/|$)/g,
+      (_, index, str) => index + 6 < str.length ? str.slice(index + 6) === "\\/" ? "(?:\\/[^\\/]+)+" : "(?:\\/[^\\/]+)*" : `\\/${TRAILING_DOUBLESTAR}`,
+      "*"
+    ],
+    [
+      /(^|[^\\]+)(\\\*)+(?=.+)/g,
+      (_, p1, p2) => {
+        const unescaped = p2.replace(/\\\*/g, "[^\\/]*");
+        return p1 + unescaped;
+      },
+      "*"
+    ],
+    [
+      /(^|[^\\])((?:\\\\)*)\\\*$/,
+      (match, p1, p2) => p2 === EMPTY ? p1 + TRAILING_WILDCARD : match,
+      "*"
+    ],
+    [
+      /\\\\\\(?=[$.|*+(){^])/g,
+      () => ESCAPE,
+      ESCAPE + ESCAPE
+    ],
+    [
+      /\\\\/g,
+      () => ESCAPE,
+      ESCAPE + ESCAPE
+    ],
+    [
+      /\\\[([^\]/]*?)($|\])/g,
+      (match, range, close) => `\\[${range}${close}`,
+      "["
+    ],
+    [
+      DIRECT,
+      (source) => {
+        const last = source[source.length - 1];
+        if (!last || last === TRAILING_WILDCARD || last === TRAILING_DOUBLESTAR) {
+          return source;
+        }
+        return last === SLASH ? `${source}$` : `${source}(?=$|\\/$)`;
+      }
+    ]
+  ];
+  var REGEX_REPLACE_TRAILING_WILDCARD = /(^|\\\/)?\uE000$/;
+  var MODE_IGNORE = "regex";
+  var MODE_CHECK_IGNORE = "checkRegex";
+  var UNDERSCORE = "_";
+  var replaceTrailingWildcard = (_, p1) => {
+    const prefix = p1 ? `${p1}[^/]+` : "[^/]*";
+    return `${prefix}(?=$|\\/$)`;
+  };
+  var REGEX_REPLACE_TRAILING_DOUBLESTAR = /\uE001$/;
+  var replaceTrailingDoublestar = () => ".+(?=$|\\/$)";
+  var WILDCARD = "[^\\/]*";
+  var separatorAfter = (run, at) => {
+    let separator = EMPTY;
+    for (let index = at + 1;index < run.length && !run[index].wildcard; index++) {
+      separator += run[index].single;
+    }
+    return separator;
+  };
+  var pinWildcards = (source) => {
+    if (source.indexOf(WILDCARD) < 0) {
+      return source;
+    }
+    const tokens = [];
+    const { length } = source;
+    let index = 0;
+    while (index < length) {
+      const char = source[index];
+      if (source.startsWith(WILDCARD, index)) {
+        tokens.push({ wildcard: true });
+        index += WILDCARD.length;
+      } else if (char === "[") {
+        let end = index + 1;
+        if (source[end] === "^") {
+          end++;
+        }
+        if (source[end] === "]") {
+          end++;
+        }
+        while (end < length && source[end] !== "]") {
+          end += source[end] === ESCAPE ? 2 : 1;
+        }
+        end++;
+        tokens.push({ single: source.slice(index, end) });
+        index = end;
+      } else if (char === ESCAPE) {
+        tokens.push({ single: source.slice(index, index + 2) });
+        index += 2;
+      } else if (char === "(") {
+        let depth = 0;
+        let end = index;
+        do {
+          if (source[end] === ESCAPE) {
+            end++;
+          } else if (source[end] === "(") {
+            depth++;
+          } else if (source[end] === ")") {
+            depth--;
+          }
+          end++;
+        } while (end < length && depth > 0);
+        if ("*+?".indexOf(source[end]) >= 0) {
+          end++;
+        }
+        tokens.push({ boundary: source.slice(index, end) });
+        index = end;
+      } else if (char === "^" || char === "$") {
+        tokens.push({ boundary: char });
+        index++;
+      } else {
+        tokens.push({ single: char });
+        index++;
+      }
+    }
+    let out = EMPTY;
+    let run = [];
+    const flush = () => {
+      let lastWildcard;
+      run.forEach((token, at) => {
+        if (token.wildcard) {
+          lastWildcard = at;
+        }
+      });
+      run.forEach((token, at) => {
+        if (!token.wildcard) {
+          out += token.single;
+          return;
+        }
+        out += at === lastWildcard ? WILDCARD : `(?:(?!${separatorAfter(run, at)})[^\\/])*`;
+      });
+      run = [];
+    };
+    tokens.forEach((token) => {
+      if (token.boundary === undefined) {
+        run.push(token);
+        return;
+      }
+      flush();
+      out += token.boundary;
+    });
+    flush();
+    return out;
+  };
+  var makeRegexPrefix = (pattern) => {
+    if (REGEX_ANCHORED_GLOBSTAR.test(pattern)) {
+      pattern = "**";
+    }
+    const { source, sources } = extractBrackets(pattern);
+    const replaced = REPLACERS.reduce((prev, [matcher, replacer, required]) => {
+      if (matcher === DIRECT) {
+        return replacer(prev, pattern);
+      }
+      if (required !== UNDEFINED && prev.indexOf(required) < 0) {
+        return prev;
+      }
+      return matcher.test(prev) ? prev.replace(matcher, replacer.bind(pattern)) : prev;
+    }, source);
+    return sources.length ? replaced.replace(REGEX_RESTORE_PLACEHOLDER, (match, index) => sources[index]) : replaced;
+  };
+  var checkSourceOf = (body, prefix) => {
+    if (body[body.length - 1] === SLASH) {
+      prefix = makeRegexPrefix(body.slice(0, -1));
+    }
+    const head = prefix.slice(0, -1);
+    const last = prefix[prefix.length - 1];
+    return last === TRAILING_WILDCARD ? `${head}$` : last === TRAILING_DOUBLESTAR ? `${head}.*$` : NEVER_MATCH;
+  };
+  var matchesBasename = (body) => {
+    const index = body.indexOf(SLASH);
+    return index < 0 || index === body.length - 1;
+  };
+  var basenameOf = (path) => {
+    const end = path.length - 1;
+    const index = path.lastIndexOf(SLASH, path[end] === SLASH ? end - 1 : end);
+    return index < 0 ? path : path.slice(index + 1);
+  };
+  var parentOf = (path) => {
+    if (path.charCodeAt(0) === SLASH_CODE || path.indexOf(DOUBLE_SLASH) >= 0) {
+      const slices = path.split(SLASH).filter(Boolean);
+      slices.pop();
+      return slices.length ? slices.join(SLASH) + SLASH : EMPTY;
+    }
+    const end = path.length - 1;
+    const cut = path.lastIndexOf(SLASH, path.charCodeAt(end) === SLASH_CODE ? end - 1 : end);
+    return cut < 0 ? EMPTY : path.slice(0, cut + 1);
+  };
+  var isString = (subject) => typeof subject === "string";
+  var checkPattern = (pattern) => pattern && isString(pattern) && !REGEX_INVALID_TRAILING_BACKSLASH.test(pattern);
+  var splitPattern = (pattern) => pattern.split(REGEX_SPLITALL_CRLF).filter(Boolean);
+
+  class IgnoreRule {
+    constructor(pattern, mark, body, ignoreCase, negative, prefix) {
+      this.pattern = pattern;
+      this.mark = mark;
+      this.negative = negative;
+      define(this, "body", body);
+      define(this, "ignoreCase", ignoreCase);
+      define(this, "regexPrefix", prefix);
+    }
+    get _basenameOnly() {
+      return define(this, "_basenameOnly", matchesBasename(this.body));
+    }
+    get regex() {
+      const key = UNDERSCORE + MODE_IGNORE;
+      if (this[key]) {
+        return this[key];
+      }
+      return this._make(MODE_IGNORE, key);
+    }
+    get checkRegex() {
+      const key = UNDERSCORE + MODE_CHECK_IGNORE;
+      if (this[key]) {
+        return this[key];
+      }
+      return this._make(MODE_CHECK_IGNORE, key);
+    }
+    _make(mode, key) {
+      const str = pinWildcards(mode === MODE_IGNORE ? this.regexPrefix.replace(REGEX_REPLACE_TRAILING_WILDCARD, replaceTrailingWildcard).replace(REGEX_REPLACE_TRAILING_DOUBLESTAR, replaceTrailingDoublestar) : checkSourceOf(this.body, this.regexPrefix));
+      const regex = this.ignoreCase ? new RegExp(str, "i") : new RegExp(str);
+      return define(this, key, regex);
+    }
+  }
+  var isLineEnd = (char) => char === "\r" || char === `
+`;
+  var trimEnd = (body) => {
+    let end = body.length;
+    while (end && isLineEnd(body[end - 1])) {
+      end--;
+    }
+    const lineEnd = end;
+    while (end && body[end - 1] === SPACE) {
+      end--;
+    }
+    if (end === lineEnd) {
+      return body.slice(0, end);
+    }
+    let backslashes = 0;
+    while (backslashes < end && body[end - backslashes - 1] === ESCAPE) {
+      backslashes++;
+    }
+    return backslashes % 2 ? body.slice(0, end - 1) + SPACE : body.slice(0, end);
+  };
+  var createRule = ({
+    pattern,
+    mark
+  }, ignoreCase) => {
+    let body = pattern[0] === BOM ? pattern.slice(1) : pattern;
+    if (body[0] === "#") {
+      return;
+    }
+    let negative = false;
+    if (body[0] === "!") {
+      negative = true;
+      body = body.slice(1);
+    }
+    const last = body[body.length - 1];
+    if (last === SPACE || last === "\r" || last === `
+`) {
+      body = trimEnd(body);
+    }
+    if (!body) {
+      return;
+    }
+    body = body.replace(REGEX_REPLACE_LEADING_EXCAPED_EXCLAMATION, "!").replace(REGEX_REPLACE_LEADING_EXCAPED_HASH, "#");
+    const regexPrefix = makeRegexPrefix(body);
+    return new IgnoreRule(pattern, mark, body, ignoreCase, negative, regexPrefix);
+  };
+
+  class RuleManager {
+    constructor(ignoreCase) {
+      this._ignoreCase = ignoreCase;
+      this._rules = [];
+      this._basenameCount = 0;
+    }
+    _add(pattern) {
+      if (pattern && pattern[KEY_IGNORE]) {
+        this._rules = this._rules.concat(pattern._rules._rules);
+        this._basenameCount += pattern._rules._basenameCount;
+        this._added = true;
+        return;
+      }
+      if (isString(pattern)) {
+        pattern = {
+          pattern
+        };
+      }
+      const rule = checkPattern(pattern.pattern) && createRule(pattern, this._ignoreCase);
+      if (rule) {
+        this._added = true;
+        this._rules.push(rule);
+        if (matchesBasename(rule.body)) {
+          this._basenameCount++;
+        }
+      }
+    }
+    add(pattern) {
+      this._added = false;
+      makeArray(isString(pattern) ? splitPattern(pattern) : pattern).forEach(this._add, this);
+      if (this._added) {
+        this._literalRules = UNDEFINED;
+      }
+      return this._added;
+    }
+    testLiteral(path) {
+      const rules = this._literalRules || (this._literalRules = this._rules.filter(({ body }) => body[body.length - (body[body.length - 1] === SLASH ? 2 : 1)] === "*"));
+      let ignored = false;
+      let unignored = false;
+      let matchedRule;
+      for (let index = rules.length - 1;index >= 0; index--) {
+        const rule = rules[index];
+        if (rule.checkRegex.test(path)) {
+          ignored = !rule.negative;
+          unignored = rule.negative;
+          matchedRule = rule.negative ? UNDEFINED : rule;
+          break;
+        }
+      }
+      const ret = {
+        ignored,
+        unignored
+      };
+      if (matchedRule) {
+        ret.rule = matchedRule;
+      }
+      return ret;
+    }
+    test(path, mode) {
+      const rules = this._rules;
+      const { length } = rules;
+      const shortcut = this._basenameCount * 2 >= length;
+      const basename = shortcut ? basenameOf(path) : path;
+      for (let index = length - 1;index >= 0; index--) {
+        const rule = rules[index];
+        if (rule[mode].test(shortcut && rule._basenameOnly ? basename : path)) {
+          const { negative } = rule;
+          const ret = {
+            ignored: !negative,
+            unignored: negative
+          };
+          if (!negative) {
+            ret.rule = rule;
+          }
+          return ret;
+        }
+      }
+      return {
+        ignored: false,
+        unignored: false
+      };
+    }
+  }
+  var throwError = (message, Ctor) => {
+    throw new Ctor(message);
+  };
+  var checkPath = (path, originalPath, doThrow) => {
+    if (!isString(path)) {
+      return doThrow(`path must be a string, but got \`${originalPath}\``, TypeError);
+    }
+    if (!path) {
+      return doThrow(`path must not be empty`, TypeError);
+    }
+    if (checkPath.isNotRelative(path)) {
+      const r = "`path.relative()`d";
+      return doThrow(`path should be a ${r} string, but got "${originalPath}"`, RangeError);
+    }
+    return true;
+  };
+  var isNotRelative = (path) => {
+    const first = path.charCodeAt(0);
+    if (first === SLASH_CODE) {
+      return true;
+    }
+    if (first !== DOT_CODE) {
+      return false;
+    }
+    if (path.length === 1) {
+      return true;
+    }
+    const second = path.charCodeAt(1);
+    if (second === SLASH_CODE) {
+      return true;
+    }
+    if (second !== DOT_CODE) {
+      return false;
+    }
+    return path.length === 2 || path.charCodeAt(2) === SLASH_CODE;
+  };
+  checkPath.isNotRelative = isNotRelative;
+  checkPath.convert = (p) => p;
+
+  class Ignore {
+    constructor({
+      ignorecase = true,
+      ignoreCase = ignorecase,
+      allowRelativePaths = false
+    } = {}) {
+      define(this, KEY_IGNORE, true);
+      this._rules = new RuleManager(ignoreCase);
+      this._strictPathCheck = !allowRelativePaths;
+      this._initCache();
+    }
+    _initCache() {
+      this._ignoreCache = Object.create(null);
+      this._testCache = Object.create(null);
+    }
+    add(pattern) {
+      if (this._rules.add(pattern)) {
+        this._initCache();
+      }
+      return this;
+    }
+    addPattern(pattern) {
+      return this.add(pattern);
+    }
+    _test(originalPath, cache) {
+      const path = originalPath && checkPath.convert(originalPath);
+      checkPath(path, originalPath, this._strictPathCheck ? throwError : RETURN_FALSE);
+      return this._t(path, cache);
+    }
+    checkIgnore(path) {
+      if (path.charCodeAt(path.length - 1) !== SLASH_CODE) {
+        return this.test(path);
+      }
+      const dir = this._t(path, this._testCache);
+      if (dir.ignored) {
+        return dir;
+      }
+      const literal = this._rules.testLiteral(path);
+      return literal.ignored || literal.unignored ? literal : dir;
+    }
+    _t(path, cache) {
+      if (path in cache) {
+        return cache[path];
+      }
+      const parentPath = parentOf(path);
+      const parent = parentPath ? this._t(parentPath, cache) : UNDEFINED;
+      return cache[path] = parent && parent.ignored ? parent : this._rules.test(path, MODE_IGNORE);
+    }
+    ignores(path) {
+      return this._test(path, this._ignoreCache).ignored;
+    }
+    createFilter() {
+      return (path) => !this.ignores(path);
+    }
+    filter(paths) {
+      return makeArray(paths).filter(this.createFilter());
+    }
+    test(path) {
+      return this._test(path, this._testCache);
+    }
+  }
+  var factory = (options) => new Ignore(options);
+  var isPathValid = (path) => checkPath(path && checkPath.convert(path), path, RETURN_FALSE);
+  var setupWindows = () => {
+    const makePosix = (str) => /^\\\\\?\\/.test(str) || /["<>|\u0000-\u001F]+/u.test(str) ? str : str.replace(/\\/g, "/");
+    checkPath.convert = makePosix;
+    const REGEX_TEST_WINDOWS_PATH_ABSOLUTE = /^[a-z]:\//i;
+    checkPath.isNotRelative = (path) => REGEX_TEST_WINDOWS_PATH_ABSOLUTE.test(path) || isNotRelative(path);
+  };
+  if (typeof process !== "undefined" && process.platform === "win32") {
+    setupWindows();
+  }
+  module2.exports = factory;
+  factory.default = factory;
+  module2.exports.isPathValid = isPathValid;
+  define(module2.exports, Symbol.for("setupWindows"), setupWindows);
+});
+
 // node_modules/.bun/picomatch@4.0.7/node_modules/picomatch/lib/constants.js
 var require_constants = __commonJS(function(exports2, module2) {
   var WIN_SLASH = "\\\\/";
@@ -4571,6 +5258,9 @@ var TERMINAL_LIMITS = {
 
 // apps/desktop/electron/main/transcripts/search.ts
 init_agent_home();
+
+// apps/desktop/electron/main/fs-kit/list-files.ts
+var import_ignore = __toESM(require_ignore(), 1);
 
 // apps/desktop/electron/main/fs-kit/rg.ts
 var import_node_child_process2 = require("node:child_process");

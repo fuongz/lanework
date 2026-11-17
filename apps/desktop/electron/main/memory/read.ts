@@ -3,7 +3,6 @@
 //
 // NOTE: Read-only, and nothing here imports Electron. Main calls it, and a
 // spec drives it under plain Node against a fake home folder.
-import { type FSWatcher, watch } from "node:fs";
 import { readdir, realpath, stat } from "node:fs/promises";
 import {
   basename,
@@ -24,6 +23,7 @@ import { splitFrontmatter } from "../frontmatter";
 import { gitReadOut } from "../git/runner";
 import { readsAllowed } from "../git/trust-gate";
 import { claudeProjectDir, readRange } from "../transcripts/jsonl";
+import { type Watch, watchPath } from "../watch";
 
 /** The most of one memory a read takes. Claude's are a few KB. */
 export const MEMORY_READ_MAX = 256 * 1024;
@@ -287,7 +287,7 @@ export async function readMemory(
 export function watchMemory(dir: string, onChange: () => void): () => void {
   let stopped = false;
   let timer: NodeJS.Timeout | null = null;
-  let watcher: FSWatcher | null = null;
+  let watcher: Watch | null = null;
   const changed = () => {
     if (stopped || timer) return;
     timer = setTimeout(() => {
@@ -300,31 +300,27 @@ export function watchMemory(dir: string, onChange: () => void): () => void {
     watcher = null;
   };
   const follow = (): boolean => {
-    try {
-      watcher = watch(dir, changed);
-      // The folder was removed under the watch: report a change, and the
-      // next listing starts again.
-      watcher.on("error", () => {
-        close();
-        changed();
-      });
-      return true;
-    } catch {
-      return false;
-    }
+    watcher = watchPath(
+      dir,
+      {
+        // The folder was removed under the watch: report a change, and the
+        // next listing starts again.
+        onError: () => {
+          watcher = null;
+          changed();
+        },
+      },
+      changed,
+    );
+    return watcher !== null;
   };
-  if (!follow()) {
-    try {
-      watcher = watch(dirname(dir), (_event, name) => {
-        if (name === null || String(name) !== basename(dir)) return;
-        close();
-        if (follow()) changed();
-      });
-      watcher.on("error", close);
-    } catch {
-      // No conversations in this folder either.
-    }
-  }
+  // Null: no conversations in this folder either.
+  if (!follow())
+    watcher = watchPath(dirname(dir), { onError: close }, (events) => {
+      if (!events.some((event) => event.name === basename(dir))) return;
+      close();
+      if (follow()) changed();
+    });
   return () => {
     stopped = true;
     if (timer) clearTimeout(timer);

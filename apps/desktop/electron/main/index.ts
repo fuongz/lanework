@@ -56,6 +56,7 @@ import {
   stopConductor,
 } from "./conversation/conductor-stop";
 import { registerDictation } from "./dictation";
+import { registerFileFinder } from "./file-finder";
 import { readLinkedOpenPulls, registerGit } from "./git";
 import { registerHandoff } from "./handoff";
 import { registerHarness } from "./harness";
@@ -84,6 +85,7 @@ import { registerReadiness } from "./readiness";
 import { registerRepoSearch } from "./repo-search";
 import { appOrigin, isTrustedUrl } from "./security";
 import { registerStorage } from "./storage";
+import { registerStructuralSearch } from "./structural-search";
 import {
   agentTerminalOn,
   killTerminal,
@@ -541,6 +543,9 @@ app
     // FE-149: ⌘⇧F in a project's folder, and across the transcripts.
     registerRepoSearch(devUrl);
     registerSessionSearch(devUrl);
+    // FE-151: fuzzy file finding (fff) and structural search (ast-grep).
+    registerFileFinder(devUrl);
+    registerStructuralSearch(devUrl);
     // A board synced to the cloud takes its conversations and conductors
     // along (FE-142); boards synced before this get theirs now.
     onProjectMoved(async (from, to) => {

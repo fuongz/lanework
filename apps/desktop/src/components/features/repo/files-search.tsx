@@ -8,11 +8,15 @@
 //   answers the superseded one with `[]`, so only the newest answer is drawn
 //   (a sequence number, not the query text: the same text with another toggle
 //   is another search).
+// - FE-151: a third toggle, Structural, sends the query to ast-grep in main
+//   as a pattern instead (`useEffect($A, [])`). Case and regex mean nothing
+//   to a pattern, so their toggles are off while it is on.
 import {
   Alert02Icon,
   ArrowDown01Icon,
   ArrowRight01Icon,
   Cancel01Icon,
+  CodeIcon,
   Loading03Icon,
   Search01Icon,
 } from "@hugeicons/core-free-icons";
@@ -48,7 +52,12 @@ interface SearchInput {
   query: string;
   regex: boolean;
   caseSensitive: boolean;
+  /** FE-151: the query is an ast-grep pattern. */
+  structural: boolean;
 }
+
+/** A pattern to show in the Structural toggle's tooltip and empty state. */
+const PATTERN_EXAMPLE = "useEffect($A, [])";
 
 /** The last search of each project and folder (`slug#folder`). */
 const searchMemory = new Map<string, SearchInput>();
@@ -212,11 +221,16 @@ function Toggle({
   pressed,
   onPress,
   label,
+  hint,
+  disabled,
   children,
 }: {
   pressed: boolean;
   onPress: () => void;
   label: string;
+  /** The tooltip, when it says more than `label`. */
+  hint?: string;
+  disabled?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -225,7 +239,8 @@ function Toggle({
       size="icon"
       aria-pressed={pressed}
       aria-label={label}
-      title={label}
+      title={hint ?? label}
+      disabled={disabled}
       onClick={onPress}
       className={cn(
         LIST_ACTION,
@@ -265,14 +280,15 @@ export function FilesSearch({
   const [caseSensitive, setCaseSensitive] = useState(
     remembered?.caseSensitive ?? false,
   );
+  const [structural, setStructural] = useState(remembered?.structural ?? false);
   const [outcome, setOutcome] = useState<Outcome>({ kind: "idle" });
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const seq = useRef(0);
   const root = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    searchMemory.set(memory, { query, regex, caseSensitive });
-  }, [memory, query, regex, caseSensitive]);
+    searchMemory.set(memory, { query, regex, caseSensitive, structural });
+  }, [memory, query, regex, caseSensitive, structural]);
 
   // Focused, its text selected, on every ⌘⇧F: typing replaces the last query.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `focusRequest` is the trigger.
@@ -306,8 +322,10 @@ export function FilesSearch({
         });
         return;
       }
-      api
-        .searchText(slug, folder, query, { regex, caseSensitive })
+      (structural
+        ? api.searchStructural(slug, folder, query)
+        : api.searchText(slug, folder, query, { regex, caseSensitive })
+      )
         .then((files) => {
           if (seq.current !== current) return;
           setCollapsed(new Set());
@@ -322,7 +340,7 @@ export function FilesSearch({
         });
     }, DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [slug, folder, query, regex, caseSensitive]);
+  }, [slug, folder, query, regex, caseSensitive, structural]);
 
   // The file opens scrolled to the line, which is selected (file-view.tsx).
   const open = (path: string, line: number) => openFile(path, false, line);
@@ -343,8 +361,12 @@ export function FilesSearch({
     body = (
       <SearchEmpty
         icon={Search01Icon}
-        title="Search in files"
-        description="Find text in every file of this folder. Files git ignores are left out."
+        title={structural ? "Search code by its shape" : "Search in files"}
+        description={
+          structural
+            ? `Type a pattern such as ${PATTERN_EXAMPLE}: $A stands for any one node, $$$A for any number of them. Files git ignores are left out.`
+            : "Find text in every file of this folder. Files git ignores are left out."
+        }
       />
     );
   else if (outcome.kind === "error")
@@ -361,7 +383,11 @@ export function FilesSearch({
         icon={Loading03Icon}
         spin
         title="Searching"
-        description="Reading the files in this folder."
+        description={
+          structural
+            ? "Parsing the files in this folder."
+            : "Reading the files in this folder."
+        }
       />
     );
   else if (files.length === 0)
@@ -369,7 +395,11 @@ export function FilesSearch({
       <SearchEmpty
         icon={Search01Icon}
         title="No results"
-        description={`Nothing in this folder matches “${query.trim()}”.`}
+        description={
+          structural
+            ? `No code in this folder has the shape of “${query.trim()}”.`
+            : `Nothing in this folder matches “${query.trim()}”.`
+        }
       />
     );
   else
@@ -413,23 +443,38 @@ export function FilesSearch({
       <ListSearch
         query={query}
         onQuery={setQuery}
-        label="Search in files"
+        label={structural ? "Search with a pattern" : "Search in files"}
         className="shrink-0 px-2 pt-2 pb-1.5"
         actions={
           <>
             <Toggle
-              pressed={caseSensitive}
+              pressed={caseSensitive && !structural}
               onPress={() => setCaseSensitive((was) => !was)}
               label="Match case"
+              disabled={structural}
             >
               Aa
             </Toggle>
             <Toggle
-              pressed={regex}
+              pressed={regex && !structural}
               onPress={() => setRegex((was) => !was)}
               label="Use regular expression"
+              disabled={structural}
             >
               .*
+            </Toggle>
+            <Toggle
+              pressed={structural}
+              onPress={() => setStructural((was) => !was)}
+              label="Structural search"
+              hint={`Structural search: match code by its shape, e.g. ${PATTERN_EXAMPLE}`}
+            >
+              <HugeiconsIcon
+                icon={CodeIcon}
+                strokeWidth={1.8}
+                aria-hidden="true"
+                className="size-3.5"
+              />
             </Toggle>
             <Button
               variant="ghost"

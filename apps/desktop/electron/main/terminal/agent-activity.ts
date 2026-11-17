@@ -7,7 +7,7 @@
 //
 // Nothing here imports Electron, so a spec can drive it under plain Node
 // against a fake home folder.
-import { existsSync, type FSWatcher, watch } from "node:fs";
+import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import {
@@ -19,6 +19,7 @@ import {
 } from "../../../shared/terminal";
 import type { SessionStore } from "../../session-store";
 import { type IngestSource, ingestOne } from "../sessions";
+import { type Watch, watchPath } from "../watch";
 import {
   CLAUDE_SUBAGENT_FILE,
   claudeProjectDir,
@@ -156,7 +157,7 @@ export function watchAgentActivity(
   onCompleted?: (agent: TerminalAgent, id: string) => void,
   sessions?: WatchSessions,
 ): () => void {
-  const watchers: FSWatcher[] = [];
+  const watchers: Watch[] = [];
   const pending = new Map<string, NodeJS.Timeout>();
   const said = new Map<string, string>();
   const running = new Set<string>();
@@ -304,18 +305,15 @@ export function watchAgentActivity(
 
   const claudeDir = join(home, ".claude", "projects", claudeProjectDir(folder));
   const watchClaude = (): boolean => {
-    let conversations: FSWatcher;
-    try {
-      conversations = watch(claudeDir, (_event, name) => {
-        const id = name ? basename(String(name)).replace(/\.jsonl$/, "") : "";
-        if (name && String(name).endsWith(".jsonl") && isAgentSessionId(id))
+    const conversations = watchPath(claudeDir, {}, (events) => {
+      for (const { name } of events) {
+        const id = name ? basename(name).replace(/\.jsonl$/, "") : "";
+        if (name?.endsWith(".jsonl") && isAgentSessionId(id))
           report("claude", id, join(claudeDir, `${id}.jsonl`));
-      });
-    } catch {
-      // No Claude conversations for this folder yet.
-      return false;
-    }
-    conversations.on("error", () => conversations.close());
+      }
+    });
+    // No Claude conversations for this folder yet.
+    if (!conversations) return false;
     watchers.push(conversations);
     watchSubagents();
     return true;
@@ -324,63 +322,52 @@ export function watchAgentActivity(
   // conversation's may sit still, as a background agent's does. It gets its
   // own recursive watch, so the conversations' watch above stays as it is.
   const watchSubagents = () => {
-    try {
-      const subagents = watch(
-        claudeDir,
-        { recursive: true },
-        (_event, name) => {
-          const match = name ? CLAUDE_SUBAGENT_PATH.exec(String(name)) : null;
-          const sub = match?.[2]
-            ? CLAUDE_SUBAGENT_FILE.exec(match[2])?.[1]
-            : null;
-          if (match?.[1] && sub && isAgentSessionId(match[1])) {
-            report("claude", match[1], join(claudeDir, String(name)), sub);
-            return;
-          }
-          // A workflow's agent: news of its run's row, keyed `<run>/<id>`.
-          const agent = name
-            ? CLAUDE_WORKFLOW_AGENT_PATH.exec(String(name))
-            : null;
-          const id = agent?.[3]
-            ? CLAUDE_SUBAGENT_FILE.exec(agent[3])?.[1]
-            : null;
-          if (
-            agent?.[1] &&
-            id &&
-            isAgentSessionId(agent[1]) &&
-            isWorkflowRunId(agent[2])
-          )
-            report(
-              "claude",
-              agent[1],
-              join(claudeDir, String(name)),
-              workflowAgentKey(agent[2], id),
-            );
-        },
-      );
-      subagents.on("error", () => subagents.close());
-      watchers.push(subagents);
-    } catch {
-      // Gone again since.
-    }
+    const written = (name: string | null) => {
+      const match = name ? CLAUDE_SUBAGENT_PATH.exec(name) : null;
+      const sub = match?.[2] ? CLAUDE_SUBAGENT_FILE.exec(match[2])?.[1] : null;
+      if (name && match?.[1] && sub && isAgentSessionId(match[1])) {
+        report("claude", match[1], join(claudeDir, name), sub);
+        return;
+      }
+      // A workflow's agent: news of its run's row, keyed `<run>/<id>`.
+      const agent = name ? CLAUDE_WORKFLOW_AGENT_PATH.exec(name) : null;
+      const id = agent?.[3] ? CLAUDE_SUBAGENT_FILE.exec(agent[3])?.[1] : null;
+      if (
+        name &&
+        agent?.[1] &&
+        id &&
+        isAgentSessionId(agent[1]) &&
+        isWorkflowRunId(agent[2])
+      )
+        report(
+          "claude",
+          agent[1],
+          join(claudeDir, name),
+          workflowAgentKey(agent[2], id),
+        );
+    };
+    const subagents = watchPath(claudeDir, { recursive: true }, (events) => {
+      for (const event of events) written(event.name);
+    });
+    // Null: gone again since.
+    if (subagents) watchers.push(subagents);
   };
   // NOTE: A folder no Claude has run in yet has no folder of Claude's. Once
   // the rail no longer reads the folder on each listing (FE-112), only this
   // watch reads a first conversation there into the store, so it waits for
   // Claude to make the folder rather than give up on it.
   if (!watchClaude()) {
-    try {
-      const projects = dirname(claudeDir);
-      const waiter = watch(projects, (_event, name) => {
-        if (stopped || String(name) !== basename(claudeDir)) return;
-        if (!existsSync(claudeDir) || !watchClaude()) return;
-        waiter.close();
-      });
-      waiter.on("error", () => waiter.close());
-      watchers.push(waiter);
-    } catch {
-      // Claude has never run here: nothing to wait for.
-    }
+    const waiter = watchPath(dirname(claudeDir), {}, (events) => {
+      if (
+        stopped ||
+        !events.some((event) => event.name === basename(claudeDir))
+      )
+        return;
+      if (!existsSync(claudeDir) || !watchClaude()) return;
+      waiter?.close();
+    });
+    // Null: Claude has never run here. Nothing to wait for.
+    if (waiter) watchers.push(waiter);
   }
 
   const codexRoot = join(home, ".codex", "sessions");
@@ -396,7 +383,7 @@ export function watchAgentActivity(
   // then spin until the end, and a new Codex's prompt, written just after its
   // `session_meta`, would never be read. A watch on the file itself sees
   // every write. Capped: the oldest followed is let go first.
-  const followed = new Map<string, FSWatcher>();
+  const followed = new Map<string, Watch>();
   const unfollow = (file: string) => {
     followed.get(file)?.close();
     followed.delete(file);
@@ -407,13 +394,12 @@ export function watchAgentActivity(
       const [oldest] = followed.keys();
       if (oldest !== undefined) unfollow(oldest);
     }
-    try {
-      const watcher = watch(file, () => seen(file));
-      watcher.on("error", () => unfollow(file));
-      followed.set(file, watcher);
-    } catch {
-      // Gone already.
-    }
+    // A file's watch is its own, never its folder's: see `watchPath`.
+    const watcher = watchPath(file, { onError: () => unfollow(file) }, () =>
+      seen(file),
+    );
+    // Null: gone already.
+    if (watcher) followed.set(file, watcher);
   };
   const seen = (file: string) => {
     let known = whose.get(file);
@@ -438,18 +424,16 @@ export function watchAgentActivity(
       }
     });
   };
-  try {
-    watchers.push(
-      watch(codexRoot, { recursive: true }, (_event, name) => {
-        const match = name ? TRAILING_ID.exec(String(name)) : null;
-        if (!match?.[1] || !basename(String(name)).startsWith("rollout-"))
-          return;
-        seen(join(codexRoot, String(name)));
-      }),
-    );
-  } catch {
-    // No Codex sessions on this machine.
-  }
+  const rollouts = watchPath(codexRoot, { recursive: true }, (events) => {
+    for (const { name } of events) {
+      const match = name ? TRAILING_ID.exec(name) : null;
+      if (!name || !match?.[1] || !basename(name).startsWith("rollout-"))
+        continue;
+      seen(join(codexRoot, name));
+    }
+  });
+  // Null: no Codex sessions on this machine.
+  if (rollouts) watchers.push(rollouts);
 
   // OpenCode (FE-104): one database for every folder, written through its
   // WAL. A write of it is read, once settled, for this folder's sessions
@@ -527,21 +511,20 @@ export function watchAgentActivity(
         });
     }, SETTLE_MS);
   };
-  try {
-    watchers.push(
-      watch(opencodeDir, (_event, name) => {
-        // No name: the event was merged or its file not said, so it may be
-        // the database's.
-        const file = name ? String(name) : "";
-        if (!file || file === "opencode.db" || file === "opencode.db-wal")
-          opencodeWritten();
-      }),
-    );
-  } catch {
-    // No OpenCode on this machine.
-  }
+  const opencode = watchPath(opencodeDir, {}, (events) => {
+    // No name: the event was merged or its file not said, so it may be the
+    // database's.
+    if (
+      events.some(
+        ({ name }) =>
+          !name || name === "opencode.db" || name === "opencode.db-wal",
+      )
+    )
+      opencodeWritten();
+  });
+  // Null: no OpenCode on this machine.
+  if (opencode) watchers.push(opencode);
 
-  for (const watcher of watchers) watcher.on("error", () => watcher.close());
   return () => {
     stopped = true;
     if (opencodeTimer) clearTimeout(opencodeTimer);
