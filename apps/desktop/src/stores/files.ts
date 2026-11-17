@@ -247,7 +247,15 @@ interface FilesStore {
    * @param pin Keep the tab (a double click, Quick Open). Without it, the
    * file opens in the preview tab, as a single click does.
    */
-  openFile: (path: string, pin?: boolean) => void;
+  /**
+   * Open `path` in a tab; `line` (1-based) also scrolls the view there and
+   * selects it, as a ⌘⇧F result does (FE-149).
+   */
+  openFile: (path: string, pin?: boolean, line?: number) => void;
+  /** The line the next view of `path` scrolls to, once; null when none. */
+  revealAt: { path: string; line: number } | null;
+  /** The view has scrolled to {@link revealAt}. */
+  clearReveal: () => void;
   /**
    * Open a repository path from another screen, such as a chat badge.
    *
@@ -544,9 +552,13 @@ export const useFiles = create<FilesStore>((set, get) => {
       remember();
     },
 
-    openFile: (path, pin = false) => {
+    revealAt: null,
+    clearReveal: () => set({ revealAt: null }),
+
+    openFile: (path, pin = false, line) => {
       const slug = get().slug;
       if (!slug) return;
+      set({ revealAt: line ? { path, line } : null });
       const { tabs } = get();
       const existing = tabs.find((tab) => tab.path === path);
       if (existing) {

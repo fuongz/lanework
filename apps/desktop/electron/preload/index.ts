@@ -33,6 +33,10 @@ import {
   type DictationEvent,
   dictationChannels,
 } from "../../shared/dictation";
+import {
+  type DesktopFsSearchApi,
+  fsSearchChannels,
+} from "../../shared/fs-search";
 import { type DesktopGitApi, gitChannels } from "../../shared/git";
 import { type DesktopHandoffApi, handoffChannels } from "../../shared/handoff";
 import {
@@ -982,6 +986,27 @@ const projects: DesktopProjectsApi = {
   },
 };
 
+/**
+ * Content search (FE-149): a project's folder by slug and folder index, and
+ * the agents' transcripts. Main runs ripgrep; the page gets matches.
+ *
+ * NOTE: `folder` and `opts` are sent as `null` and `{}` when absent, never
+ * omitted: a handler that checks its argument count sees the same count
+ * every time.
+ */
+const fsSearch: DesktopFsSearchApi = {
+  searchText: (slug, folder, query, opts) =>
+    ipcRenderer.invoke(
+      fsSearchChannels.text,
+      slug,
+      folder ?? null,
+      query,
+      opts ?? {},
+    ),
+  searchSessions: (query, opts) =>
+    ipcRenderer.invoke(fsSearchChannels.sessions, query, opts ?? {}),
+};
+
 const desktop: DesktopApi = {
   getAppInfo: () => ipcRenderer.invoke(channels.appInfo),
   setTheme: (source) => ipcRenderer.invoke(channels.setTheme, source),
@@ -1012,5 +1037,6 @@ const desktop: DesktopApi = {
   jev,
   leads,
   conductors,
+  fsSearch,
 };
 contextBridge.exposeInMainWorld("desktop", desktop);

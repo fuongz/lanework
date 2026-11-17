@@ -6,6 +6,9 @@
 // members, comments, attachments or subscriptions offline, so those tools do
 // not exist here and `assignees.users` is accepted and ignored.
 //
+// One more, offline only: `search_sessions` (FE-149), over this machine's
+// agent transcripts.
+//
 // NOTE: Keep this layer thin. Every rule a card obeys (task-id minting,
 // checklist keys, stream validation, checkpoint trimming, tombstones) lives in
 // `../local-store`, which the app also writes through; a rule spelled twice
@@ -34,6 +37,11 @@ import {
   LocalStoreError,
   normalizeRepo,
 } from "../local-store/index";
+import {
+  SESSION_LIMIT,
+  SESSION_LIMIT_MAX,
+  searchSessions,
+} from "../main/transcripts/search";
 import type { Param, Shape } from "./schema";
 
 export interface ToolContext {
@@ -846,6 +854,40 @@ export const TOOLS: ToolSpec[] = [
         else waiting.push({ ...brief(detail), pending: state.pending });
       }
       return { waiting, ready, inFlight, review };
+    },
+  },
+  // FE-149: not a board tool, and offline only. The cloud cannot read this
+  // machine's transcripts.
+  {
+    name: "search_sessions",
+    description:
+      "Search this machine's Claude Code, Codex and OpenCode conversations for a phrase in what was said (prompts, answers, tool calls and output), newest first. Returns each session's harness, id, title, last write and up to 3 matching snippets.",
+    readOnly: true,
+    properties: {
+      query: { type: "string", description: "A literal phrase, not a regex" },
+      limit: {
+        type: "integer",
+        minimum: 1,
+        maximum: SESSION_LIMIT_MAX,
+        description: `Sessions returned; default ${SESSION_LIMIT}`,
+      },
+      folder: {
+        type: "string",
+        description:
+          "Only sessions run in this folder (an absolute path, e.g. the repo's root); every folder's when omitted",
+      },
+    },
+    required: ["query"],
+    // NOTE: The only tool whose answer is a promise: it runs ripgrep.
+    async run(args) {
+      const query = String(args.query).trim();
+      if (!query) fail("invalid", "query is empty");
+      const folder = str(args.folder);
+      const sessions = await searchSessions(query, {
+        limit: typeof args.limit === "number" ? args.limit : undefined,
+        folders: folder ? [folder] : undefined,
+      });
+      return { sessions };
     },
   },
 ];

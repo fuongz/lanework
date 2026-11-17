@@ -5,13 +5,14 @@
 import { constants } from "node:fs";
 import { open, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   type CommandSource,
   type ConversationAgent,
   commandLabel,
   type Suggestion,
 } from "../../../shared/conversation";
+import { listFiles } from "../fs-kit";
 import { gitReadOut } from "../git/runner";
 import { readsAllowed } from "../git/trust-gate";
 import { codexHome } from "../handoff/codex";
@@ -20,7 +21,7 @@ import { codexHome } from "../handoff/codex";
 const LIMIT = 50;
 /** The most files taken from git's list. */
 const FILES_MAX = 50_000;
-/** The most files a walk collects, when the folder is not a git repo. */
+/** The most files fs-kit lists, when git cannot list the folder's. */
 const WALK_MAX = 20_000;
 /** How long a folder's file list is reused. */
 const CACHE_MS = 10_000;
@@ -344,7 +345,8 @@ export function rankCommands(all: Suggestion[], query: string): Suggestion[] {
  * The folder's tracked and untracked, non-ignored files, as git lists them.
  *
  * Through the runner's read flags (FE-77/D1). An automatic read (D6): a
- * folder whose git config the user has not trusted is walked instead.
+ * folder whose git config the user has not trusted is listed by fs-kit
+ * instead.
  *
  * @returns null when git cannot list them: not a repo, git failed, or the
  *   folder is not trusted for automatic reads.
@@ -364,32 +366,20 @@ async function gitFiles(folder: string): Promise<string[] | null> {
 }
 
 /**
- * The folder's files from a bounded walk, skipping build and dependency
- * folders.
+ * The folder's files when git cannot list them (FE-149): fs-kit's `rg
+ * --files`, which honours `.gitignore`, or its fdir walk when rg cannot run.
+ * Dotfiles are kept, as git's list keeps tracked ones; `.git/` never is.
  */
 async function walkFiles(folder: string): Promise<string[]> {
-  const out: string[] = [];
-  const skip = new Set([
-    ".git",
-    "node_modules",
-    ".next",
-    "dist",
-    "build",
-    ".turbo",
-  ]);
-  const walk = async (dir: string, depth: number) => {
-    if (out.length >= WALK_MAX || depth > 8) return;
-    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
-    for (const entry of entries) {
-      if (out.length >= WALK_MAX) return;
-      if (entry.isDirectory()) {
-        if (!skip.has(entry.name)) await walk(join(dir, entry.name), depth + 1);
-      } else if (entry.isFile())
-        out.push(relative(folder, join(dir, entry.name)));
-    }
-  };
-  await walk(folder, 0);
-  return out;
+  try {
+    const { files } = await listFiles(folder, {
+      hidden: true,
+      maxFiles: WALK_MAX,
+    });
+    return files;
+  } catch {
+    return [];
+  }
 }
 
 /** The last file lists, by folder; at most 16 are kept. */
@@ -398,7 +388,7 @@ const fileCache = new Map<string, { at: number; files: Promise<string[]> }>();
 /**
  * The folder's files, relative to it.
  *
- * Git's list, else a walk; reused for {@link CACHE_MS}.
+ * Git's list, else fs-kit's; reused for {@link CACHE_MS}.
  */
 export function projectFiles(folder: string): Promise<string[]> {
   const cached = fileCache.get(folder);

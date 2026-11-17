@@ -12,7 +12,7 @@
 //   comments unless a command clicks it.
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -72,6 +72,19 @@ Object.assign(env, {
 delete env.ELECTRON_RUN_AS_NODE;
 delete env.ELECTRON_RENDERER_URL;
 
+// `--seed-claude <file.jsonl>`: a copy of one Claude transcript, filed under
+// `--folder` in the temp agent config, so a long real chat can be opened
+// (e.g. to profile scrolling). The original is only read.
+const seed = flag("seed-claude", null);
+if (seed) {
+  const slot = folder.replace(/[^A-Za-z0-9]/g, "-");
+  for (const root of [join(profile, "claude"), join(agentHome, ".claude")]) {
+    const dir = join(root, "projects", slot);
+    await mkdir(dir, { recursive: true });
+    await copyFile(resolve(seed), join(dir, seed.split("/").pop()));
+  }
+}
+
 // `gh-login` flips this; until then the `loggedout` wrapper hides the login.
 const loginFlag = join(profile, "gh-logged-in");
 if (ghMode === "missing") env.LANEWORK_GH_PATH = join(profile, "no-such-gh");
@@ -123,7 +136,8 @@ async function firstProject() {
   await page
     .getByRole("button", { name: /^Switch project/ })
     .waitFor({ timeout: 15_000 });
-  await page.goto("app://lanework/settings/projects");
+  // Settings → Projects lists projects; the folders are on the project's page.
+  await page.goto("app://lanework/settings/projects/lanework");
   await page
     .getByRole("button", { name: "Source folders for Lanework" })
     .click();

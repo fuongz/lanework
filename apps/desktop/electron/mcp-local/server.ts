@@ -107,8 +107,14 @@ export class LocalMcpSession {
     this.store = store;
   }
 
-  /** The answer to one message, or null for a notification. */
-  handle(message: unknown): JsonRpcResponse | null {
+  /**
+   * The answer to one message, or null for a notification.
+   *
+   * NOTE: The board tools answer at once. A tool that reads the disk
+   * (`search_sessions`, FE-149) answers later, as a promise; such a reply may
+   * overtake an earlier one, which JSON-RPC allows (ids pair them).
+   */
+  handle(message: unknown): JsonRpcResponse | Promise<JsonRpcResponse> | null {
     if (
       typeof message !== "object" ||
       message === null ||
@@ -123,7 +129,10 @@ export class LocalMcpSession {
         : this.#error(id ?? null, INVALID_REQUEST, "missing method");
     if (isNotification) return null; // initialized, cancelled, …: nothing to say.
     try {
-      return { jsonrpc: "2.0", id, result: this.#dispatch(method, params) };
+      const result = this.#dispatch(method, params);
+      if (result instanceof Promise)
+        return result.then((value) => ({ jsonrpc: "2.0", id, result: value }));
+      return { jsonrpc: "2.0", id, result };
     } catch (error) {
       if (error instanceof RpcError)
         return this.#error(id, error.code, error.message);
@@ -176,9 +185,7 @@ export class LocalMcpSession {
       agent: this.#agent,
       host: this.#host,
     };
-    try {
-      return text(tool.run(checkShape(tool, params.arguments), ctx));
-    } catch (error) {
+    const failed = (error: unknown) => {
       if (error instanceof LocalStoreError)
         return text({ error: error.code, message: error.message }, true);
       if (error instanceof InvalidParams)
@@ -187,6 +194,14 @@ export class LocalMcpSession {
       const message = error instanceof Error ? error.message : String(error);
       process.stderr.write(`lanework mcp: ${tool.name} failed: ${message}\n`);
       return text({ error: "internal", message }, true);
+    };
+    try {
+      const result: unknown = tool.run(checkShape(tool, params.arguments), ctx);
+      if (result instanceof Promise)
+        return result.then((value) => text(value), failed);
+      return text(result);
+    } catch (error) {
+      return failed(error);
     }
   }
 }
@@ -199,8 +214,14 @@ class RpcError extends Error {
   }
 }
 
-/** The lines to write back for one line of input; none for a notification. */
-export function handleLine(session: LocalMcpSession, line: string): string[] {
+/**
+ * The lines to write back for one line of input; none for a notification.
+ * A promise when one of its messages is answered later (see `handle`).
+ */
+export function handleLine(
+  session: LocalMcpSession,
+  line: string,
+): string[] | Promise<string[]> {
   if (!line.trim()) return [];
   let parsed: unknown;
   try {
@@ -216,12 +237,20 @@ export function handleLine(session: LocalMcpSession, line: string): string[] {
   }
   // A JSON-RPC batch (2024-11-05 clients may send one).
   if (Array.isArray(parsed)) {
-    const answers = parsed
-      .map((message) => session.handle(message))
-      .filter((answer): answer is JsonRpcResponse => answer !== null);
-    return answers.length > 0 ? [JSON.stringify(answers)] : [];
+    const pending = parsed.map((message) => session.handle(message));
+    const lines = (all: (JsonRpcResponse | null)[]) => {
+      const answers = all.filter(
+        (answer): answer is JsonRpcResponse => answer !== null,
+      );
+      return answers.length > 0 ? [JSON.stringify(answers)] : [];
+    };
+    return pending.some((answer) => answer instanceof Promise)
+      ? Promise.all(pending).then(lines)
+      : lines(pending as (JsonRpcResponse | null)[]);
   }
   const answer = session.handle(parsed);
+  if (answer instanceof Promise)
+    return answer.then((value) => [JSON.stringify(value)]);
   return answer ? [JSON.stringify(answer)] : [];
 }
 
@@ -258,13 +287,26 @@ export function runLocalMcpServer(options: RunOptions = {}): Promise<void> {
         buffer = "";
       }
     };
+    // Answers still being worked out; stdin closing waits for them.
+    const inFlight = new Set<Promise<void>>();
+    const report = (error: unknown) => {
+      process.stderr.write(
+        `lanework mcp: ${error instanceof Error ? error.stack : String(error)}\n`,
+      );
+    };
+    const write = (lines: string[]) => {
+      for (const out of lines) output.write(`${out}\n`);
+    };
     const respond = (line: string) => {
       try {
-        for (const out of handleLine(session, line)) output.write(`${out}\n`);
+        const lines = handleLine(session, line);
+        if (!(lines instanceof Promise)) return write(lines);
+        const later = lines.then(write, report).finally(() => {
+          inFlight.delete(later);
+        });
+        inFlight.add(later);
       } catch (error) {
-        process.stderr.write(
-          `lanework mcp: ${error instanceof Error ? error.stack : String(error)}\n`,
-        );
+        report(error);
       }
     };
     let done = false;
@@ -272,8 +314,10 @@ export function runLocalMcpServer(options: RunOptions = {}): Promise<void> {
       if (done) return;
       done = true;
       flush(true);
-      store.close();
-      resolve();
+      void Promise.allSettled([...inFlight]).then(() => {
+        store.close();
+        resolve();
+      });
     };
     input.setEncoding?.("utf8");
     input.on("data", (chunk: string | Buffer) => {

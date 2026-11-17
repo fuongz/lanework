@@ -12,10 +12,10 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { CodeViewItem } from "@pierre/diffs";
-import { CodeView } from "@pierre/diffs/react";
+import { CodeView, type CodeViewHandle } from "@pierre/diffs/react";
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import { type ReactNode, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { MarkdownBody } from "#/components/shared/common/markdown-body";
 import { SegmentedControl } from "#/components/shared/common/segmented-control";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
@@ -199,6 +199,9 @@ function FileHeader({
 
 function Code({ path, text }: { path: string; text: string }) {
   const dark = useDark();
+  const view = useRef<CodeViewHandle<undefined, undefined>>(null);
+  const revealAt = useFiles((state) => state.revealAt);
+  const clearReveal = useFiles((state) => state.clearReveal);
   // NOTE: `version` has to move when the text does. CodeView compares items
   // by it, and a refresh that read new text under the same id is ignored.
   const version = useRef(0);
@@ -239,8 +242,30 @@ function Code({ path, text }: { path: string; text: string }) {
     [path, text],
   );
 
+  // A ⌘⇧F result asked for a line (FE-149): scroll there and select it,
+  // once. A frame later, so CodeView has laid out the text it just got.
+  useEffect(() => {
+    if (!revealAt || revealAt.path !== path) return;
+    const frame = requestAnimationFrame(() => {
+      const line = revealAt.line;
+      view.current?.scrollTo({
+        type: "line",
+        id: path,
+        lineNumber: line,
+        align: "center",
+      });
+      view.current?.setSelectedLines({
+        id: path,
+        range: { start: line, end: line },
+      });
+      clearReveal();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [revealAt, path, clearReveal]);
+
   return (
     <CodeView
+      ref={view}
       items={items}
       options={options}
       // The scroller CodeView virtualizes against — see `patch-view.tsx`.

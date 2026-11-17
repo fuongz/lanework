@@ -61,6 +61,8 @@ function client(session: LocalMcpSession) {
       session,
       JSON.stringify({ jsonrpc: "2.0", id, method, params }),
     );
+    // The board tools answer at once; only search_sessions answers later.
+    assert.ok(Array.isArray(lines));
     assert.equal(lines.length, 1);
     return JSON.parse(lines[0] as string) as {
       result?: Record<string, unknown>;
@@ -161,7 +163,7 @@ describe("offline MCP session", () => {
     const unknownBoard = mcp.call("board_summary", { board_id: "nope" });
     assert.equal(unknownBoard.isError, true);
     assert.equal(unknownBoard.body.error, "not_found");
-    assert.deepEqual(handleLine(session, "{not json").length, 1);
+    assert.deepEqual((handleLine(session, "{not json") as string[]).length, 1);
   });
 
   test("board: create_board → list_boards({ repo }) → link_repo guard", () => {

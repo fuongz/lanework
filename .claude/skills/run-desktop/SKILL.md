@@ -46,6 +46,9 @@ What setup does (skip with `--no-setup`):
 - Welcome → Continue → **Skip for now** (local mode), then creates project
   **Lanework** (slug `lanework`) and links `--folder` (default: this repo)
   through the folder-chooser seam `LANEWORK_TEST_FOLDERS`.
+- `--seed-claude <file.jsonl>` copies one Claude transcript into the temp
+  agent config under `--folder`, so a real (e.g. long) chat can be opened.
+  The original is only read.
 - `--gh missing` points `LANEWORK_GH_PATH` at nothing; `--gh loggedout` wraps
   the real `gh` with an empty config until the `gh-login` command;
   `--gh offline` answers every call with gh's "error connecting" text.

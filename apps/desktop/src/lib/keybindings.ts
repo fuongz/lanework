@@ -355,6 +355,19 @@ export const KEYBINDINGS: Keybinding[] = [
     where: "files-layout.tsx",
   },
   {
+    command: "Files: Search in Files",
+    keys: ["⇧⌘F"],
+    when: "Files",
+    where: "files-layout.tsx",
+  },
+  {
+    command: "Files: Back to the Tree",
+    standard: true,
+    keys: ["Esc"],
+    when: "Search in Files",
+    where: "files-search.tsx",
+  },
+  {
     command: "Files: Close Tab",
     keys: ["⌘W"],
     when: "Files, a file open",

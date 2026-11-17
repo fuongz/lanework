@@ -16,6 +16,7 @@ import { savedFolder, saveFolder, useFiles } from "#/stores/files";
 import { useWorktree } from "#/stores/worktree";
 import type { PickedFolder } from "../../../../shared/projects";
 import { FileTabs, FileView } from "./file-view";
+import { FilesSearch } from "./files-search";
 import { FilesTree } from "./files-tree";
 import { FolderSwitcher } from "./folder-switcher";
 import { QuickOpen } from "./quick-open";
@@ -51,6 +52,10 @@ export function FilesLayout() {
   const active = useFiles((state) => state.active);
   const close = useFiles((state) => state.close);
   const setQuickOpen = useFiles((state) => state.setQuickOpen);
+  // ⌘⇧F puts the search in the tree's place (FE-149); each press moves
+  // `searchFocus` so a second one takes the box again.
+  const [searching, setSearching] = useState(false);
+  const [searchFocus, setSearchFocus] = useState(0);
 
   const { defaultLayout, onLayoutChanged } = usePersistedLayout(
     "lanework:files",
@@ -113,13 +118,20 @@ export function FilesLayout() {
     return () => window.removeEventListener("focus", onFocus);
   }, [refresh, refreshWorktree, readFolders]);
 
-  // ⌘P finds a file; ⌘W closes the open one (FE-66/D3, D8). The menu leaves
-  // ⌘W unbound (`menu.ts`) so it reaches the page.
+  // ⌘P finds a file; ⌘W closes the open one (FE-66/D3, D8); ⌘⇧F searches
+  // the files' text (FE-149). The menu leaves ⌘W unbound (`menu.ts`) so it
+  // reaches the page.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey)
-        return;
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
       const key = event.key.toLowerCase();
+      if (event.shiftKey) {
+        if (key !== "f") return;
+        event.preventDefault();
+        setSearching(true);
+        setSearchFocus((was) => was + 1);
+        return;
+      }
       if (key === "p") {
         event.preventDefault();
         setQuickOpen(true);
@@ -231,16 +243,27 @@ export function FilesLayout() {
             >
               {switcher}
               {/* NOTE: Keyed by project and folder. The model's expansion and
-                selection are about one repository's paths, never another's. */}
-              <FilesTree
-                key={`${slug}#${folder}`}
-                memoryKey={`${slug}#${folder}`}
-                base={base}
-                loaded={loaded}
-                changes={state.files}
-                onRefresh={refreshAll}
-                refreshing={loading}
-              />
+                selection are about one repository's paths, never another's;
+                a search is about one folder's files. */}
+              {searching ? (
+                <FilesSearch
+                  key={`${slug}#${folder}`}
+                  slug={slug}
+                  folder={folder}
+                  focusRequest={searchFocus}
+                  onClose={() => setSearching(false)}
+                />
+              ) : (
+                <FilesTree
+                  key={`${slug}#${folder}`}
+                  memoryKey={`${slug}#${folder}`}
+                  base={base}
+                  loaded={loaded}
+                  changes={state.files}
+                  onRefresh={refreshAll}
+                  refreshing={loading}
+                />
+              )}
             </aside>
           </ResizablePanel>
           <ResizableHandle aria-label="Resize file tree" />

@@ -4,6 +4,7 @@ import type { DesktopAuthApi, DesktopLaneworkMcpApi } from "./auth";
 import type { DesktopConductorsApi } from "./conductor-sessions";
 import type { DesktopConversationApi } from "./conversation";
 import type { DesktopDictationApi } from "./dictation";
+import type { DesktopFsSearchApi } from "./fs-search";
 import type { DesktopGitApi } from "./git";
 import type { DesktopHandoffApi } from "./handoff";
 import type { DesktopHarnessApi } from "./harness";
@@ -127,6 +128,8 @@ export interface DesktopApi {
   git: DesktopGitApi;
   /** The project's local repository: changes, commits, history. */
   worktree: DesktopWorktreeApi;
+  /** Search by content: a project's files (⌘⇧F) and past chats (FE-149). */
+  fsSearch: DesktopFsSearchApi;
   terminal: DesktopTerminalApi;
   /** A Claude conversation as a chat, and its composer. */
   conversation: DesktopConversationApi;

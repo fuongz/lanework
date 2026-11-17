@@ -81,6 +81,7 @@ import {
 import { migrateProjectsLayout } from "./projects/layout-migration";
 import { registerAppProtocol } from "./protocol";
 import { registerReadiness } from "./readiness";
+import { registerRepoSearch } from "./repo-search";
 import { appOrigin, isTrustedUrl } from "./security";
 import { registerStorage } from "./storage";
 import {
@@ -91,6 +92,7 @@ import {
   registerTerminal,
   terminalActivity,
 } from "./terminal";
+import { registerSessionSearch } from "./transcripts/search";
 import { registerUpdater } from "./updater";
 import { countActiveRuns } from "./updater/live-work";
 
@@ -536,6 +538,9 @@ app
     registerOrchestration(devUrl, orchestrationMain, jevMain);
     registerLeads(devUrl, leadsMain);
     registerConductors(devUrl);
+    // FE-149: ⌘⇧F in a project's folder, and across the transcripts.
+    registerRepoSearch(devUrl);
+    registerSessionSearch(devUrl);
     // A board synced to the cloud takes its conversations and conductors
     // along (FE-142); boards synced before this get theirs now.
     onProjectMoved(async (from, to) => {
