@@ -170,13 +170,17 @@ export function PullDetail() {
     if (!showFiles && !panel.isCollapsed()) panel.collapse();
   }, [showFiles, filesRef]);
 
-  // The screen's name stays in the title bar until this pull request has a
-  // title to put there, so the bar is never blank while one loads.
+  // The screen's name stays in the header until this pull request has a
+  // title to put there, so it is never blank while one loads.
   if (error)
     return (
-      <div className="flex flex-1 items-start justify-center p-8">
+      <div className="flex min-h-0 flex-1 flex-col">
         <PullsTitlebar />
-        <p className="text-destructive max-w-prose text-xs/relaxed">{error}</p>
+        <div className="flex flex-1 items-start justify-center p-8">
+          <p className="text-destructive max-w-prose text-xs/relaxed">
+            {error}
+          </p>
+        </div>
       </div>
     );
 
@@ -204,9 +208,8 @@ export function PullDetail() {
           drawn only when a diff is on screen. In one row, the diff's facts
           sat among the controls and read as one.
 
-          The top row is the window's title bar (FE-58), as Codex draws a
-          thread's header. The bar keeps it clear of the window controls,
-          also in focus mode with the list shut. */}
+          The top row is the pane's header (FE-58, FE-144), as Codex draws a
+          thread's header. */}
       <WindowTitlebar>
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <HugeiconsIcon

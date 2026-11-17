@@ -211,16 +211,24 @@ html[data-window-inactive]
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.985 0 0);
+  /* The window's ground round the page card: a breath of the brand, so the
+     frame reads as the app's own colour rather than a grey (FE-143). The
+     accent picker rewrites these four with the picked hue (lib/accent.ts).
+     Under vibrancy the ground is also see-through: `.window-ground` below. */
+  --sidebar: oklch(0.975 0.006 45.4);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
-  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent: oklch(0.948 0.009 45.4);
   --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.944 0 0);
+  --sidebar-border: oklch(0.93 0.007 45.4);
   --sidebar-ring: var(--accent-brand);
   /* The 1px rule between two resizable panels. See the dark value below. */
-  --panel-rule: oklch(0.944 0 0);
+  --panel-rule: oklch(0.93 0.007 45.4);
+  /* A rail row's hover and its open page (FE-143): the brand laid thinly over
+     the ground, so they follow the accent picker with no value of their own. */
+  --rail-hover: color-mix(in oklab, var(--primary) 7%, transparent);
+  --rail-active: color-mix(in oklab, var(--primary) 13%, transparent);
   /* The edge of the page's card on the window's ground. */
   --panel-edge: var(--border);
 
@@ -329,7 +337,7 @@ html[data-window-inactive]
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.148 0.007 58);
+  --sidebar: oklch(0.148 0.009 55);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
@@ -337,6 +345,10 @@ html[data-window-inactive]
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: var(--accent-brand);
+  /* More of the brand than in light mode: a mid colour over a near-black
+     ground lifts it less than it darkens a near-white one. */
+  --rail-hover: color-mix(in oklab, var(--primary) 12%, transparent);
+  --rail-active: color-mix(in oklab, var(--primary) 22%, transparent);
   /* NOTE: Opaque, unlike `--sidebar-border`. A panel handle has no surface of
      its own underneath it, only the window, so white 10% there is composited
      over whatever the window is painted with and reads as a bright stripe
@@ -448,6 +460,8 @@ html[data-window-inactive]
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
+  --color-rail-hover: var(--rail-hover);
+  --color-rail-active: var(--rail-active);
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
@@ -545,6 +559,52 @@ html[data-window-inactive]
 }
 
 @layer base {
+  /* How every menu, popover and select opens (`MENU_MOTION`): it pops out of
+     its trigger's side, from a few px off and a touch small, in 140ms, and
+     closes at once. Fast enough to read as instant, slow enough to show where it came
+     from.
+
+     NOTE: `!important` in this early layer, to beat the `animate-none!` the
+     same popups carry (layers reverse for important rules: an earlier one
+     wins). That utility is what removes the registry's own zoom in and out. */
+  /* Transform only, never opacity. The glass is a `backdrop-filter` on the
+     popup's `::before`, and an ancestor below full opacity cuts it off from
+     what is behind: for the length of a fade the menu drew with no glass at
+     all, then snapped to it at the end. */
+  @keyframes menu-pop {
+    from {
+      transform: translate(var(--menu-pop-x, 0), var(--menu-pop-y, -4px))
+        scale(0.96);
+    }
+  }
+  .menu-pop[data-open] {
+    /* biome-ignore lint/complexity/noImportantStyles: must beat the popups' `animate-none!` (see above) */
+    animation: menu-pop 140ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
+  .menu-pop[data-side="top"] {
+    --menu-pop-y: 4px;
+  }
+  .menu-pop[data-side="left"],
+  .menu-pop[data-side="inline-start"] {
+    --menu-pop-x: 4px;
+    --menu-pop-y: 0;
+  }
+  .menu-pop[data-side="right"],
+  .menu-pop[data-side="inline-end"] {
+    --menu-pop-x: -4px;
+    --menu-pop-y: 0;
+  }
+  /* A select laid over its trigger has no side to come from. */
+  .menu-pop[data-align-trigger="true"] {
+    --menu-pop-y: 0;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .menu-pop[data-open] {
+      /* biome-ignore lint/complexity/noImportantStyles: as the rule above it */
+      animation: none !important;
+    }
+  }
+
   /* Not a utility class: `--sidebar` is the token for this surface and it is
      right in both themes (0.985 against a white page, a warm 0.148 ground
      under a 0.168 one), where a single blend of `--muted` could only be right
@@ -622,6 +682,13 @@ html[data-window-inactive]
     display: flex;
     align-items: center;
     min-width: 0;
+  }
+  /* The session tabs (FE-144) start on the page card's left edge, not at
+     the slot's 17px inset that lines a page's title up with its content.
+     Not with the rail folded: the slot then starts after back and forward,
+     and the tabs would slide under them. */
+  html:not([data-rail-mini="true"]) .session-tabs {
+    margin-left: -17px;
   }
   /* Settings' bar: its card starts 6px (`my-1.5`) under the bar, so what
      sits in it (the project picker, a page's title and search) is centred
@@ -724,4 +791,23 @@ html[data-window-inactive]
   ::-webkit-scrollbar-thumb:active {
     background-color: color-mix(in oklab, var(--foreground) 45%, transparent);
   }
+}
+
+/* The window's ground under macOS vibrancy (FE-143): a little of the desktop
+   shows through the frame round the page card. The rail inside it paints no
+   ground of its own, or the two would stack into a darker rail. The page card
+   and every menu, dialog and popover stay opaque.
+
+   NOTE: Unlayered, so it beats the `bg-sidebar` utility on the same element.
+   Dark mode keeps more of its colour: the material behind it is lighter than
+   the 0.148 ground, and much of it reads as a washed grey. */
+html[data-vibrancy="true"] .window-ground {
+  background-color: color-mix(in oklab, var(--sidebar) 84%, transparent);
+}
+html[data-vibrancy="true"].dark .window-ground {
+  background-color: color-mix(in oklab, var(--sidebar) 92%, transparent);
+}
+html[data-vibrancy="true"] .window-ground .app-sidebar,
+html[data-vibrancy="true"] .window-ground .settings-sidebar {
+  background-color: transparent;
 }

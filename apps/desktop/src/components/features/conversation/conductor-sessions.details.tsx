@@ -530,15 +530,14 @@ function CommitsGroup({
 }
 
 /**
- * The panel's one card: its blocks one under another, a hairline between.
+ * The dropdown's content: its blocks one under another, a hairline between.
  * A block that draws nothing leaves no line behind.
  */
 export function PanelCard({ children }: { children: ReactNode }) {
   return (
     <div
-      // The composer's border and layered shadow, so the panel's card and
-      // the prompt box read as one family.
-      className="bg-card border-border flex flex-col overflow-hidden rounded-2xl border shadow-[0_1px_2px_rgb(0_0_0/0.04),0_6px_20px_-4px_rgb(0_0_0/0.10)]"
+      // No frame of its own: the dropdown round it is the card.
+      className="flex flex-col"
     >
       {/* A group opens as a page of the card, with Back at its top. */}
       <PanelPages>

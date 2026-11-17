@@ -4,11 +4,9 @@ import {
   ArrowUpRight01Icon,
   Cancel01Icon,
   Delete02Icon,
-  EllipsisIcon,
   Folder01Icon,
   PlayIcon,
   Target02Icon,
-  Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
@@ -41,7 +39,6 @@ import {
 import {
   ReadOnlyBadge,
   StatusPill,
-  TaskBadge,
   TaskRow,
 } from "#/components/shared/orchestration/task-row";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
@@ -74,11 +71,8 @@ import {
   runOverall,
   shownStatus,
   TONE_TEXT,
-  taskBadge,
-  taskBar,
   taskHint,
   taskLabel,
-  taskTone,
 } from "#/lib/orchestration-status";
 import { cn } from "#/lib/utils";
 import { useProposalEdits } from "./orchestration-panel.store";
@@ -302,36 +296,9 @@ function StepMark({
   return (
     <Tip label={taskHint(task)}>
       <span className="flex shrink-0">
-        <StepGlyph task={task} size="size-6" number={number} />
+        <StepGlyph task={task} size="size-4" number={number} />
       </span>
     </Tip>
-  );
-}
-
-/**
- * The worker's status as a small tinted pill beside its title: its colour,
- * a tick once it is done, the word in small caps.
- */
-function StatusBadge({ task }: { task: OrchestrationTask }) {
-  const done = task.status === "completed";
-  return (
-    <TaskBadge
-      tone={taskTone(task)}
-      icon={
-        done ? (
-          <HugeiconsIcon
-            // Done (the lead reviewed and took it): a tick; under review,
-            // an ellipsis, as the mark beside it.
-            icon={task.accepted ? Tick02Icon : EllipsisIcon}
-            className="size-3"
-            strokeWidth={2.4}
-            aria-hidden="true"
-          />
-        ) : undefined
-      }
-    >
-      {taskBadge(task)}
-    </TaskBadge>
   );
 }
 
@@ -421,7 +388,8 @@ function ScopeBadge({ slug, scope }: { slug: string; scope: string }) {
  * One worker of the run (FE-137): a checklist row that opens and folds, its
  * status as a square, its id in a column of its own so every title starts at
  * the same x, and its facts and actions hooked under the square. A worker
- * that runs, waits on the lead or went wrong starts open.
+ * that waits on the lead or went wrong starts open; one that only runs
+ * starts folded.
  */
 function WorkerRow({
   slug,
@@ -452,9 +420,7 @@ function WorkerRow({
   onCancel: (() => void) | null;
   onAllow: (() => void) | null;
 }) {
-  const attention = Boolean(
-    task.needsInput || task.error || wider || task.status === "running",
-  );
+  const attention = Boolean(task.needsInput || task.error || wider);
   const [chosen, setChosen] = useState<boolean | null>(null);
   // Anything to show under the row? A finished read-only worker has
   // nothing, so it gets no chevron and never opens on an empty body.
@@ -475,12 +441,7 @@ function WorkerRow({
       mark={<StepMark task={task} number={number} />}
       title={task.title}
       tip={`${task.title} (${task.id})`}
-      badge={
-        <>
-          <StatusBadge task={task} />
-          {task.files.length === 0 && <ReadOnlyBadge />}
-        </>
-      }
+      badge={task.files.length === 0 && <ReadOnlyBadge />}
       trailing={
         <>
           {/* Model and effort as one outlined pill, as the proposal card's. */}
@@ -501,7 +462,7 @@ function WorkerRow({
             </span>
           </Tip>
           {time && (
-            <span className="text-muted-foreground w-10 shrink-0 text-right text-[11.5px] tabular-nums">
+            <span className="text-muted-foreground min-w-10 shrink-0 text-right text-[11.5px] whitespace-nowrap tabular-nums">
               {time}
             </span>
           )}
@@ -831,51 +792,45 @@ export function RunPanel({
         <p role="status" aria-live="polite" className="sr-only">
           {announcement}
         </p>
-        <header className="flex min-w-0 items-start gap-3 px-4 pt-3.5 pb-2">
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            {/* A small caps eyebrow, as the proposal card has: what this is,
-            and how far it got (FE-137's counts). */}
-            <p className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[11px] font-medium tracking-[0.06em] uppercase">
-              <HugeiconsIcon
-                icon={Target02Icon}
-                strokeWidth={2}
-                aria-hidden="true"
-                className="size-3 shrink-0"
-              />
-              <span>Run</span>
-              {run.tasks.length > 0 && (
-                <span className="text-muted-foreground/70 flex min-w-0 items-center gap-x-2.5 truncate tracking-normal normal-case tabular-nums">
-                  {/* Working > Review > Done: done is what the lead took. */}
-                  <span>
-                    {accepted} of {run.tasks.length} done
-                  </span>
-                  {done > accepted && <span>{done - accepted} in review</span>}
-                  {running > 0 && <span>{running} working</span>}
-                  {waiting > 0 && (
-                    <span className="text-tone-amber">
-                      {waiting} waiting for the lead
-                    </span>
-                  )}
-                  {yours > 0 && (
-                    <span className="text-tone-amber">
-                      {yours} waiting for you
-                    </span>
-                  )}
-                </span>
-              )}
-            </p>
+        <header className="flex min-w-0 items-center gap-3 px-4 pt-3 pb-2">
+          {/* One row (FE-137): the run's mark, its title, what is going on
+              now, then status and clock. How many are done is left to the
+              rows and their marks. */}
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <HugeiconsIcon
+              icon={Target02Icon}
+              strokeWidth={2}
+              aria-hidden="true"
+              className="text-muted-foreground size-3.5 shrink-0"
+            />
             <Tip label={heading}>
               <h2
                 ref={headingRef}
                 // Not in the tab order: the focus is only moved here, from the
                 // card an approval replaced.
                 tabIndex={-1}
-                className="focus-visible:ring-ring/30 line-clamp-2 rounded-sm text-[15px] leading-snug font-medium text-balance outline-none focus-visible:ring-2"
+                className="focus-visible:ring-ring/30 min-w-0 truncate rounded-sm text-[14px] leading-5 font-medium outline-none focus-visible:ring-2"
               >
                 {heading}
                 <span className="sr-only">, {RUN_LABELS[run.status]}</span>
               </h2>
             </Tip>
+            {(done > accepted || running > 0 || waiting > 0 || yours > 0) && (
+              <span className="text-muted-foreground flex shrink-0 items-center gap-x-2.5 text-[12px] tabular-nums">
+                {done > accepted && <span>{done - accepted} in review</span>}
+                {running > 0 && <span>{running} working</span>}
+                {waiting > 0 && (
+                  <span className="text-tone-amber">
+                    {waiting} waiting for the lead
+                  </span>
+                )}
+                {yours > 0 && (
+                  <span className="text-tone-amber">
+                    {yours} waiting for you
+                  </span>
+                )}
+              </span>
+            )}
           </div>
           {/* Status and clock, then the one action the run allows now:
             Run while it is paused, Stop while it runs (FE-137). */}
@@ -953,24 +908,6 @@ export function RunPanel({
             )}
           </ButtonGroup>
         </header>
-
-        {run.tasks.length > 0 && (
-          <div className="flex min-w-0 items-center px-4 pb-3">
-            {/* One segment per worker, in its status colour (FE-137). */}
-            <div
-              aria-hidden="true"
-              className="flex h-1.5 min-w-0 flex-1 gap-0.5"
-            >
-              {run.tasks.map((task) => (
-                <Tip key={task.id} label={`${task.title}: ${taskLabel(task)}`}>
-                  <span
-                    className={cn("h-full flex-1 rounded-full", taskBar(task))}
-                  />
-                </Tip>
-              ))}
-            </div>
-          </div>
-        )}
 
         {run.report && (
           <RunReportSummary

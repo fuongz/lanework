@@ -21,7 +21,7 @@ import { useCommandPalette } from "#/stores/command-palette";
 
 /** One square slot of the mini rail; the open page gets the pill. */
 const SLOT =
-  "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] aria-[current]:bg-foreground/[0.08] aria-[current]:text-foreground grid size-9 shrink-0 place-items-center rounded-lg transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50";
+  "text-muted-foreground hover:text-foreground hover:bg-rail-hover aria-[current]:bg-rail-active aria-[current]:text-foreground grid size-9 shrink-0 place-items-center rounded-lg transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50";
 
 const ACTIVE = { "aria-current": "page" as const };
 

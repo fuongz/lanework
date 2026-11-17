@@ -190,121 +190,130 @@ export function GitLayout() {
 
   if (!state)
     return (
-      <>
+      <div className="flex min-h-0 flex-1 flex-col">
         {title}
-        {error ? (
-          <RepoMessage
-            title="The repository could not be read"
-            description={error}
-          >
-            <HeldReadAction
-              message={error}
-              onRetry={async (refusal) => {
-                if (refusal === "refused") await askAgain(slug);
-                await refresh();
-                if (tab === "history") await openHistory(slug);
-              }}
+        {/* Under the header, the rest of the page fills what is left. */}
+        <div className="flex min-h-0 flex-1 flex-col">
+          {error ? (
+            <RepoMessage
+              title="The repository could not be read"
+              description={error}
+            >
+              <HeldReadAction
+                message={error}
+                onRetry={async (refusal) => {
+                  if (refusal === "refused") await askAgain(slug);
+                  await refresh();
+                  if (tab === "history") await openHistory(slug);
+                }}
+              />
+            </RepoMessage>
+          ) : (
+            <SplitSkeleton
+              label="Reading the repository"
+              lines={tab === "history" ? 2 : 1}
             />
-          </RepoMessage>
-        ) : (
-          <SplitSkeleton
-            label="Reading the repository"
-            lines={tab === "history" ? 2 : 1}
-          />
-        )}
-      </>
+          )}
+        </div>
+      </div>
     );
   if (state.kind !== "ready")
     return (
-      <>
+      <div className="flex min-h-0 flex-1 flex-col">
         {title}
-        <RepoEmpty state={state} />
-      </>
+        {/* Under the header, the rest of the page fills what is left. */}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <RepoEmpty state={state} />
+        </div>
+      </div>
     );
 
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col">
       {title}
-      <ResizablePanelGroup
-        id="lanework:git"
-        defaultLayout={defaultLayout}
-        onLayoutChanged={onLayoutChanged}
-      >
-        <ResizablePanel
-          id="list"
-          defaultSize="280px"
-          minSize="15%"
-          maxSize="45%"
-          groupResizeBehavior="preserve-pixel-size"
+      {/* Under the header, the rest of the page fills what is left. */}
+      <div className="flex min-h-0 flex-1 flex-col">
+        <ResizablePanelGroup
+          id="lanework:git"
+          defaultLayout={defaultLayout}
+          onLayoutChanged={onLayoutChanged}
         >
-          <aside
-            aria-label="Commits"
-            className="bg-sidebar flex h-full min-h-0 flex-col"
+          <ResizablePanel
+            id="list"
+            defaultSize="280px"
+            minSize="15%"
+            maxSize="45%"
+            groupResizeBehavior="preserve-pixel-size"
           >
-            {seen.changes && (
-              <Shown
-                shown={tab === "changes"}
-                role="tabpanel"
-                id={GIT_PANEL_ID("changes")}
-                aria-labelledby={GIT_TAB_ID("changes")}
-              >
-                {files.length ? (
-                  <ChangesList files={files} />
-                ) : (
-                  <div className="flex min-h-0 flex-1">
-                    <RepoMessage
-                      title="No changes"
-                      description="The working tree matches the last commit."
-                    />
-                  </div>
-                )}
-                <CommitBox
-                  files={files}
-                  branch={state.branch}
-                  head={state.head}
-                  remotes={state.remotes}
-                />
-              </Shown>
-            )}
-            {seen.history && (
-              <Shown
-                shown={tab === "history"}
-                role="tabpanel"
-                id={GIT_PANEL_ID("history")}
-                aria-labelledby={GIT_TAB_ID("history")}
-              >
-                <HistoryColumn slug={slug} shown={tab === "history"} />
-              </Shown>
-            )}
-          </aside>
-        </ResizablePanel>
-        <ResizableHandle aria-label="Resize Git column" />
-        <ResizablePanel id="pane" minSize="40%">
-          <div className="flex h-full min-h-0">
-            {seen.changes && (
-              <Shown shown={tab === "changes"}>
-                {files.length ? (
-                  <ChangesDiff slug={slug} files={files} />
-                ) : (
-                  <RepoMessage
-                    title="Nothing to review"
-                    description="Edit a file in this repository and its diff appears here."
+            <aside
+              aria-label="Commits"
+              className="bg-sidebar flex h-full min-h-0 flex-col"
+            >
+              {seen.changes && (
+                <Shown
+                  shown={tab === "changes"}
+                  role="tabpanel"
+                  id={GIT_PANEL_ID("changes")}
+                  aria-labelledby={GIT_TAB_ID("changes")}
+                >
+                  {files.length ? (
+                    <ChangesList files={files} />
+                  ) : (
+                    <div className="flex min-h-0 flex-1">
+                      <RepoMessage
+                        title="No changes"
+                        description="The working tree matches the last commit."
+                      />
+                    </div>
+                  )}
+                  <CommitBox
+                    files={files}
+                    branch={state.branch}
+                    head={state.head}
+                    remotes={state.remotes}
                   />
-                )}
-              </Shown>
-            )}
-            {seen.history && (
-              <Shown shown={tab === "history"}>
-                {historySha ? (
-                  <CommitDetail slug={slug} sha={historySha} />
-                ) : (
-                  <HistoryEmpty />
-                )}
-              </Shown>
-            )}
-          </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
-    </>
+                </Shown>
+              )}
+              {seen.history && (
+                <Shown
+                  shown={tab === "history"}
+                  role="tabpanel"
+                  id={GIT_PANEL_ID("history")}
+                  aria-labelledby={GIT_TAB_ID("history")}
+                >
+                  <HistoryColumn slug={slug} shown={tab === "history"} />
+                </Shown>
+              )}
+            </aside>
+          </ResizablePanel>
+          <ResizableHandle aria-label="Resize Git column" />
+          <ResizablePanel id="pane" minSize="40%">
+            <div className="flex h-full min-h-0">
+              {seen.changes && (
+                <Shown shown={tab === "changes"}>
+                  {files.length ? (
+                    <ChangesDiff slug={slug} files={files} />
+                  ) : (
+                    <RepoMessage
+                      title="Nothing to review"
+                      description="Edit a file in this repository and its diff appears here."
+                    />
+                  )}
+                </Shown>
+              )}
+              {seen.history && (
+                <Shown shown={tab === "history"}>
+                  {historySha ? (
+                    <CommitDetail slug={slug} sha={historySha} />
+                  ) : (
+                    <HistoryEmpty />
+                  )}
+                </Shown>
+              )}
+            </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </div>
+    </div>
   );
 }

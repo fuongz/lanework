@@ -240,10 +240,28 @@ function PromptToken({ token }: { token: string }) {
   );
 }
 
+/**
+ * Where a prompt's code is: its fenced blocks (to the end when a fence never
+ * closes) and inline code spans. A `@` or `/` in there is code, not a token.
+ */
+const PROMPT_CODE =
+  /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[ \t]*$|(?![\s\S]))|`[^`\n]+`/gm;
+
+/** The composer's tokens of a prompt, without the ones inside its code. */
+function promptTokens(text: string): RegExpExecArray[] {
+  const code = [...text.matchAll(PROMPT_CODE)].map(
+    (m) => [m.index ?? 0, (m.index ?? 0) + m[0].length] as const,
+  );
+  return [...text.matchAll(PROMPT_TOKEN)].filter((m) => {
+    const at = m.index ?? 0;
+    return !code.some(([from, to]) => at >= from && at < to);
+  });
+}
+
 function PromptText({ text }: { text: string }) {
   const parts: React.ReactNode[] = [];
   let last = 0;
-  for (const match of text.matchAll(PROMPT_TOKEN)) {
+  for (const match of promptTokens(text)) {
     const at = match.index ?? 0;
     const token = match[0];
     if (at > last)
@@ -268,16 +286,12 @@ function PromptText({ text }: { text: string }) {
 /**
  * Whether a prompt is written in markdown worth drawing: a fence, a list, a
  * heading, emphasis or inline code. A prompt with the composer's tokens
- * (`@file`, `/command`, a conductor) keeps its chips and stays plain text,
+ * (`@file`, `/command`, a conductor) outside its code keeps its chips and
+ * stays plain text,
  * and so does plain prose, whose line breaks are kept as typed.
  */
 function looksLikeMarkdown(text: string): boolean {
-  if (
-    new RegExp(PROMPT_TOKEN.source, PROMPT_TOKEN.flags.replace("g", "")).test(
-      text,
-    )
-  )
-    return false;
+  if (promptTokens(text).length) return false;
   return (
     /^\s*(```|~~~)/m.test(text) ||
     /^\s{0,3}([-*+]|\d+[.)])\s+\S/m.test(text) ||
@@ -573,13 +587,16 @@ export const TurnView = memo(
         <div
           ref={(node) => anchor?.(turn.id, node)}
           data-turn={turn.id}
-          className={cn("scroll-mt-6", OFFSCREEN, dim)}
+          className={cn("group/turn scroll-mt-6", OFFSCREEN, dim)}
         >
           <UserTurnView turn={turn} />
         </div>
       );
     return (
-      <div data-turn={turn.id} className={cn(!turn.open && OFFSCREEN, dim)}>
+      <div
+        data-turn={turn.id}
+        className={cn("group/turn", !turn.open && OFFSCREEN, dim)}
+      >
         <AssistantView
           turn={turn}
           delta={delta}

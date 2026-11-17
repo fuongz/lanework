@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { readAccent } from "#/lib/accent";
 import { isThemeSource, type ThemeSource } from "../../shared/desktop";
 import {
   type DictationCorrection,
@@ -93,6 +94,12 @@ function isProjectSort(value: unknown): value is ProjectSort {
 interface Preferences {
   theme: ThemeSource;
   setTheme: (value: ThemeSource) => void;
+  /**
+   * The accent colour picked on this machine, as `#rrggbb` (FE-143). Null is
+   * Lanework's own orange.
+   */
+  accent: string | null;
+  setAccent: (value: string | null) => void;
   /** The fonts picked on this machine, like the theme. */
   fonts: FontPreferences;
   setFont: (role: FontRole, value: FontChoice | null) => void;
@@ -163,6 +170,8 @@ export const usePreferences = create<Preferences>()(
     (set) => ({
       theme: "system",
       setTheme: (theme) => set({ theme }),
+      accent: null,
+      setAccent: (value) => set({ accent: readAccent(value) }),
       fonts: NO_FONTS,
       setFont: (role, value) =>
         set((state) => ({ fonts: { ...state.fonts, [role]: value } })),
@@ -205,6 +214,7 @@ export const usePreferences = create<Preferences>()(
       skipHydration: true,
       partialize: ({
         theme,
+        accent,
         onboarded,
         fonts,
         projectSort,
@@ -216,6 +226,7 @@ export const usePreferences = create<Preferences>()(
         islandSound,
       }) => ({
         theme,
+        accent,
         onboarded,
         fonts,
         projectSort,
@@ -236,6 +247,8 @@ export const usePreferences = create<Preferences>()(
         return {
           ...current,
           theme: isThemeSource(saved?.theme) ? saved.theme : "system",
+          // Missing or malformed reads as Lanework's own orange.
+          accent: readAccent(saved?.accent),
           // A record without fonts reads as the defaults, and a malformed one
           // as the defaults role by role.
           fonts: readFonts(saved?.fonts),

@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import type { AgentSession, TerminalAgent } from "#/../shared/terminal";
+import { RenameAgentDialog } from "#/components/shared/agents/rename-agent-dialog";
 import { StatusPing } from "#/components/shared/agents/status-ping";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
@@ -43,7 +44,6 @@ import {
   StopItem,
 } from "./agent-sessions-nav.row";
 import { useAgentRail } from "./agent-sessions-nav.sessions";
-import { RenameAgentDialog } from "./rename-agent-dialog";
 
 /** What would have found a deleted conversation again, per CLI. */
 const RESUME_COMMAND: Record<TerminalAgent, string> = {
@@ -289,7 +289,7 @@ function AgentSessionsList({
                   title="Search conversations"
                   disabled={sessions.length === 0}
                   onClick={() => setSearching(true)}
-                  className="hover:bg-foreground/[0.06] text-muted-foreground hover:text-foreground flex size-5 items-center justify-center rounded-md transition-colors disabled:opacity-50"
+                  className="hover:bg-rail-hover text-muted-foreground hover:text-foreground flex size-5 items-center justify-center rounded-md transition-colors disabled:opacity-50"
                 >
                   <HugeiconsIcon
                     icon={Search01Icon}
@@ -311,7 +311,7 @@ function AgentSessionsList({
                     params: { slug },
                   })
                 }
-                className="hover:bg-foreground/[0.06] text-muted-foreground hover:text-foreground flex size-5 items-center justify-center rounded-md transition-colors disabled:opacity-50"
+                className="hover:bg-rail-hover text-muted-foreground hover:text-foreground flex size-5 items-center justify-center rounded-md transition-colors disabled:opacity-50"
               >
                 <HugeiconsIcon
                   icon={Add01Icon}

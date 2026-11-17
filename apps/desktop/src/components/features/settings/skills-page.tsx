@@ -165,7 +165,8 @@ export function SkillsPage() {
     : "Skill";
 
   return (
-    <>
+    // A column: the header on top, the panels in the rest of the card.
+    <div className="flex h-full min-h-0 flex-col">
       <WindowTitlebar>
         <h1 className={WINDOW_TITLE}>Skills</h1>
         <InputGroup className="ml-auto w-56 shrink">
@@ -189,6 +190,7 @@ export function SkillsPage() {
       </WindowTitlebar>
 
       <ResizablePanelGroup
+        className="h-auto min-h-0 flex-1"
         id="lanework:skills"
         defaultLayout={defaultLayout}
         onLayoutChanged={onLayoutChanged}
@@ -291,7 +293,7 @@ export function SkillsPage() {
           </section>
         </ResizablePanel>
       </ResizablePanelGroup>
-    </>
+    </div>
   );
 }
 

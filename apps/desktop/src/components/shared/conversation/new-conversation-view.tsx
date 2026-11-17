@@ -293,19 +293,19 @@ export function NewConversationPage({
       aria-label={conductor ? conductor.name : "New conversation"}
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
     >
-      <WindowTitlebar className="gap-2.5">
-        {conductor && (
+      {/* A plain new chat is named by its "New conversation" tab in the
+          title bar (FE-144); a conductor's keeps its own name here. */}
+      {conductor && (
+        <WindowTitlebar className="gap-2.5">
           <HugeiconsIcon
             icon={leadIcon(conductor.icon)}
             className="text-muted-foreground size-4 shrink-0"
             strokeWidth={1.5}
             aria-hidden="true"
           />
-        )}
-        <h1 className={WINDOW_TITLE}>
-          {conductor ? conductor.name : "New conversation"}
-        </h1>
-      </WindowTitlebar>
+          <h1 className={WINDOW_TITLE}>{conductor.name}</h1>
+        </WindowTitlebar>
+      )}
 
       {/* A little under the middle, where the eye lands on an empty page. */}
       <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-8 pt-[30vh] pb-10">

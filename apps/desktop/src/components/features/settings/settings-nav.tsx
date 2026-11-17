@@ -47,7 +47,7 @@ export function SettingsNav() {
                 to={item.to}
                 className={`${RAIL_ROW} group relative flex h-[30px] items-center gap-2.5 rounded-md px-2 text-[13px] transition-[background-color,scale] duration-150 ease-out active:scale-[0.98]`}
                 activeProps={{
-                  className: "bg-foreground/[0.08]",
+                  className: "bg-rail-active",
                   "aria-current": "page",
                 }}
               >

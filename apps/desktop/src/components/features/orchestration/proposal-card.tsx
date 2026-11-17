@@ -375,7 +375,7 @@ function TaskRow({
         <span
           aria-hidden="true"
           className={cn(
-            "grid size-6 shrink-0 place-items-center rounded-full text-[11px] font-medium tabular-nums",
+            "grid size-4 shrink-0 place-items-center rounded-full text-[9.5px] font-medium tabular-nums",
             invalid
               ? "bg-destructive/10 text-destructive"
               : "bg-background text-muted-foreground ring-border ring-1",

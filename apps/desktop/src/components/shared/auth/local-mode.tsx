@@ -56,12 +56,21 @@ export function listedProjects(
   );
 }
 
-/** The "Local" badge: saved on this machine only. */
+/**
+ * The "Local" badge: saved on this machine only.
+ *
+ * A filled chip, not an outline: a hairline on the menu's glass and on a lit
+ * row left it hard to make out. Translucent, so it stays a step darker than
+ * whatever row it sits on.
+ */
 export function LocalBadge({ className }: { className?: string }) {
   return (
     <Badge
-      variant="outline"
-      className={cn("shrink-0", className)}
+      variant="secondary"
+      className={cn(
+        "text-foreground/75 shrink-0 bg-foreground/[0.08] dark:bg-foreground/[0.12]",
+        className,
+      )}
       title="Saved on this machine only"
     >
       Local

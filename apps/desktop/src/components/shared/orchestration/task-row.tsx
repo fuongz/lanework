@@ -31,7 +31,7 @@ export function TaskRow({
 }: {
   /** The row's DOM id; the toggle is its first button. */
   id: string;
-  /** A 24px mark: the run's status, or the proposal's number. */
+  /** A 16px mark, the title's size: the run's status, or the proposal's number. */
   mark: ReactNode;
   title: string;
   /** The title's tooltip: the whole title and its task id. */
@@ -60,11 +60,11 @@ export function TaskRow({
     <li id={id} className="relative">
       {!last && (
         // From under this mark to the next row's: the row is 40px tall and
-        // its 24px mark sits 8px from its top, 8px + 12px from its left.
+        // its 16px mark sits 12px from its top, 8px + 8px from its left.
         <span
           aria-hidden="true"
           className={cn(
-            "pointer-events-none absolute top-[34px] -bottom-[6px] left-[19px] border-l-2",
+            "pointer-events-none absolute top-[30px] -bottom-[10px] left-[15px] border-l-2",
             done
               ? "border-tone-emerald/35"
               : "border-foreground/15 border-dashed",
@@ -88,7 +88,7 @@ export function TaskRow({
           <span className="flex shrink-0">{mark}</span>
           <span className="flex min-w-0 flex-1 items-center gap-2">
             <span
-              className="text-foreground min-w-0 truncate text-[13px] leading-snug font-semibold"
+              className="text-foreground min-w-0 truncate text-[13px] leading-snug font-normal"
               title={tip}
             >
               {title}
@@ -129,7 +129,7 @@ export function TaskRow({
       {below}
       {open && expandable && (
         // Lined up with the title: the row's padding, the mark, the gap.
-        <div className="mt-2 mr-2 mb-3 ml-11 flex min-w-0 flex-col gap-2.5 text-[12px]">
+        <div className="mt-2 mr-2 mb-3 ml-9 flex min-w-0 flex-col gap-2.5 text-[12px]">
           {children}
         </div>
       )}

@@ -70,7 +70,7 @@ function ReorderRow({
         onMove(event.key === "ArrowUp" ? -1 : 1);
       }}
       className={cn(
-        "focus-visible:bg-foreground/[0.08] flex h-7 shrink-0 cursor-grab touch-none items-center gap-2.5 rounded-md px-2 text-left text-[13px] outline-none select-none active:cursor-grabbing",
+        "focus-visible:bg-foreground/[0.08] flex h-6.5 shrink-0 cursor-grab touch-none items-center gap-2 rounded-md px-1.5 text-left text-[13px] outline-none select-none active:cursor-grabbing",
         drag.isDragging
           ? "bg-popover shadow-card relative z-10"
           : "hover:bg-foreground/[0.05]",
@@ -78,10 +78,10 @@ function ReorderRow({
     >
       <ProjectTile
         project={project}
-        className="size-5 rounded-[5px] text-[10px]"
+        className="size-4.5 rounded-[5px] text-[9.5px]"
       />
       <span className="truncate">{project.name}</span>
-      {isLocalProject(project) && <LocalBadge />}
+      {isLocalProject(project) && <LocalBadge className="h-4.5 px-1.5" />}
       <HugeiconsIcon
         icon={DragDropVerticalIcon}
         className="text-muted-foreground ml-auto size-3.5 shrink-0"

@@ -2,6 +2,7 @@ import { ThemeChoice } from "#/components/shared/common/theme-choice";
 import { SettingsPage } from "#/components/shared/settings/settings-page";
 import { Switch } from "#/components/ui/switch";
 import { usePreferences } from "#/stores/preferences";
+import { AccentPicker } from "./accent-picker";
 import { CodePreview } from "./code-preview";
 import { FontPicker } from "./font-picker";
 
@@ -11,7 +12,7 @@ export function AppearanceSection() {
   return (
     <SettingsPage
       title="Appearance"
-      description="Theme, fonts and the project list."
+      description="Theme, accent colour, fonts and the project list."
       sections={[
         {
           title: "Theme",
@@ -27,6 +28,19 @@ export function AppearanceSection() {
               <CodePreview />
             </div>
           ),
+        },
+        {
+          title: "Colour",
+          rows: [
+            {
+              label: "Accent colour",
+              description:
+                "Buttons, switches, focus rings, links and selected text.",
+              keywords:
+                "accent colour color brand primary highlight tint grey gray",
+              control: <AccentPicker />,
+            },
+          ],
         },
         {
           title: "Fonts",

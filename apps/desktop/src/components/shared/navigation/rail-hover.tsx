@@ -5,7 +5,8 @@ import { cn } from "#/lib/utils";
 /** The class every rail row carries, so the hover can find the row it is on. */
 export const RAIL_ROW = "rail-row";
 
-const SPRING = {
+/** How the rail's hover slides between rows; the ⌘K palette's too. */
+export const RAIL_SPRING = {
   type: "spring",
   stiffness: 900,
   damping: 50,
@@ -91,13 +92,13 @@ export function RailHover({
           aria-hidden="true"
           data-testid="rail-hover"
           className={cn(
-            "bg-foreground/[0.04] pointer-events-none absolute top-0 left-0 rounded-md",
+            "bg-rail-hover pointer-events-none absolute top-0 left-0 rounded-md",
             backgroundClassName,
           )}
           initial={false}
           animate={{ ...box, opacity: visible ? 1 : 0 }}
           transition={{
-            default: jump ? { duration: 0 } : SPRING,
+            default: jump ? { duration: 0 } : RAIL_SPRING,
             opacity: { duration: reduced ? 0 : 0.1 },
           }}
         />

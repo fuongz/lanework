@@ -23,14 +23,15 @@ function sendViewCommand(command: ViewCommand): void {
  *   for. ⌃`, which VS Code and Codex use and FE-19/D6 picked first, stays as
  *   a hidden second binding. ⌘` is also macOS's "Move focus to next window",
  *   which an app menu item takes over only inside this app. New Terminal is
- *   ⌘T, the key the panel's + menu shows, with ⌃⇧` kept the same way.
+ *   ⌃⇧`, the key the panel's + menu shows. ⌘T is the page's: a new session
+ *   tab (FE-144), as in a browser.
  * - NOTE: No ⌘W. Electron's File menu (macOS) and Window menu (elsewhere)
  *   bind it to Close Window, and this app has one window: the key people
  *   press to close a tab would take the whole app off the screen. Close
  *   Window stays in File without a key, and the window's own close button is
  *   untouched.
- *   The page takes ⌘W instead: Files closes the open file, a chat asks
- *   before stopping its live agent.
+ *   The page takes ⌘W instead: Files closes the open file, a chat closes its
+ *   tab (asking first while its agent is live).
  * - Toggle Sidebar is ⌘B (FE-20/D5, as in VS Code). Nothing in the app claims
  *   it: CodeMirror, the one editor, binds no Mod-B, and a key the page
  *   handles never reaches the menu anyway.
@@ -142,10 +143,9 @@ export function installMenu(): void {
         {
           id: "terminal-new",
           label: "New Terminal",
-          accelerator: "CommandOrControl+T",
+          accelerator: "Ctrl+Shift+`",
           click: add,
         },
-        ...alias("terminal-new-ctrl", "New Terminal", "Ctrl+Shift+`", add),
         { type: "separator" },
         { role: "reload" },
         { role: "forceReload" },

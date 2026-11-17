@@ -81,7 +81,11 @@ function CopyAction({ text, label }: { text: string; label: string }) {
   );
 }
 
-/** The row under a message: its actions and its time, always shown. */
+/**
+ * The row under a message: its actions and its time, shown while the pointer
+ * is on the message (`group/turn`, turn-view.tsx) or focus is in the row. It
+ * keeps its height hidden, so nothing below moves when it shows.
+ */
 function Row({
   align,
   time,
@@ -94,7 +98,7 @@ function Row({
   return (
     <div
       className={cn(
-        "flex h-8 items-center gap-0.5",
+        "flex h-8 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/turn:opacity-100 focus-within:opacity-100 has-[[aria-expanded=true]]:opacity-100 motion-reduce:transition-none",
         align === "end" ? "justify-end" : "justify-start",
       )}
     >

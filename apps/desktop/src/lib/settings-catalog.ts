@@ -61,7 +61,8 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         to: "/settings/appearance",
         label: "Appearance",
         icon: Sun01Icon,
-        keywords: "theme dark light system colour color mode font",
+        keywords:
+          "theme dark light system colour color mode font accent brand primary",
       },
       {
         to: "/settings/dictation",

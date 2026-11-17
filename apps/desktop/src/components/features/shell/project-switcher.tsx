@@ -299,17 +299,27 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
   };
 
   /**
-   * ⌘1…⌘9 open a project, in the menu's order.
+   * ⌥⌘1…⌥⌘9 open a project, in the menu's order, and ⌘O opens this menu to
+   * pick one by name. ⌘1…⌘9 are the session tabs' (FE-144).
    *
    * The menu does not print them beside each row, as the list reads cleaner
    * without, but the keys work for whoever knows them.
+   *
+   * NOTE: The digit by `code`, not `key`: with ⌥ held, macOS types "¡", "™"…
    */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (!event.metaKey && !event.ctrlKey) return;
-      const at = Number(event.key) - 1;
-      if (!Number.isInteger(at) || at < 0 || at > 8) return;
-      const project = menuOrder[at];
+      if (!event.altKey && !event.shiftKey && event.key.toLowerCase() === "o") {
+        event.preventDefault();
+        setOpen(true);
+        return;
+      }
+      if (!event.altKey || event.shiftKey) return;
+      const digit = /^Digit([1-9])$/.exec(event.code);
+      if (!digit) return;
+      const project = menuOrder[Number(digit[1]) - 1];
       if (!project) return;
       event.preventDefault();
       go(project.slug);
@@ -333,16 +343,16 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
             role="option"
             aria-selected={project.slug === active?.slug}
             onClick={() => go(project.slug)}
-            className={`${RAIL_ROW} relative aria-selected:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] flex h-7 shrink-0 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none`}
+            className={`${RAIL_ROW} relative aria-selected:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] flex h-6.5 shrink-0 items-center gap-2 rounded-md px-1.5 text-left text-[13px] focus:outline-none`}
           />
         }
       >
         <ProjectTile
           project={project}
-          className="size-5 rounded-[5px] text-[10px]"
+          className="size-4.5 rounded-[5px] text-[9.5px]"
         />
         <span className="truncate">{label}</span>
-        {isLocalProject(project) && <LocalBadge />}
+        {isLocalProject(project) && <LocalBadge className="h-4.5 px-1.5" />}
         <RunningAgents agents={runningIn(project)} />
       </ContextMenuTrigger>
       {/* The two everyday edits from Settings → Projects,
@@ -429,10 +439,10 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
           initialFocus={reordering ? undefined : search}
           // A set width: as wide as its rows, it would narrow with every
           // letter typed.
-          className="w-72 p-1"
+          className="w-64 p-1"
         >
           {reordering && (
-            <div className="border-foreground/10 mb-1 flex h-8 shrink-0 items-center gap-2 border-b px-2 pb-1">
+            <div className="mb-1 flex h-7 shrink-0 items-center gap-2 px-1.5">
               <span className="text-muted-foreground min-w-0 flex-1 truncate text-[12px]">
                 Drag to reorder
               </span>
@@ -454,7 +464,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
             </p>
           )}
           {!reordering && projects.length > 0 && (
-            <div className="border-foreground/10 mb-1 flex h-8 shrink-0 items-center gap-2 border-b px-2 pb-1">
+            <div className="mb-1 flex h-7 shrink-0 items-center gap-2 px-1.5">
               <HugeiconsIcon
                 icon={Search01Icon}
                 className="text-muted-foreground size-3.5 shrink-0"
@@ -497,7 +507,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                 ref={list}
                 role="listbox"
                 aria-label="Projects"
-                className="flex flex-col gap-0.5"
+                className="flex flex-col gap-px"
                 onKeyDown={(event) => {
                   // ↑ ↓ walk the rows; ↑ from the first returns to the search.
                   if (event.key !== "ArrowDown" && event.key !== "ArrowUp")
@@ -548,7 +558,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                   return (
                     <div
                       key={`ns:${entry.namespace}`}
-                      className="flex flex-col gap-0.5"
+                      className="flex flex-col gap-px"
                     >
                       <button
                         type="button"
@@ -569,36 +579,38 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                         }}
                         // Folded over the open project, the header stands in for
                         // its row and is lit the way that row would be.
-                        className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] flex h-7 shrink-0 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none ${!expanded && holdsActive ? "bg-foreground/[0.08]" : ""}`}
+                        className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] flex h-6.5 shrink-0 items-center gap-2 rounded-md px-1.5 text-left text-[13px] focus:outline-none ${!expanded && holdsActive ? "bg-foreground/[0.08]" : ""}`}
                       >
-                        <span className="grid size-5 shrink-0 place-items-center">
+                        <span className="grid size-4.5 shrink-0 place-items-center">
                           <HugeiconsIcon
                             icon={ArrowRight01Icon}
-                            className={`text-muted-foreground size-3.5 transition-transform duration-150 motion-reduce:transition-none ${expanded ? "rotate-90" : ""}`}
+                            className={`text-muted-foreground size-3.25 transition-transform duration-150 motion-reduce:transition-none ${expanded ? "rotate-90" : ""}`}
                             strokeWidth={2}
                             aria-hidden="true"
                           />
                         </span>
                         <span className="truncate">{entry.namespace}</span>
+                        {/* Folded, its projects' agents still show, and the
+                            count closes the row at its right edge: work going
+                            on is not hidden by a fold. */}
                         {!expanded && (
-                          <span className="text-muted-foreground shrink-0 text-[12px] tabular-nums">
-                            {entry.projects.length}
+                          <span className="ml-auto flex shrink-0 items-center gap-2">
+                            <RunningAgents
+                              agents={entry.projects.flatMap(runningIn)}
+                            />
+                            <span className="text-foreground/75 bg-foreground/[0.08] dark:bg-foreground/[0.12] grid h-4.5 min-w-4.5 place-items-center rounded-full px-1.5 text-[10.5px] leading-none font-medium tabular-nums">
+                              {entry.projects.length}
+                            </span>
                           </span>
-                        )}
-                        {/* Folded, its projects' agents still show here:
-                            work going on is not hidden by a fold. */}
-                        {!expanded && (
-                          <RunningAgents
-                            agents={entry.projects.flatMap(runningIn)}
-                          />
                         )}
                       </button>
                       {expanded && (
-                        // The guide line runs down from the chevron, and the
-                        // indent puts the rows' tiles under the header's label.
+                        // The guide line runs down from the chevron's middle
+                        // (6px padding + half its 18px), and a short indent
+                        // keeps the rows close to the edge.
                         <fieldset
                           aria-label={entry.namespace}
-                          className="border-foreground/10 ml-[17px] flex min-w-0 flex-col gap-0.5 border-l pl-3"
+                          className="border-foreground/10 ml-[14.5px] flex min-w-0 flex-col gap-px border-l pl-1"
                         >
                           {entry.projects.map((project) =>
                             renderRow(
@@ -614,7 +626,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
               </div>
             </RailHover>
           )}
-          <RailHover className="border-foreground/10 mt-1 flex gap-0.5 border-t pt-1">
+          <RailHover className="mt-1 flex gap-px">
             {/* A row that opens a dialog, and the menu closes behind it. A
               project is named and pointed at its folders in one go, which
               neither fits nor belongs inside a menu people open to switch. */}
@@ -624,11 +636,11 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                 setOpen(false);
                 setCreating(true);
               }}
-              className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] flex h-7 min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none`}
+              className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] flex h-6.5 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left text-[13px] focus:outline-none`}
             >
               <HugeiconsIcon
                 icon={Add01Icon}
-                className="text-muted-foreground size-4 shrink-0 mx-0.5"
+                className="text-muted-foreground size-4 shrink-0 mx-px"
                 strokeWidth={1.8}
                 aria-hidden="true"
               />
@@ -643,11 +655,11 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                 setOpen(false);
                 void navigate({ to: "/settings/projects" });
               }}
-              className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] text-muted-foreground hover:text-foreground grid size-7 shrink-0 place-items-center rounded-md transition-colors duration-150 focus:outline-none`}
+              className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] text-muted-foreground hover:text-foreground grid size-6.5 shrink-0 place-items-center rounded-md transition-colors duration-150 focus:outline-none`}
             >
               <HugeiconsIcon
                 icon={Settings01Icon}
-                className="size-4"
+                className="size-3.5"
                 strokeWidth={1.8}
                 aria-hidden="true"
               />
@@ -672,11 +684,11 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                 setQuery("");
                 setReordering(true);
               }}
-              className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] text-muted-foreground hover:text-foreground aria-pressed:bg-foreground/[0.08] aria-pressed:text-foreground grid size-7 shrink-0 place-items-center rounded-md transition-colors duration-150 focus:outline-none disabled:opacity-40`}
+              className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] text-muted-foreground hover:text-foreground aria-pressed:bg-foreground/[0.08] aria-pressed:text-foreground grid size-6.5 shrink-0 place-items-center rounded-md transition-colors duration-150 focus:outline-none disabled:opacity-40`}
             >
               <HugeiconsIcon
                 icon={ListOrderedIcon}
-                className="size-4"
+                className="size-3.5"
                 strokeWidth={1.8}
                 aria-hidden="true"
               />
@@ -688,11 +700,11 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                     type="button"
                     aria-label="Sort projects"
                     title="Sort projects"
-                    className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] text-muted-foreground hover:text-foreground grid size-7 shrink-0 place-items-center rounded-md transition-colors duration-150 focus:outline-none`}
+                    className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] text-muted-foreground hover:text-foreground grid size-6.5 shrink-0 place-items-center rounded-md transition-colors duration-150 focus:outline-none`}
                   >
                     <HugeiconsIcon
                       icon={Sorting05Icon}
-                      className="size-4"
+                      className="size-3.5"
                       strokeWidth={1.8}
                       aria-hidden="true"
                     />

@@ -40,6 +40,7 @@ import { HistoryButtons } from "./history-nav";
 import { IslandHost } from "./island-host";
 import { McpAuthIsland } from "./mcp-auth-island";
 import { NotifyIsland } from "./notify-island";
+import { SessionTabs } from "./session-tabs";
 
 const RAIL_DEFAULT_PX = 240;
 /** The rail folded to its icons: one 36px slot and its margins. */
@@ -217,7 +218,7 @@ export function AppShell() {
   const setTerminalOpen = useTerminal((state) => state.setOpen);
   useTerminalSessions(projectKey);
 
-  // View › Toggle Terminal (⌘`, and ⌃`) and New Terminal (⌘T, and ⌃⇧`), from
+  // View › Toggle Terminal (⌘`, and ⌃`) and New Terminal (⌃⇧`), from
   // the app menu.
   useEffect(
     () =>
@@ -334,14 +335,19 @@ export function AppShell() {
     // scrolled the whole shell up out of sight. `relative` keeps such
     // strays inside the shell; `clip`, unlike `hidden`, is no scroll
     // container, so nothing can scroll the shell itself either.
-    <div className="bg-sidebar relative flex h-screen flex-col overflow-clip">
+    <div className="window-ground bg-sidebar relative flex h-screen flex-col overflow-clip">
       {/* The window's title bar across its whole width, open or folded: the
           window controls, back and forward over the rail, and the page's
           header (`<WindowTitlebar>`) beside them. The rail and the page's
           card start under it, so no header has to step around the controls.
           `app-titlebar` keeps its slot clear of back and forward too
           (app.css). */}
-      <WindowTitlebarHost className="app-titlebar" />
+      <WindowTitlebarHost
+        className="app-titlebar"
+        // The open sessions as tabs, first in the slot (FE-144); a page's
+        // own header follows them.
+        lead={<SessionTabs />}
+      />
       <ResizablePanelGroup
         className="h-auto min-h-0 flex-1"
         id="lanework:shell"
@@ -485,7 +491,7 @@ export function AppShell() {
           onClick={toggleRail}
           aria-label={railHidden ? "Show sidebar" : "Hide sidebar"}
           title={`${railHidden ? "Show" : "Hide"} sidebar (⌘B)`}
-          className="sidebar-toggle text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground size-6 place-items-center rounded-md transition-colors duration-150"
+          className="sidebar-toggle text-muted-foreground hover:bg-rail-hover hover:text-foreground size-6 place-items-center rounded-md transition-colors duration-150"
         >
           <HugeiconsIcon
             icon={SidebarLeftIcon}

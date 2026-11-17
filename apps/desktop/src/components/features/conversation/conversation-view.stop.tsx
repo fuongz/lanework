@@ -14,16 +14,17 @@ import { useChatEngines } from "#/stores/chat-engines";
 import { notify } from "#/stores/notify";
 
 /**
- * ⌘W (Ctrl+W elsewhere) in a chat: asks, then stops the session, as the
- * rail's Stop does.
+ * ⌘W (Ctrl+W elsewhere) in a chat closes its tab (FE-144). With the agent
+ * still alive it asks first, then stops the session as the rail's Stop does
+ * and closes the tab.
  *
  * - While a turn runs: the turn is cut off and the agent behind it ended
  *   (Claude's or Codex's process; OpenCode's session interrupted and its
  *   stream let go).
  * - While the agent is merely alive between turns: it is ended.
  * - Either way the transcript stays; the next message starts it again.
- * - With nothing alive the key does nothing: the menu leaves ⌘W unbound
- *   (`menu.ts`), so the window never closes from it either.
+ * - With nothing alive the tab closes at once. The menu leaves ⌘W unbound
+ *   (`menu.ts`), so the window never closes from it.
  * - The dialog closes by itself when the agent ends on its own meanwhile.
  *
  * @returns The dialog to draw.
@@ -33,7 +34,10 @@ export function useStopShortcut({
   project,
   id,
   running,
+  onClose,
 }: {
+  /** Closes the chat's tab. */
+  onClose: () => void;
   /** The agent's name, e.g. "OpenCode". */
   label: string;
   project: string | null;
@@ -62,13 +66,13 @@ export function useStopShortcut({
         return;
       if (event.key.toLowerCase() !== "w") return;
       event.preventDefault();
-      if (!live) return;
+      if (!live) return onClose();
       setWasRunning(running);
       setAsking(true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [live, running]);
+  }, [live, running, onClose]);
 
   // The agent ended by itself: nothing left to stop.
   useEffect(() => {
@@ -77,6 +81,7 @@ export function useStopShortcut({
 
   const stop = () => {
     setAsking(false);
+    onClose();
     if (!project) return;
     void window.desktop?.conversation
       .close(project, id)
@@ -94,7 +99,7 @@ export function useStopShortcut({
           A shortcut's answer should not wait on motion. */}
       <AlertDialogContent className="transition-none">
         <AlertDialogHeader>
-          <AlertDialogTitle>Stop this {label} session?</AlertDialogTitle>
+          <AlertDialogTitle>Stop {label} and close this tab?</AlertDialogTitle>
           <AlertDialogDescription>
             {wasRunning
               ? `${label} is still working on its reply. Stopping cuts the reply off and ends ${label} for this chat.`
@@ -111,7 +116,7 @@ export function useStopShortcut({
             className="border-0"
             onClick={stop}
           >
-            Stop
+            Stop and close
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

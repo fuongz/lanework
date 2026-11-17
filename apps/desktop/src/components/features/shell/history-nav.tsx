@@ -43,7 +43,7 @@ function useHistoryNav() {
 }
 
 const BUTTON =
-  "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground grid size-6 place-items-center rounded-md transition-colors duration-150 disabled:pointer-events-none disabled:opacity-40";
+  "text-muted-foreground hover:bg-rail-hover hover:text-foreground grid size-6 place-items-center rounded-md transition-colors duration-150 disabled:pointer-events-none disabled:opacity-40";
 
 export function HistoryButtons() {
   const { canBack, canForward, back, forward } = useHistoryNav();

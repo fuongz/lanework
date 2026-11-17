@@ -1,45 +1,11 @@
 // The window's title bar: one row across the whole window, the way Codex has
-// it. The window controls and the shell's own buttons sit on the left, and on
-// the right whatever the open page puts there through `<WindowTitlebar>`.
+// it. The window controls and the shell's own buttons sit on the left, then
+// the shell's `lead` (the session tabs, Settings' project picker).
 //
-// The slot is kept here, in a module, not in a context of the app shell: the
-// Settings shell hosts the same bar with no `AppShell` above it, and a page
-// must not care which of the two it was drawn under.
-import {
-  type CSSProperties,
-  type ReactNode,
-  useCallback,
-  useSyncExternalStore,
-} from "react";
-import { createPortal } from "react-dom";
+// A page's own header is no longer put in it: `<WindowTitlebar>` draws at the
+// top of the page's card (FE-144).
+import type { CSSProperties, ReactNode } from "react";
 import { cn } from "#/lib/utils";
-
-/**
- * The slot of the one host mounted now.
- *
- * NOTE: One host at a time. A second one mounting (a route swap between the
- * two shells) takes the slot over, and a host gives it up only if it still
- * holds it. So the leaving shell's unmount, which React may run after the
- * arriving shell's mount, never empties the new bar.
- */
-let current: HTMLElement | null = null;
-const listeners = new Set<() => void>();
-
-function setSlot(next: HTMLElement | null) {
-  if (current === next) return;
-  current = next;
-  for (const listener of listeners) listener();
-}
-
-function subscribe(listener: () => void) {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-}
-
-const getSlot = () => current;
-const getServerSlot = () => null;
 
 /**
  * The bar itself, for a shell to draw at the top of the window.
@@ -76,14 +42,6 @@ export function WindowTitlebarHost({
    */
   lead?: ReactNode;
 }) {
-  // React 19 runs the ref's cleanup on unmount, with the node it attached.
-  const slotRef = useCallback((node: HTMLDivElement | null) => {
-    if (!node) return;
-    setSlot(node);
-    return () => {
-      if (current === node) setSlot(null);
-    };
-  }, []);
   return (
     <div
       data-slot="window-titlebar"
@@ -91,9 +49,7 @@ export function WindowTitlebarHost({
       style={style}
     >
       {children}
-      <div ref={slotRef} className="window-titlebar-slot">
-        {lead}
-      </div>
+      <div className="window-titlebar-slot">{lead}</div>
     </div>
   );
 }
@@ -102,17 +58,20 @@ export function WindowTitlebarHost({
  * The page's name in the title bar: one size and weight on every page, so
  * moving between them never makes the title jump.
  */
-export const WINDOW_TITLE =
-  "min-w-0 truncate text-[15px] font-semibold tracking-tight";
+export const WINDOW_TITLE = "min-w-0 truncate text-[14px] font-semibold";
 
 /**
- * Put the page's header in the window's title bar.
+ * The page's header, at the top of its card (FE-144).
  *
- * The children are laid out as one flex row that fills the slot (centred
- * vertically, `gap-2`, `min-w-0` so a `truncate` title can shrink).
- * `className` adds to it, e.g. `justify-between` for a title on the left and
- * actions on the right. Nothing is drawn until a host has mounted, and a page
- * that renders none leaves the slot empty.
+ * It used to be portalled into the window's title bar; the title bar now
+ * holds the session tabs, and each page heads its own card. One row: centred
+ * vertically, `gap-2`, `min-w-0` so a `truncate` title can shrink, the same
+ * 48px height and 20px inset on every page. `className` adds to it, e.g.
+ * `justify-between` for a title on the left and actions on the right.
+ *
+ * NOTE: The name is kept so the pages did not have to change; it draws in
+ * place, where the page puts it, so it must sit in a column (a page's
+ * `flex-col` root) to read as a header.
  */
 export function WindowTitlebar({
   children,
@@ -121,14 +80,15 @@ export function WindowTitlebar({
   children: ReactNode;
   className?: string;
 }) {
-  const slot = useSyncExternalStore(subscribe, getSlot, getServerSlot);
-  if (!slot) return null;
-  return createPortal(
+  return (
     <div
-      className={cn("flex h-full min-w-0 flex-1 items-center gap-2", className)}
+      data-slot="page-header"
+      className={cn(
+        "flex h-12 min-w-0 shrink-0 items-center gap-2 px-5",
+        className,
+      )}
     >
       {children}
-    </div>,
-    slot,
+    </div>
   );
 }

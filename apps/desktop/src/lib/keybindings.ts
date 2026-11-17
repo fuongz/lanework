@@ -35,9 +35,51 @@ export const KEYBINDINGS: Keybinding[] = [
   },
   {
     command: "App: Open Project 1–9",
-    keys: ["⌘1…⌘9"],
+    keys: ["⌥⌘1…⌥⌘9"],
     when: "Always",
     where: "project-switcher.tsx",
+  },
+  {
+    command: "App: Switch Project",
+    keys: ["⌘O"],
+    when: "Always",
+    where: "project-switcher.tsx",
+  },
+  {
+    command: "Tabs: Go to Tab 1–8",
+    keys: ["⌘1…⌘8"],
+    when: "In a project",
+    where: "session-tabs.tsx",
+  },
+  {
+    command: "Tabs: Go to Last Tab",
+    keys: ["⌘9"],
+    when: "In a project",
+    where: "session-tabs.tsx",
+  },
+  {
+    command: "Tabs: Next Tab",
+    keys: ["⌃⇥", "⇧⌘]"],
+    when: "In a project",
+    where: "session-tabs.tsx",
+  },
+  {
+    command: "Tabs: Previous Tab",
+    keys: ["⌃⇧⇥", "⇧⌘["],
+    when: "In a project",
+    where: "session-tabs.tsx",
+  },
+  {
+    command: "Tabs: New Tab",
+    keys: ["⌘T"],
+    when: "In a project",
+    where: "session-tabs.tsx",
+  },
+  {
+    command: "Tabs: Close Tab",
+    keys: ["⌘W"],
+    when: "In a chat (asks first while its agent runs)",
+    where: "conversation-view.stop.tsx",
   },
   {
     command: "App: Hide Lanework",
@@ -170,7 +212,7 @@ export const KEYBINDINGS: Keybinding[] = [
   },
   {
     command: "Terminal: New Terminal",
-    keys: ["⌘T", "⌃⇧`"],
+    keys: ["⌃⇧`"],
     when: "Always",
     where: "electron/main/menu.ts",
   },

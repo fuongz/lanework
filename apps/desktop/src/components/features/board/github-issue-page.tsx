@@ -22,7 +22,7 @@ export function GitHubIssuePage() {
   const filters = parseIssueSearch(useSearch({ from: "/_app/w/$slug/issues" }));
   const active = useBoard((state) => state.active);
   return (
-    <>
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col">
       <WindowTitlebar className="gap-1">
         <Link
           to="/w/$slug/issues"
@@ -42,6 +42,6 @@ export function GitHubIssuePage() {
         slug={slug}
         number={Number(number)}
       />
-    </>
+    </section>
   );
 }

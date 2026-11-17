@@ -107,10 +107,10 @@ export function QuickOpen({ paths }: { paths: string[] }) {
                   setQuery("");
                 }}
               >
-                <FileTypeIcon path={path} className="size-3.5 shrink-0" />
+                <FileTypeIcon path={path} className="size-4 shrink-0" />
                 <span className="shrink-0">{path.slice(cut + 1)}</span>
                 {cut > 0 && (
-                  <span className="text-muted-foreground min-w-0 truncate text-xs">
+                  <span className="text-muted-foreground min-w-0 truncate text-[12.5px]">
                     {path.slice(0, cut)}
                   </span>
                 )}

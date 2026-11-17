@@ -22,23 +22,25 @@ import { useBoard } from "#/stores/board";
 export function IssuesEmpty() {
   const active = useBoard((state) => state.active);
   return (
-    <div className="flex min-w-0 flex-1 items-center justify-center">
-      {/* The screen's name in the title bar only while no issue is open: the
-          bar holds one header, and an issue puts its own breadcrumb there. */}
+    <div className="flex min-w-0 flex-1 flex-col">
+      {/* The pane's header while nothing is open; an open one draws its
+          own in its place. The empty state is centred under it. */}
       <WindowTitlebar>
         <h1 className={WINDOW_TITLE}>{active?.name ?? "Issues"}</h1>
       </WindowTitlebar>
-      <Empty className="py-16">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <HugeiconsIcon icon={ListViewIcon} strokeWidth={1.8} />
-          </EmptyMedia>
-          <EmptyTitle>No issue selected</EmptyTitle>
-          <EmptyDescription>
-            Pick an issue from the list, or press J and K to move through it.
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <div className="flex min-h-0 flex-1 items-center justify-center">
+        <Empty className="py-16">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <HugeiconsIcon icon={ListViewIcon} strokeWidth={1.8} />
+            </EmptyMedia>
+            <EmptyTitle>No issue selected</EmptyTitle>
+            <EmptyDescription>
+              Pick an issue from the list, or press J and K to move through it.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      </div>
     </div>
   );
 }

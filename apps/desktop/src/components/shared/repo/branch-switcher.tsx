@@ -98,9 +98,7 @@ export function BranchSwitcher({
                 strokeWidth={1.8}
                 aria-hidden="true"
               />
-              <span className="min-w-0 truncate font-mono text-[0.92em]">
-                {label}
-              </span>
+              <span className="min-w-0 truncate">{label}</span>
               <HugeiconsIcon
                 icon={ArrowDown01Icon}
                 className="size-3.5 shrink-0 opacity-60"
@@ -123,9 +121,7 @@ export function BranchSwitcher({
                 strokeWidth={1.8}
                 aria-hidden="true"
               />
-              <span className="min-w-0 truncate font-mono text-[0.92em]">
-                {label}
-              </span>
+              <span className="min-w-0 truncate">{label}</span>
               <HugeiconsIcon
                 icon={ArrowDown01Icon}
                 strokeWidth={1.8}

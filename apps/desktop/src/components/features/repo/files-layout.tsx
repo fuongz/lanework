@@ -1,19 +1,11 @@
-import { RefreshIcon, Search01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { SplitSkeleton } from "#/components/shared/loading/skeletons";
-import {
-  WINDOW_TITLE,
-  WindowTitlebar,
-} from "#/components/shared/navigation/window-titlebar";
 import {
   HeldReadAction,
   RepoEmpty,
   RepoMessage,
 } from "#/components/shared/repo/repo-empty";
-import { Button } from "#/components/ui/button";
-import { Kbd } from "#/components/ui/kbd";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -146,44 +138,6 @@ export function FilesLayout() {
     void readFolders();
   };
 
-  // Drawn in every state, so the screen keeps its name while the repository
-  // is read, and when the folder is not one.
-  const title = (
-    <WindowTitlebar>
-      <h1 className={WINDOW_TITLE}>Files</h1>
-      <span className="ml-auto" />
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={!base}
-        onClick={() => setQuickOpen(true)}
-      >
-        <HugeiconsIcon
-          icon={Search01Icon}
-          strokeWidth={1.8}
-          aria-hidden="true"
-        />
-        Go to File
-        <Kbd>⌘P</Kbd>
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Refresh files"
-        title="Refresh"
-        disabled={loading}
-        onClick={refreshAll}
-      >
-        <HugeiconsIcon
-          icon={RefreshIcon}
-          strokeWidth={1.8}
-          aria-hidden="true"
-          className={loading ? "animate-spin" : undefined}
-        />
-      </Button>
-    </WindowTitlebar>
-  );
-
   const switcher =
     folders && folders.length > 1 ? (
       <FolderSwitcher folders={folders} index={folder} onChange={pick} />
@@ -195,110 +149,114 @@ export function FilesLayout() {
 
   if (!state)
     return (
-      <>
-        {title}
-        {lone}
-        {readError ? (
-          <RepoMessage
-            title="The repository could not be read"
-            description={readError}
-          >
-            <HeldReadAction
-              message={readError}
-              onRetry={async (refusal) => {
-                if (refusal === "refused") await askAgain(slug, folder);
-                refreshAll();
-              }}
-            />
-          </RepoMessage>
-        ) : (
-          <SplitSkeleton label="Reading the repository" />
-        )}
-      </>
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col">
+          {lone}
+          {readError ? (
+            <RepoMessage
+              title="The repository could not be read"
+              description={readError}
+            >
+              <HeldReadAction
+                message={readError}
+                onRetry={async (refusal) => {
+                  if (refusal === "refused") await askAgain(slug, folder);
+                  refreshAll();
+                }}
+              />
+            </RepoMessage>
+          ) : (
+            <SplitSkeleton label="Reading the repository" />
+          )}
+        </div>
+      </div>
     );
   if (state.kind !== "ready")
     return (
-      <>
-        {title}
-        {lone}
-        <RepoEmpty
-          state={state}
-          init={{
-            busy: initializing !== null,
-            error: initError?.folder === folder ? initError.message : null,
-            onInit: () => {
-              void initRepo(slug, folder).then((made) => {
-                // The primary's tree opens by itself once its status is
-                // ready (the effect above); another folder is read here.
-                if (made && folder > 0) void refresh();
-              });
-            },
-          }}
-        />
-      </>
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col">
+          {lone}
+          <RepoEmpty
+            state={state}
+            init={{
+              busy: initializing !== null,
+              error: initError?.folder === folder ? initError.message : null,
+              onInit: () => {
+                void initRepo(slug, folder).then((made) => {
+                  // The primary's tree opens by itself once its status is
+                  // ready (the effect above); another folder is read here.
+                  if (made && folder > 0) void refresh();
+                });
+              },
+            }}
+          />
+        </div>
+      </div>
     );
   if (!base)
     return (
-      <>
-        {title}
-        {lone}
-        {error ? (
-          <RepoMessage
-            title="The folder could not be read"
-            description={error}
-          />
-        ) : (
-          <SplitSkeleton label="Reading the files" />
-        )}
-      </>
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col">
+          {lone}
+          {error ? (
+            <RepoMessage
+              title="The folder could not be read"
+              description={error}
+            />
+          ) : (
+            <SplitSkeleton label="Reading the files" />
+          )}
+        </div>
+      </div>
     );
 
   return (
-    <>
-      {title}
-      <ResizablePanelGroup
-        id="lanework:files"
-        defaultLayout={defaultLayout}
-        onLayoutChanged={onLayoutChanged}
-      >
-        <ResizablePanel
-          id="tree"
-          defaultSize="280px"
-          minSize="15%"
-          maxSize="45%"
-          groupResizeBehavior="preserve-pixel-size"
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <ResizablePanelGroup
+          id="lanework:files"
+          defaultLayout={defaultLayout}
+          onLayoutChanged={onLayoutChanged}
         >
-          <aside
-            aria-label="Files"
-            className="bg-sidebar flex h-full min-h-0 flex-col"
+          <ResizablePanel
+            id="tree"
+            defaultSize="280px"
+            minSize="15%"
+            maxSize="45%"
+            groupResizeBehavior="preserve-pixel-size"
           >
-            {switcher}
-            {/* NOTE: Keyed by project and folder. The model's expansion and
+            <aside
+              aria-label="Files"
+              className="bg-sidebar flex h-full min-h-0 flex-col"
+            >
+              {switcher}
+              {/* NOTE: Keyed by project and folder. The model's expansion and
                 selection are about one repository's paths, never another's. */}
-            <FilesTree
-              key={`${slug}#${folder}`}
-              memoryKey={`${slug}#${folder}`}
-              base={base}
-              loaded={loaded}
-              changes={state.files}
-              onRefresh={refreshAll}
-              refreshing={loading}
-            />
-          </aside>
-        </ResizablePanel>
-        <ResizableHandle aria-label="Resize file tree" />
-        <ResizablePanel id="file" minSize="40%">
-          <div className="flex h-full min-h-0 flex-col">
-            <FileTabs changes={state.files} />
-            <FileView
-              slug={slug}
-              changes={state.files}
-              changesLink={folder === 0}
-            />
-          </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
-      <QuickOpen paths={base.paths} />
-    </>
+              <FilesTree
+                key={`${slug}#${folder}`}
+                memoryKey={`${slug}#${folder}`}
+                base={base}
+                loaded={loaded}
+                changes={state.files}
+                onRefresh={refreshAll}
+                refreshing={loading}
+              />
+            </aside>
+          </ResizablePanel>
+          <ResizableHandle aria-label="Resize file tree" />
+          <ResizablePanel id="file" minSize="40%">
+            <div className="flex h-full min-h-0 flex-col">
+              <FileTabs changes={state.files} />
+              <FileView
+                slug={slug}
+                changes={state.files}
+                changesLink={folder === 0}
+              />
+            </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+        <QuickOpen paths={base.paths} />
+      </div>
+    </div>
   );
 }

@@ -85,7 +85,7 @@ export function AgentSessionsMini({
             aria-label={label}
             aria-current={current ? "page" : undefined}
             aria-busy={state === "working" || undefined}
-            className="text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] aria-[current]:bg-foreground/[0.08] aria-[current]:text-foreground relative grid size-9 shrink-0 place-items-center rounded-lg transition-colors duration-150"
+            className="text-muted-foreground hover:text-foreground hover:bg-rail-hover aria-[current]:bg-rail-active aria-[current]:text-foreground relative grid size-9 shrink-0 place-items-center rounded-lg transition-colors duration-150"
           />
         }
       >

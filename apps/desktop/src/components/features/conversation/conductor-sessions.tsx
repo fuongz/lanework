@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import type { AgentSession, TerminalAgent } from "#/../shared/terminal";
@@ -41,16 +42,16 @@ import {
 /** Stable empty list: a selector that allocates one re-renders forever. */
 const NONE: AgentSession[] = [];
 
-/** The panel's width, px: the size of the popover it replaced. */
-export const SESSIONS_PANEL_PX = 320;
-const PANEL_PX = SESSIONS_PANEL_PX;
+/** The dropdown's width, px. */
+const PANEL_PX = 272;
+/** How long it takes to open, ms; it closes at once. */
+const GLIDE_MS = 140;
 /**
- * The strip left free at the window's edge, px: the chat's contents rail
- * (`right-4`, `w-7`) and its scrollbar stay there, beside the panel.
+ * What a press may land on without closing the dropdown: a menu, dialog,
+ * popover or tooltip it opened, all drawn in a portal outside it.
  */
-export const SESSIONS_PANEL_GUTTER = 48;
-/** As long as the rail's glide (`RAIL_GLIDE_MS`, app-shell.tsx). */
-const GLIDE_MS = 240;
+const LAYERED =
+  '[role="menu"], [role="dialog"], [role="alertdialog"], [role="listbox"], [data-slot="popover-content"], [data-slot="tooltip-content"]';
 
 /**
  * Which chats had the panel open, and which session's details it showed,
@@ -175,11 +176,11 @@ export function ConductorSessionsToggle({
 }
 
 /**
- * The Sessions panel, docked on the right of `conductor`'s chat.
+ * The Sessions dropdown (FE-128): a card hung under its toggle at the top
+ * right of the chat, over it rather than beside it. A press anywhere else, or
+ * Escape, closes it; its toggle opens and closes it.
  *
- * It glides open and shut the way the rail does: its width moves, its
- * content stays at full width and is clipped, so nothing re-wraps on the
- * way. Shut, it is unmounted once the glide is over.
+ * It grows from the toggle's corner. Shut, it is unmounted once that is over.
  */
 export function ConductorSessionsPanel({
   project,
@@ -187,6 +188,7 @@ export function ConductorSessionsPanel({
   conductor,
   chat,
   open,
+  onOpenChange,
   self,
   runs,
 }: {
@@ -196,13 +198,15 @@ export function ConductorSessionsPanel({
   conductor: string | null;
   chat: string;
   open: boolean;
+  onOpenChange: (open: boolean) => void;
   /** The conductor's own conversation, counted in the overview. */
   self: ConductorSelf | null;
   /** The runs it led, drawn between the overview and the sessions. */
   runs?: ReactNode;
 }) {
-  // Still drawn while it glides shut.
+  // Still drawn while it closes.
   const [present, setPresent] = useState(open);
+  const panel = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (open) {
       setPresent(true);
@@ -212,22 +216,48 @@ export function ConductorSessionsPanel({
     return () => window.clearTimeout(timer);
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (!target?.closest) return;
+      if (panel.current?.contains(target)) return;
+      // Its toggle flips it by itself; closing here too would reopen it.
+      if (target.closest(`[aria-controls="${CSS.escape(panelId(chat))}"]`))
+        return;
+      if (target.closest(LAYERED)) return;
+      onOpenChange(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      // A menu or dialog of its own takes Escape first.
+      const active = document.activeElement;
+      if (active?.closest?.(LAYERED)) return;
+      onOpenChange(false);
+    };
+    document.addEventListener("pointerdown", onPointer, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open, chat, onOpenChange]);
+
   return (
     <div
+      ref={panel}
       id={panelId(chat)}
       inert={!open}
-      style={{ width: PANEL_PX, right: SESSIONS_PANEL_GUTTER }}
-      // NOTE: Over the chat rather than beside it: the chat keeps its width
-      // and pads its content clear (`--side-panel`), so its contents rail
-      // and scrollbar stay at the window's edge, in the gutter on the
-      // panel's right.
-      // It glides in by `transform` and `opacity` at a fixed width: growing
-      // its width re-laid out the panel, and the chat beside it, every frame.
+      style={{ width: PANEL_PX }}
+      // Under the title bar's toggle, its right edge on the toggle's.
       className={cn(
-        "bg-background absolute inset-y-0 z-20 overflow-hidden transition-[transform,opacity] duration-[240ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
+        "bg-popover border-border absolute top-1.5 right-3 z-30 flex max-h-[min(78vh,calc(100%-1rem))] origin-top-right flex-col overflow-hidden rounded-2xl border shadow-[0_8px_24px_-8px_rgb(0_0_0/0.14)]",
+        // Opens as every menu does (`.menu-pop`, app.css): out of its toggle
+        // in 140ms. Shut, it goes at once, with no transition to run.
         open
-          ? "translate-x-0 opacity-100"
-          : "pointer-events-none translate-x-4 opacity-0",
+          ? "translate-y-0 scale-100 opacity-100 transition-[transform,opacity] duration-[140ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
+          : "pointer-events-none -translate-y-1 scale-[0.97] opacity-0",
+        !open && !present && "hidden",
       )}
     >
       {(open || present) && (
@@ -303,10 +333,9 @@ function SessionsList({
     return (
       <aside
         aria-label={`Session: ${shown.session.title || "Session"}`}
-        style={{ width: PANEL_PX }}
-        className="flex h-full min-h-0 flex-col"
+        className="flex min-h-0 flex-col"
       >
-        <div className="shrink-0 px-2 pt-2 pb-1">
+        <div className="border-border shrink-0 border-b px-2 pt-2 pb-1">
           <SessionHeader
             session={shown.session}
             activity={shown.activity}
@@ -315,7 +344,7 @@ function SessionsList({
             onBack={() => select(null)}
           />
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-1 pb-3">
+        <div className="min-h-0 overflow-y-auto">
           <PanelCard>
             <SessionDetails
               key={shown.session.id}
@@ -333,10 +362,9 @@ function SessionsList({
   return (
     <aside
       aria-label="The conductor's work and its sessions"
-      style={{ width: PANEL_PX }}
-      className="flex h-full min-h-0 flex-col"
+      className="flex min-h-0 flex-col"
     >
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-2 pb-3">
+      <div className="min-h-0 overflow-y-auto">
         {/* One card: where and what (the overview), the runs, the
             sessions, a hairline between. A block with nothing to show draws
             nothing, and takes its line with it. */}

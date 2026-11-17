@@ -40,7 +40,7 @@ import {
 
 /** The header's icon buttons, as Search's and New conversation's. */
 const ICON_BUTTON =
-  "hover:bg-foreground/[0.06] text-muted-foreground hover:text-foreground flex size-5 items-center justify-center rounded-md transition-colors disabled:opacity-50";
+  "hover:bg-rail-hover text-muted-foreground hover:text-foreground flex size-5 items-center justify-center rounded-md transition-colors disabled:opacity-50";
 
 const LIST = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
 
@@ -146,7 +146,7 @@ export function PullProgress({ pull }: { pull: SessionsPull }) {
         type="button"
         disabled={pull.cancelling}
         onClick={pull.cancel}
-        className="hover:bg-foreground/[0.06] text-muted-foreground hover:text-foreground h-5 shrink-0 rounded-md px-1.5 text-[11px] transition-colors disabled:opacity-50"
+        className="hover:bg-rail-hover text-muted-foreground hover:text-foreground h-5 shrink-0 rounded-md px-1.5 text-[11px] transition-colors disabled:opacity-50"
       >
         Cancel
       </button>

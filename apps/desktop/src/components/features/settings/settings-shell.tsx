@@ -46,7 +46,7 @@ export function SettingsShell({ children }: { children: ReactNode }) {
     // when the app shell went away.
     // NOTE: `relative overflow-clip`, as the app shell's (app-shell.tsx):
     // a switch's hidden input deep in a long page must not grow the document.
-    <div className="bg-sidebar relative flex h-screen flex-col overflow-clip">
+    <div className="window-ground bg-sidebar relative flex h-screen flex-col overflow-clip">
       <WindowTitlebarHost
         className="settings-titlebar"
         style={{ "--titlebar-split": "15rem" } as CSSProperties}
@@ -58,7 +58,7 @@ export function SettingsShell({ children }: { children: ReactNode }) {
         <aside className="settings-sidebar flex w-60 shrink-0 flex-col overflow-y-auto px-2.5">
           <Link
             to="/"
-            className="hover:bg-foreground/[0.04] mt-2 flex h-[30px] shrink-0 items-center gap-2.5 rounded-md px-2 text-[13px] transition-[background-color,scale] duration-150 ease-out active:scale-[0.98]"
+            className="hover:bg-rail-hover mt-2 flex h-[30px] shrink-0 items-center gap-2.5 rounded-md px-2 text-[13px] transition-[background-color,scale] duration-150 ease-out active:scale-[0.98]"
           >
             <HugeiconsIcon
               icon={ArrowLeft02Icon}

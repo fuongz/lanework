@@ -48,10 +48,10 @@ import { useUnseenPulls } from "./use-unseen-pulls";
 const ROW = `${RAIL_ROW} group relative flex h-[30px] items-center gap-2.5 rounded-md px-2 text-[13px] transition-[background-color,scale] duration-150 ease-out active:scale-[0.98]`;
 
 /** A row outside the scroll area (Settings), which lights on its own. */
-const LONE_ROW = `${ROW} [&:not([aria-current])]:hover:bg-foreground/[0.04]`;
+const LONE_ROW = `${ROW} [&:not([aria-current])]:hover:bg-rail-hover`;
 
 const ACTIVE = {
-  className: "bg-foreground/[0.08]",
+  className: "bg-rail-active",
   "aria-current": "page" as const,
 };
 
@@ -308,7 +308,7 @@ export function AppSidebar({
           title="Search — ⌘K"
           // A size container, so the ⌘K hint steps aside before the label
           // has to at the rail's narrowest.
-          className="hover:bg-foreground/[0.06] bg-foreground/[0.035] text-muted-foreground @container flex h-[30px] w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-[13px] transition-colors duration-150"
+          className="hover:bg-rail-hover bg-foreground/[0.035] text-muted-foreground @container flex h-[30px] w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-[13px] transition-colors duration-150"
         >
           <HugeiconsIcon
             icon={Search01Icon}

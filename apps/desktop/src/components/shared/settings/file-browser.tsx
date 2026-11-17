@@ -97,13 +97,15 @@ export function FileBrowserLayout({
     "file",
   ]);
   return (
-    <>
+    // A column: the header on top, the panels in the rest of the card.
+    <div className="flex h-full min-h-0 flex-col">
       <WindowTitlebar>
         {heading ?? <h1 className={WINDOW_TITLE}>{title}</h1>}
         <span className="ml-auto" />
         {actions}
       </WindowTitlebar>
       <ResizablePanelGroup
+        className="h-auto min-h-0 flex-1"
         id={id}
         defaultLayout={defaultLayout}
         onLayoutChanged={onLayoutChanged}
@@ -127,7 +129,7 @@ export function FileBrowserLayout({
           <div className="flex h-full min-h-0 flex-col">{children}</div>
         </ResizablePanel>
       </ResizablePanelGroup>
-    </>
+    </div>
   );
 }
 

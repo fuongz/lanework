@@ -172,7 +172,7 @@ export function TerminalPanel({
                 <TerminalKindIcon kind={kind} className="size-4 shrink-0" />
                 {TERMINAL_KIND_LABELS[kind]}
                 {kind === "shell" && (
-                  <DropdownMenuShortcut>⌘T</DropdownMenuShortcut>
+                  <DropdownMenuShortcut>⌃⇧`</DropdownMenuShortcut>
                 )}
               </DropdownMenuItem>
             ))}

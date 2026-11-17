@@ -4,12 +4,12 @@ import {
   ArrowLeft01Icon,
   Flowchart01Icon,
   MessageMultiple01Icon,
+  MoreHorizontalIcon,
   SecurityCheckIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import {
-  type CSSProperties,
   Fragment,
   useCallback,
   useEffect,
@@ -36,6 +36,7 @@ import { canLead } from "#/../shared/orchestration";
 import type { AgentSession } from "#/../shared/terminal";
 import { PermissionStack } from "#/components/features/conversation/permission-stack";
 import { ContextButton } from "#/components/shared/agents/conversation-facts";
+import { RenameAgentDialog } from "#/components/shared/agents/rename-agent-dialog";
 import { useConversationFacts } from "#/components/shared/agents/use-agent-facts";
 import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
 import { setChatAgent } from "#/components/shared/conversation/chat-agent";
@@ -53,16 +54,19 @@ import {
 } from "#/components/shared/conversation/turn-view";
 import { ConversationSkeleton } from "#/components/shared/loading/skeletons";
 import {
-  WINDOW_TITLE,
-  WindowTitlebar,
-} from "#/components/shared/navigation/window-titlebar";
-import {
   type TrustAsk,
   TrustDialog,
 } from "#/components/shared/settings/trust-dialog";
 import { useProjectTrust } from "#/components/shared/settings/use-project-trust";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import { Alert, AlertDescription } from "#/components/ui/alert";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "#/components/ui/dropdown-menu";
 import {
   Empty,
   EmptyDescription,
@@ -71,6 +75,7 @@ import {
   EmptyTitle,
 } from "#/components/ui/empty";
 import { TooltipProvider } from "#/components/ui/tooltip";
+import { useCloseSessionTab } from "#/hooks/use-close-session-tab";
 import { useOrchestrationRuns } from "#/hooks/use-orchestration-runs";
 import { readProjectRoots } from "#/hooks/use-project-folders";
 import { useProjectKey } from "#/hooks/use-project-key";
@@ -108,8 +113,6 @@ import {
   ConductorSessionsToggle,
   PanelGroup,
   PanelSection,
-  SESSIONS_PANEL_GUTTER,
-  SESSIONS_PANEL_PX,
   useSessionsPanel,
 } from "./conductor-sessions";
 import { useClearConversation } from "./conversation-view.clear";
@@ -129,7 +132,7 @@ const ROUTE = "/_app/w/$slug/agents/chat/$conversation" as const;
  * pixel, so it sits on the middle of the lower-case text it leads rather
  * than of the line box.
  */
-const TITLE_MARK = "flex h-5 shrink-0 translate-y-px items-center";
+const TITLE_MARK = "flex h-5 shrink-0 items-center";
 /** Stable empties: a memoized turn compares these by reference. */
 /** Closer than this to the end and the view sticks to it as text streams. */
 const BOTTOM_SLACK = 48;
@@ -233,6 +236,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   const facts = useConversationFacts(project, agent, id);
 
   const [settings, setSettings] = useState<ComposerSettings | null>(null);
+  const [renaming, setRenaming] = useState(false);
   // A conversation just started from the new page: its first message,
   // until the transcript has it.
   const {
@@ -736,7 +740,15 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       );
   };
   // ⌘W asks, then stops the session: the turn cut off, the agent ended.
-  const stopDialog = useStopShortcut({ label, project, id, running });
+  const closeTab = useCloseSessionTab(slug);
+  const closeThisTab = useCallback(() => closeTab(id), [closeTab, id]);
+  const stopDialog = useStopShortcut({
+    label,
+    project,
+    id,
+    running,
+    onClose: closeThisTab,
+  });
 
   /**
    * Takes queued messages out: dropped, or back to the composer.
@@ -868,7 +880,10 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
         aria-label={`${label} — ${title}`}
         className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
       >
-        <WindowTitlebar className="gap-2.5">
+        {/* The chat's own header, on the page's card rather than in the
+            window's title bar: its mark, its title and the Sessions toggle
+            belong to this chat, not to the window. */}
+        <header className="flex h-12 min-w-0 shrink-0 items-center gap-2.5 px-5">
           {/* A worker's way back to its lead's conversation: Back, its
               title only in the tooltip, so the worker's own name has the
               bar. */}
@@ -895,15 +910,32 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
               />
             </>
           )}
+          {/* A breadcrumb (FE-144): the tabs above say which session, this
+              says where it sits. A worker has Back to its lead instead. */}
+          {!asWorker && (
+            <>
+              {/* Where it sits in the rail: a conductor's own chat under
+                  Conductors, any other under Sessions. */}
+              <span className="text-muted-foreground shrink-0 text-[14px] leading-5">
+                {conductor ? "Conductors" : "Sessions"}
+              </span>
+              <span
+                aria-hidden="true"
+                className="text-muted-foreground/60 shrink-0 text-[14px] leading-5"
+              >
+                /
+              </span>
+            </>
+          )}
           {working ? (
             <span role="img" aria-label="Working" className={TITLE_MARK}>
-              <OrbitSpinner className="text-foreground size-[13px]" />
+              <OrbitSpinner className="text-foreground size-3.5" />
             </span>
           ) : conductor ? (
             <span className={TITLE_MARK}>
               <HugeiconsIcon
                 icon={leadIcon(conductor.icon)}
-                className="size-[13px]"
+                className="size-3.5"
                 strokeWidth={1.5}
                 aria-hidden="true"
               />
@@ -911,12 +943,15 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
           ) : (
             agent && (
               <span className={TITLE_MARK}>
-                <TerminalKindIcon kind={agent} className="size-[13px]" />
+                <TerminalKindIcon kind={agent} className="size-3.5" />
               </span>
             )
           )}
           <h1
-            className={cn(WINDOW_TITLE, "leading-5", working && "text-shimmer")}
+            className={cn(
+              "min-w-0 truncate text-[14px] leading-5 font-semibold",
+              working && "text-shimmer",
+            )}
             title={title}
           >
             {title}
@@ -933,35 +968,34 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
               onOpenChange={sessionsPanel.setOpen}
             />
           )}
-        </WindowTitlebar>
+          <SessionMenu
+            slug={slug}
+            id={id}
+            // Only where the session's name is the title: a conductor's chat
+            // shows the conductor's name and a worker's its task's, so a
+            // rename there would change nothing on screen.
+            onRename={
+              listed && project && !conductor && !asWorker
+                ? () => setRenaming(true)
+                : undefined
+            }
+          />
+        </header>
+        {project && (
+          <RenameAgentDialog
+            project={project}
+            session={renaming ? (listed ?? null) : null}
+            onClose={() => setRenaming(false)}
+          />
+        )}
 
-        <div
-          className="relative flex min-h-0 flex-1"
-          // How much of the right edge the Sessions panel covers: the chat
-          // keeps its full width and pads its content clear of it.
-          style={
-            {
-              "--side-panel":
-                // NOT `project && …`: the project is read after the first
-                // render, and the padding would then glide in on every
-                // visit to a chat whose panel was left open.
-                sessionsPanel.open
-                  ? `${SESSIONS_PANEL_PX + SESSIONS_PANEL_GUTTER}px`
-                  : "0px",
-            } as CSSProperties
-          }
-        >
+        <div className="relative flex min-h-0 flex-1">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <div className="relative min-h-0 flex-1">
               <div
                 ref={scroller}
                 onScroll={onScroll}
-                // NOTE: Padding, not a narrower box, clears the Sessions panel:
-                // the scrollbar stays at the window's edge instead of floating
-                // beside the panel.
-                // It changes at once, never animated: an animated padding
-                // re-wrapped the whole transcript on every frame.
-                className="h-full overflow-y-auto pr-[var(--side-panel,0px)] [overflow-anchor:none]"
+                className="h-full overflow-y-auto [overflow-anchor:none]"
               >
                 <div
                   ref={content}
@@ -1088,7 +1122,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                     atBottom.current = true;
                     toBottom(true);
                   }}
-                  className="bg-popover text-muted-foreground hover:text-foreground ring-foreground/10 absolute bottom-3 left-[calc((100%-var(--side-panel,0px))/2)] z-10 flex size-7 -translate-x-1/2 items-center justify-center rounded-full shadow-md ring-1 transition-colors"
+                  className="bg-popover text-muted-foreground hover:text-foreground ring-foreground/10 absolute bottom-3 left-1/2 z-10 flex size-7 -translate-x-1/2 items-center justify-center rounded-full shadow-md ring-1 transition-colors"
                 >
                   <HugeiconsIcon
                     icon={ArrowDown01Icon}
@@ -1099,8 +1133,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
               )}
             </div>
 
-            {/* Clear of the Sessions panel, which lies over the right edge. */}
-            <div className="pr-[var(--side-panel,0px)]">
+            <div>
               <div className="mx-auto flex w-full max-w-[940px] min-w-0 flex-col gap-1.5 px-8 pb-4">
                 {(actionError || engine.state === "error") && (
                   <p role="alert" className="text-destructive px-1 text-xs">
@@ -1246,6 +1279,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                 conductor={conductor?.id ?? null}
                 chat={sessionsChat}
                 open={sessionsPanel.open}
+                onOpenChange={sessionsPanel.setOpen}
                 self={conductorSelf}
                 runs={
                   conductor && (
@@ -1358,4 +1392,55 @@ function elapsed(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
+}
+
+/**
+ * The header's `…` menu (FE-144): rename the session, copy its id, close its
+ * tab. Rename is there once the session is listed (it has a name to change).
+ */
+function SessionMenu({
+  slug,
+  id,
+  onRename,
+}: {
+  slug: string;
+  id: string;
+  onRename?: () => void;
+}) {
+  const closeTab = useCloseSessionTab(slug);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <button
+            type="button"
+            aria-label="Session actions"
+            title="Session actions"
+            className="text-muted-foreground hover:bg-rail-hover hover:text-foreground aria-expanded:bg-rail-hover aria-expanded:text-foreground grid size-7 shrink-0 place-items-center rounded-md transition-colors"
+          >
+            <HugeiconsIcon
+              icon={MoreHorizontalIcon}
+              className="size-4"
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+          </button>
+        }
+      />
+      <DropdownMenuContent align="end" className="min-w-44">
+        {onRename && (
+          <DropdownMenuItem onClick={onRename}>Rename…</DropdownMenuItem>
+        )}
+        <DropdownMenuItem
+          onClick={() => void navigator.clipboard.writeText(id)}
+        >
+          Copy session id
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => closeTab(id)}>
+          Close tab
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
