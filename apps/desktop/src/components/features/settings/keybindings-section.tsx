@@ -29,11 +29,35 @@ import { useSettingsSearch } from "#/stores/settings-search";
  * Read-only: the keys are fixed where they are handled, and recording new
  * ones would need each handler to read its key from one place first.
  */
+/** "Tabs: New Tab" → "Tabs"; a command with no area is the App's. */
+const areaOf = (command: string) =>
+  command.includes(": ") ? command.slice(0, command.indexOf(": ")) : "App";
+/** "Tabs: New Tab" → "New Tab", the row's name under its area. */
+const actionOf = (command: string) =>
+  command.includes(": ") ? command.slice(command.indexOf(": ") + 2) : command;
+
+/** `bindings` by area, each area where its first shortcut was. */
+function groupsOf(
+  bindings: typeof KEYBINDINGS,
+): [string, typeof KEYBINDINGS][] {
+  const groups = new Map<string, typeof KEYBINDINGS>();
+  for (const binding of bindings) {
+    const area = areaOf(binding.command);
+    const list = groups.get(area);
+    if (list) list.push(binding);
+    else groups.set(area, [binding]);
+  }
+  return [...groups];
+}
+
+/** Lanework's own shortcuts: the system's (Copy, Zoom, Quit…) left out. */
+const OWN = KEYBINDINGS.filter((binding) => !binding.standard);
+
 export function KeybindingsSection() {
   const query = useSettingsSearch((state) => state.query);
   const [filter, setFilter] = useState("");
   // The sidebar's search and this page's own filter both narrow the list.
-  const shown = KEYBINDINGS.filter(
+  const shown = OWN.filter(
     (binding) =>
       matches(filter, binding.command, binding.keys.join(" "), binding.when) &&
       (matches(query, binding.command, binding.keys.join(" "), binding.when) ||
@@ -43,13 +67,13 @@ export function KeybindingsSection() {
   return (
     <SettingsPage
       title="Keybindings"
-      description="Every shortcut in the app."
+      description="Lanework's own shortcuts. The system's (Copy, Paste, Zoom, Quit…) and a form's usual keys (↩ or ⌘↩ to send, Esc to cancel, ⌘S to save) work as usual."
       sections={[
         {
           title: "Shortcuts",
           // Drawn below, on one row with the count and the filter.
           hideTitle: true,
-          keywords: `keybindings shortcuts keys hotkeys keyboard ${KEYBINDINGS.map(
+          keywords: `keybindings shortcuts keys hotkeys keyboard ${OWN.map(
             (binding) => `${binding.command} ${binding.keys.join(" ")}`,
           ).join(" ")}`,
           content: (
@@ -58,9 +82,9 @@ export function KeybindingsSection() {
                 <h2 className="text-[15px] font-medium">Shortcuts</h2>
                 <div className="flex items-center gap-3">
                   <span className="text-muted-foreground text-[13px] tabular-nums">
-                    {shown.length === KEYBINDINGS.length
-                      ? `${KEYBINDINGS.length} shortcuts`
-                      : `${shown.length} of ${KEYBINDINGS.length}`}
+                    {shown.length === OWN.length
+                      ? `${OWN.length} shortcuts`
+                      : `${shown.length} of ${OWN.length}`}
                   </span>
                   <InputGroup className="w-56">
                     <InputGroupAddon>
@@ -81,8 +105,8 @@ export function KeybindingsSection() {
                   </InputGroup>
                 </div>
               </div>
-              <SettingsCard className="overflow-hidden">
-                {shown.length === 0 ? (
+              {shown.length === 0 ? (
+                <SettingsCard className="overflow-hidden">
                   <Empty className="py-8">
                     <EmptyHeader>
                       <EmptyMedia variant="icon">
@@ -94,44 +118,51 @@ export function KeybindingsSection() {
                       </EmptyDescription>
                     </EmptyHeader>
                   </Empty>
-                ) : (
-                  <table className="w-full table-fixed text-left">
-                    <thead className="border-border border-b">
-                      <tr className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
-                        <th className="px-4 py-2.5 font-medium">Command</th>
-                        <th className="w-36 px-4 py-2.5 font-medium">
-                          Keybinding
-                        </th>
-                        <th className="w-48 px-4 py-2.5 font-medium">When</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-border divide-y">
-                      {shown.map((binding) => (
-                        <tr key={binding.command} title={binding.where}>
-                          <td className="truncate px-4 py-2.5 text-[13px]">
-                            {binding.command}
-                          </td>
-                          <td className="px-4 py-2.5">
-                            <span className="flex flex-wrap gap-1">
-                              {binding.keys.map((key) => (
-                                <Kbd
-                                  key={key}
-                                  className="h-6 min-w-6 px-1.5 font-mono text-[11px]"
-                                >
-                                  {key}
-                                </Kbd>
-                              ))}
-                            </span>
-                          </td>
-                          <td className="text-muted-foreground px-4 py-2.5 text-[13px] leading-snug">
-                            {binding.when}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </SettingsCard>
+                </SettingsCard>
+              ) : (
+                // One card per area (the part of a command before ":"),
+                // in the list's order: Tabs, Terminal, Composer…
+                groupsOf(shown).map(([area, bindings]) => (
+                  <section
+                    key={area}
+                    aria-label={area}
+                    className="mt-3 flex flex-col gap-2 first:mt-0"
+                  >
+                    <h3 className="text-muted-foreground px-1 text-[12px] font-medium">
+                      {area}
+                    </h3>
+                    <SettingsCard className="overflow-hidden">
+                      <table className="w-full table-fixed text-left">
+                        <tbody className="divide-border divide-y">
+                          {bindings.map((binding) => (
+                            <tr key={binding.command} title={binding.where}>
+                              <td className="truncate px-4 py-2.5 text-[13px]">
+                                {actionOf(binding.command)}
+                              </td>
+                              <td className="w-36 px-4 py-2.5">
+                                <span className="flex flex-wrap gap-1">
+                                  {binding.keys.map((key) => (
+                                    <Kbd
+                                      key={key}
+                                      // Sans, not mono: in a mono face ⌘O and ⌘0 look alike.
+                                      className="h-6 min-w-6 px-1.5 text-[11px]"
+                                    >
+                                      {key}
+                                    </Kbd>
+                                  ))}
+                                </span>
+                              </td>
+                              <td className="text-muted-foreground w-48 px-4 py-2.5 text-[13px] leading-snug">
+                                {binding.when}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </SettingsCard>
+                  </section>
+                ))
+              )}
             </div>
           ),
         },

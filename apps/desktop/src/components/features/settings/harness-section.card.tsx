@@ -1,11 +1,5 @@
-import {
-  ArrowDown01Icon,
-  ArrowRight01Icon,
-  Loading03Icon,
-  Tick02Icon,
-} from "@hugeicons/core-free-icons";
+import { Loading03Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useState } from "react";
 import { HarnessAccountRow } from "#/components/shared/agents/harness-account";
 import { HARNESS_NAMES } from "#/components/shared/agents/harness-island";
 import { TextSkeleton } from "#/components/shared/loading/skeletons";
@@ -43,9 +37,8 @@ const INSTALLED_WITH: Record<InstallMethod, string> = {
  * - The account: its organization, whether it is ready, the plan, and the
  *   email, blurred.
  * - Its usage limits.
- * - Its rows, drawn as {@link SettingsPage} draws a section's, folded under
- *   the usage by default: the version and the limits are what a glance is
- *   for, and the switches are set once.
+ * - Its rows, drawn as {@link SettingsPage} draws a section's, under the
+ *   usage: the card has the CLI's own page (FE-146), so nothing is folded.
  */
 export function HarnessCard({
   kind,
@@ -73,7 +66,6 @@ export function HarnessCard({
     info.latest !== null &&
     compareVersions(info.latest, info.version) > 0;
   const signedIn = !!account?.signedIn;
-  const [open, setOpen] = useState(false);
 
   return (
     <SettingsCard>
@@ -177,42 +169,25 @@ export function HarnessCard({
         />
       )}
       {usage && <UsageRow view={usage} now={now} />}
-      {rows.length > 0 && (
-        <button
-          type="button"
-          onClick={() => setOpen((value) => !value)}
-          aria-expanded={open}
-          className="text-muted-foreground hover:text-foreground flex w-full items-center gap-1.5 px-4 py-2.5 text-[13px] font-medium transition-colors"
+      {/* Open, not folded: the card has the CLI's page to itself (FE-146). */}
+      {rows.map((row) => (
+        <div
+          key={row.label}
+          className="flex items-center justify-between gap-8 px-4 py-3.5"
         >
-          {/* The app's one disclosure arrow (issue detail's sub-issues). */}
-          <HugeiconsIcon
-            icon={open ? ArrowDown01Icon : ArrowRight01Icon}
-            className="size-3.5"
-            strokeWidth={2}
-            aria-hidden="true"
-          />
-          Settings
-        </button>
-      )}
-      {open &&
-        rows.map((row) => (
-          <div
-            key={row.label}
-            className="flex items-center justify-between gap-8 px-4 py-3.5"
-          >
-            <div className="flex min-w-0 flex-col gap-1">
-              <span className="text-sm font-medium">{row.label}</span>
-              {row.description ? (
-                <span className="text-muted-foreground text-[13px] leading-relaxed">
-                  {row.description}
-                </span>
-              ) : null}
-            </div>
-            {row.control ? (
-              <div className="flex shrink-0 items-center">{row.control}</div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="text-sm font-medium">{row.label}</span>
+            {row.description ? (
+              <span className="text-muted-foreground text-[13px] leading-relaxed">
+                {row.description}
+              </span>
             ) : null}
           </div>
-        ))}
+          {row.control ? (
+            <div className="flex shrink-0 items-center">{row.control}</div>
+          ) : null}
+        </div>
+      ))}
     </SettingsCard>
   );
 }

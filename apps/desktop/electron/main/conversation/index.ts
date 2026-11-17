@@ -30,6 +30,7 @@ import {
   type Conversation,
   type ConversationAgent,
   type ConversationEvent,
+  type CustomModel,
   conversationChannels,
   type EngineState,
   type ImagePreview,
@@ -44,6 +45,7 @@ import {
   type Suggestion,
   setClaudeModels,
   setCodexModels,
+  setCustomModels,
   setOpenCodeModels,
   type Turn,
 } from "../../../shared/conversation";
@@ -1156,6 +1158,18 @@ export function registerConversation(
       await ready;
       if (args.length !== 0) throw new Error("No arguments are taken");
       return store.last();
+    },
+  );
+
+  // The user's own models (FE-146). Each id is checked against its CLI's
+  // shape in `setCustomModels`, as any model a turn is sent with is.
+  handle(
+    conversationChannels.customModels,
+    devUrl,
+    async (args): Promise<void> => {
+      if (args.length !== 1 || !Array.isArray(args[0]))
+        throw new Error("A list of models is required");
+      setCustomModels(args[0] as CustomModel[]);
     },
   );
 

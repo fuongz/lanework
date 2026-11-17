@@ -1,10 +1,12 @@
 import {
   Add01Icon,
+  DashboardSquare02Icon,
   Search01Icon,
   UnfoldMoreIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useRef, useState } from "react";
+import type { Project } from "#/../shared/projects";
 import { LocalBadge } from "#/components/shared/auth/local-mode";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
 import { CreateProjectDialog } from "#/components/shared/projects/create-project-dialog";
@@ -20,6 +22,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "#/components/ui/popover";
+import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
 import { isLocalProject } from "#/stores/session";
 import {
@@ -35,17 +38,43 @@ const fold = (text: string) =>
     .replace(/đ/gi, "d")
     .toLowerCase();
 
+const ALL = "All projects";
+
+/** The option rows' look, shared by "All projects" and each project. */
+const OPTION = `${RAIL_ROW} relative aria-selected:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] flex h-7 shrink-0 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none`;
+
 /**
- * The project Settings › Projects is about, in the title bar of each of its
- * pages.
+ * What a scoped Settings page applies to (FE-145): "Applying settings for"
+ * and a menu of "All projects" (where the page has one) and every project.
  *
- * The project switcher's button and menu (a search, the list, and New
- * project), but picking only chooses what these pages show.
+ * Skills, MCP and Archived read the choice from `stores/settings-project`, so
+ * it carries from one page to the next. A project's own page passes
+ * `current` and `onChoose` instead: there the URL names the project, and
+ * picking another one goes to its page.
+ *
+ * The project switcher's menu (a search, the list, New project), but
+ * choosing only changes what Settings shows, never the app's open project.
  */
-export function SettingsProjectPicker() {
+export function SettingsScope({
+  allowAll = false,
+  current,
+  onChoose,
+  className,
+}: {
+  /** Offer "All projects": Skills and MCP, not Archived. */
+  allowAll?: boolean;
+  /** The project shown, when the page knows it better than the store. */
+  current?: Project | null;
+  /** After a project is chosen (and stored): a project page navigates. */
+  onChoose?: (slug: string) => void;
+  className?: string;
+}) {
   const projects = useBoard((state) => state.projects);
-  const selected = useSettingsProject();
+  const stored = useSettingsProject();
+  const all = useSettingsProjectPick((state) => state.all) && allowAll;
   const pick = useSettingsProjectPick((state) => state.pick);
+  const setAll = useSettingsProjectPick((state) => state.setAll);
+  const selected = current === undefined ? stored : current;
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [query, setQuery] = useState("");
@@ -60,14 +89,28 @@ export function SettingsProjectPicker() {
           fold(project.slug).includes(needle),
       )
     : projects;
+  // "All projects" is a row like the others, so the search can find it too.
+  const showAll = allowAll && (!needle || fold(ALL).includes(needle));
 
   const choose = (slug: string) => {
     setOpen(false);
     pick(slug);
+    onChoose?.(slug);
+  };
+  const chooseAll = () => {
+    setOpen(false);
+    setAll(true);
   };
 
+  const label = all ? ALL : (selected?.name ?? "Choose a project");
+
   return (
-    <>
+    <div
+      className={cn("flex min-w-0 items-center gap-2 text-[13px]", className)}
+    >
+      <span className="text-muted-foreground shrink-0">
+        Applying settings for
+      </span>
       <Popover
         open={open}
         onOpenChange={(next) => {
@@ -80,20 +123,23 @@ export function SettingsProjectPicker() {
           render={
             <button
               type="button"
-              aria-label={`Pick a project — currently ${selected?.name ?? "none"}`}
-              // - `-ml-3.5`: the slot keeps 17px clear of the card's edge for a
-              //   page's title; the picker's tile sits close to it instead.
-              // Its height is centred with the page's title by the shell's
-              // `.settings-titlebar` (app.css), not here.
-              className="hover:bg-foreground/[0.05] -ml-3.5 mr-3 flex h-7 min-w-0 max-w-56 shrink-0 items-center gap-2 rounded-md px-1.5 text-left transition-colors duration-150"
+              aria-label={`Applying settings for ${label}. Change`}
+              className="border-input hover:bg-foreground/[0.04] flex h-8 min-w-0 max-w-64 items-center gap-2 rounded-lg border px-2.5 text-left transition-colors duration-150"
             >
-              <ProjectTile
-                project={selected}
-                className="size-4 rounded-[4px] text-[9px]"
-              />
-              <span className="truncate text-[13px] font-medium">
-                {selected?.name ?? "Choose a project"}
-              </span>
+              {all ? (
+                <HugeiconsIcon
+                  icon={DashboardSquare02Icon}
+                  className="text-muted-foreground size-4 shrink-0"
+                  strokeWidth={1.5}
+                  aria-hidden="true"
+                />
+              ) : (
+                <ProjectTile
+                  project={selected}
+                  className="size-4 rounded-[4px] text-[9px]"
+                />
+              )}
+              <span className="truncate font-medium">{label}</span>
               <HugeiconsIcon
                 icon={UnfoldMoreIcon}
                 className="text-muted-foreground size-3.5 shrink-0"
@@ -125,9 +171,10 @@ export function SettingsProjectPicker() {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" && shown[0]) {
+                  if (event.key === "Enter" && (showAll || shown[0])) {
                     event.preventDefault();
-                    choose(shown[0].slug);
+                    if (showAll) chooseAll();
+                    else if (shown[0]) choose(shown[0].slug);
                   } else if (event.key === "ArrowDown") {
                     event.preventDefault();
                     list.current
@@ -168,6 +215,23 @@ export function SettingsProjectPicker() {
                 else rows[Math.min(next, rows.length - 1)]?.focus();
               }}
             >
+              {showAll && (
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={all}
+                  onClick={chooseAll}
+                  className={OPTION}
+                >
+                  <HugeiconsIcon
+                    icon={DashboardSquare02Icon}
+                    className="text-muted-foreground size-5 shrink-0"
+                    strokeWidth={1.5}
+                    aria-hidden="true"
+                  />
+                  <span className="truncate">{ALL}</span>
+                </button>
+              )}
               {projects.length === 0 && (
                 <Empty className="px-2 py-4">
                   <EmptyHeader>
@@ -175,7 +239,7 @@ export function SettingsProjectPicker() {
                   </EmptyHeader>
                 </Empty>
               )}
-              {projects.length > 0 && shown.length === 0 && (
+              {projects.length > 0 && shown.length === 0 && !showAll && (
                 <Empty className="px-2 py-4">
                   <EmptyHeader>
                     <EmptyTitle>No matches</EmptyTitle>
@@ -190,9 +254,9 @@ export function SettingsProjectPicker() {
                   key={project.slug}
                   type="button"
                   role="option"
-                  aria-selected={project.slug === selected?.slug}
+                  aria-selected={!all && project.slug === selected?.slug}
                   onClick={() => choose(project.slug)}
-                  className={`${RAIL_ROW} relative aria-selected:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] flex h-7 shrink-0 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none`}
+                  className={OPTION}
                 >
                   <ProjectTile
                     project={project}
@@ -230,8 +294,8 @@ export function SettingsProjectPicker() {
       <CreateProjectDialog
         open={creating}
         onOpenChange={setCreating}
-        onCreated={pick}
+        onCreated={choose}
       />
-    </>
+    </div>
   );
 }

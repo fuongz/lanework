@@ -57,3 +57,48 @@ export function useModels(): readonly AgentModel[] {
   }, []);
   return useSyncExternalStore(onModelsChanged, allModels);
 }
+
+/**
+ * The key a model's order is kept under (FE-146): its CLI, or for OpenCode
+ * its provider, the group Settings → Harness reorders it in.
+ */
+export function modelGroupKey(entry: AgentModel): string {
+  return entry.agent === "opencode"
+    ? `opencode:${entry.group ?? "Other"}`
+    : entry.agent;
+}
+
+/**
+ * `models` as the user arranged them (FE-146): each group where it was, its
+ * models in the order kept for it (the ones it does not name after, in the
+ * CLI's order) and, given `favorites`, the starred ones first.
+ */
+export function arrangeModels(
+  models: readonly AgentModel[],
+  order: Readonly<Record<string, readonly string[]>>,
+  favorites?: readonly string[],
+): AgentModel[] {
+  const groups = new Map<string, AgentModel[]>();
+  for (const entry of models) {
+    const key = modelGroupKey(entry);
+    const list = groups.get(key);
+    if (list) list.push(entry);
+    else groups.set(key, [entry]);
+  }
+  const starred = new Set(favorites ?? []);
+  const out: AgentModel[] = [];
+  for (const [key, list] of groups) {
+    const rank = new Map((order[key] ?? []).map((id, at) => [id, at]));
+    const place = (entry: AgentModel, at: number) =>
+      rank.get(entry.id) ?? rank.size + at;
+    const placed = list
+      .map((entry, at) => ({ entry, at: place(entry, at) }))
+      .sort((a, b) => a.at - b.at)
+      .map(({ entry }) => entry);
+    out.push(
+      ...placed.filter((entry) => starred.has(entry.id)),
+      ...placed.filter((entry) => !starred.has(entry.id)),
+    );
+  }
+  return out;
+}

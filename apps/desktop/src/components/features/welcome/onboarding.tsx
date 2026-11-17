@@ -2,9 +2,9 @@ import { useState } from "react";
 import { type Locked, SignIn } from "#/components/shared/auth/sign-in";
 import logo from "#/components/shared/common/lanework-logo.png";
 import { OnboardingStage } from "#/components/shared/common/onboarding-stage";
-import { ThemeChoice } from "#/components/shared/common/theme-choice";
 import { Button } from "#/components/ui/button";
 import { usePreferences } from "#/stores/preferences";
+import { ThemeChoice } from "./theme-choice";
 
 /** Welcome, then appearance, then the sign-in gate itself. */
 const STEPS = 3;

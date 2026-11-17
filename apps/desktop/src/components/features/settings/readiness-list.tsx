@@ -68,12 +68,13 @@ export function ReadinessList({
   const checks = [...report.checks].sort((a, b) => rank(a) - rank(b));
 
   function go(action: "project-settings" | "agent-settings") {
-    void navigate({
-      to:
-        action === "agent-settings"
-          ? "/settings/harness"
-          : "/settings/projects",
-    });
+    // The project's own page, not the list: the check is about this one.
+    if (action === "agent-settings") void navigate({ to: "/settings/harness" });
+    else
+      void navigate({
+        to: "/settings/projects/$slug",
+        params: { slug: report.slug },
+      });
   }
 
   return (

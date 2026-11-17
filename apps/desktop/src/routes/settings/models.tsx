@@ -1,5 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { ModelsSection } from "#/components/features/settings/models-section";
+import { createFileRoute, redirect } from "@tanstack/react-router";
+
+/** Models moved into each CLI's page under Harness (FE-146). */
 export const Route = createFileRoute("/settings/models")({
-  component: ModelsSection,
+  beforeLoad: () => {
+    throw redirect({ to: "/settings/harness" });
+  },
 });

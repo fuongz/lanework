@@ -26,12 +26,16 @@ export interface SettingsRowSpec {
   description?: string;
   /** The control on the right: a switch, a button, or plain text. */
   control?: ReactNode;
+  /** Drawn under the row, full width: what the control changes (a font). */
+  preview?: ReactNode;
   /** Extra words the search box matches, beyond label and description. */
   keywords?: string;
 }
 
 export interface SettingsSectionSpec {
   title: string;
+  /** A mark before the heading: whose settings these are (Lanework's). */
+  icon?: ReactNode;
   rows?: SettingsRowSpec[];
   /**
    * A section that is not a list of rows, rendered in place of the row card.
@@ -67,10 +71,19 @@ export function SettingsPage({
   sections,
   searchable = true,
   compact = false,
+  scope,
+  actions,
 }: {
   title: string;
   description: string;
   sections: SettingsSectionSpec[];
+  /**
+   * What the page applies to (`SettingsScope`, FE-145), above everything
+   * else on it. Not a section: a search must never hide it.
+   */
+  scope?: ReactNode;
+  /** Beside the title, on its right: a page's one action (Check for updates). */
+  actions?: ReactNode;
   /** False outside Settings (a dialog): the search box does not narrow it. */
   searchable?: boolean;
   /** A dialog's density (FE-95): smaller type, tighter rows and gaps. */
@@ -96,14 +109,18 @@ export function SettingsPage({
 
   return (
     <div className={cn("flex flex-col", compact ? "gap-1" : "gap-2.5")}>
-      <h1
-        className={cn(
-          "font-medium tracking-tight",
-          compact ? "text-base" : "text-2xl",
-        )}
-      >
-        {title}
-      </h1>
+      {scope && <div className="mb-5">{scope}</div>}
+      <div className="flex min-w-0 items-center gap-3">
+        <h1
+          className={cn(
+            "min-w-0 flex-1 font-medium tracking-tight",
+            compact ? "text-base" : "text-2xl",
+          )}
+        >
+          {title}
+        </h1>
+        {actions}
+      </div>
       <p
         className={cn(
           "text-muted-foreground leading-relaxed",
@@ -139,10 +156,12 @@ export function SettingsPage({
                 compact
                   ? "text-muted-foreground text-xs font-medium"
                   : "text-[15px] font-medium",
+                section.icon && "flex items-center gap-2",
                 section.hideTitle && "sr-only",
                 section.destructive && "text-destructive",
               )}
             >
+              {section.icon}
               {section.title}
             </h2>
             {section.content ?? (
@@ -151,40 +170,43 @@ export function SettingsPage({
                   <div
                     key={row.label}
                     className={cn(
-                      "flex items-center justify-between gap-8",
+                      "flex flex-col gap-3",
                       compact ? "px-3.5 py-2.5" : "px-4 py-3.5",
                     )}
                   >
-                    <div
-                      className={cn(
-                        "flex min-w-0 flex-col",
-                        compact ? "gap-0.5" : "gap-1",
-                      )}
-                    >
-                      <span
+                    <div className="flex items-center justify-between gap-8">
+                      <div
                         className={cn(
-                          "font-medium",
-                          compact ? "text-[13px]" : "text-sm",
+                          "flex min-w-0 flex-col",
+                          compact ? "gap-0.5" : "gap-1",
                         )}
                       >
-                        {row.label}
-                      </span>
-                      {row.description ? (
                         <span
                           className={cn(
-                            "text-muted-foreground leading-relaxed",
-                            compact ? "text-xs" : "text-[13px]",
+                            "font-medium",
+                            compact ? "text-[13px]" : "text-sm",
                           )}
                         >
-                          {row.description}
+                          {row.label}
                         </span>
+                        {row.description ? (
+                          <span
+                            className={cn(
+                              "text-muted-foreground leading-relaxed",
+                              compact ? "text-xs" : "text-[13px]",
+                            )}
+                          >
+                            {row.description}
+                          </span>
+                        ) : null}
+                      </div>
+                      {row.control ? (
+                        <div className="flex shrink-0 items-center">
+                          {row.control}
+                        </div>
                       ) : null}
                     </div>
-                    {row.control ? (
-                      <div className="flex shrink-0 items-center">
-                        {row.control}
-                      </div>
-                    ) : null}
+                    {row.preview}
                   </div>
                 ))}
               </SettingsCard>

@@ -1,5 +1,6 @@
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
+import type { ReactNode } from "react";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
 import {
   Empty,
@@ -7,12 +8,24 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "#/components/ui/empty";
-import { matches, SETTINGS_GROUPS } from "#/lib/settings-catalog";
+import {
+  matches,
+  SETTINGS_GROUPS,
+  type SettingsItem,
+} from "#/lib/settings-catalog";
+import { useBoard } from "#/stores/board";
+import { useSettingsProjectPick } from "#/stores/settings-project";
 import { useSettingsSearch } from "#/stores/settings-search";
 
 /** The grouped section list, filtered by whatever is in the search box. */
 export function SettingsNav() {
   const query = useSettingsSearch((state) => state.query);
+  // Projects opens the project already in hand (picked here, else the one
+  // open in the app) rather than the list; the breadcrumb's "Projects" goes
+  // back to the list.
+  const picked = useSettingsProjectPick((state) => state.picked);
+  const active = useBoard((state) => state.active?.slug ?? null);
+  const current = picked ?? active;
 
   const groups = SETTINGS_GROUPS.map((group) => ({
     ...group,
@@ -42,14 +55,10 @@ export function SettingsNav() {
               <span className="shrink-0">{group.label}</span>
             </div>
             {group.items.map((item) => (
-              <Link
+              <NavLink
                 key={item.label}
-                to={item.to}
-                className={`${RAIL_ROW} group relative flex h-[30px] items-center gap-2.5 rounded-md px-2 text-[13px] transition-[background-color,scale] duration-150 ease-out active:scale-[0.98]`}
-                activeProps={{
-                  className: "bg-rail-active",
-                  "aria-current": "page",
-                }}
+                item={item}
+                project={item.to === "/settings/projects" ? current : null}
               >
                 <HugeiconsIcon
                   icon={item.icon}
@@ -61,11 +70,42 @@ export function SettingsNav() {
                   strokeWidth={1.5}
                 />
                 {item.label}
-              </Link>
+              </NavLink>
             ))}
           </div>
         ))}
       </nav>
     </RailHover>
+  );
+}
+
+const ROW = `${RAIL_ROW} group relative flex h-[30px] items-center gap-2.5 rounded-md px-2 text-[13px] transition-[background-color,scale] duration-150 ease-out active:scale-[0.98]`;
+const ACTIVE = { className: "bg-rail-active", "aria-current": "page" as const };
+
+/** A nav row; Projects goes to `project`'s own page when there is one. */
+function NavLink({
+  item,
+  project,
+  children,
+}: {
+  item: SettingsItem;
+  project: string | null;
+  children: ReactNode;
+}) {
+  if (project)
+    return (
+      <Link
+        to="/settings/projects/$slug"
+        params={{ slug: project }}
+        className={ROW}
+        activeProps={ACTIVE}
+      >
+        {children}
+      </Link>
+    );
+  return (
+    <Link to={item.to} className={ROW} activeProps={ACTIVE}>
+      {children}
+    </Link>
   );
 }

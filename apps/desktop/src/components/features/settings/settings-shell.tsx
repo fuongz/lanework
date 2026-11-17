@@ -3,13 +3,12 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import type { CSSProperties, ReactNode } from "react";
 import { WindowTitlebarHost } from "#/components/shared/navigation/window-titlebar";
+import { SettingsHeader } from "#/components/shared/settings/settings-header";
 import { Input } from "#/components/ui/input";
 import { useSettingsSearch } from "#/stores/settings-search";
 import { SettingsNav } from "./settings-nav";
-import { SettingsProjectPicker } from "./settings-project-picker";
 
-const WIDE =
-  /^\/settings\/(config|skills|project-skills|memory|instructions)(\/|$)/;
+const WIDE = /^\/settings\/(config|skills|memory|instructions)(\/|$)/;
 
 /**
  * The full-window settings view: a sidebar of sections beside the open one.
@@ -37,9 +36,9 @@ export function SettingsShell({ children }: { children: ReactNode }) {
 
   return (
     // The same window as the app shell: a title bar across it, and under it
-    // the rail beside an inset card. Most pages keep their title in their own
-    // content. The file pages (Skills, Config files) put theirs in the bar as
-    // Files does, and the Projects pages their project picker.
+    // the rail beside an inset card. Every page heads its card with a
+    // breadcrumb (`SettingsHeader`, FE-145): drawn here above the pages made
+    // of rows, by the file pages (Skills, Config files) themselves.
     //
     // NOTE: The split is stated, not read from `--rail-width`. That variable
     // is the app rail's, and it stays on <html> at whatever width the rail had
@@ -47,15 +46,16 @@ export function SettingsShell({ children }: { children: ReactNode }) {
     // NOTE: `relative overflow-clip`, as the app shell's (app-shell.tsx):
     // a switch's hidden input deep in a long page must not grow the document.
     <div className="window-ground bg-sidebar relative flex h-screen flex-col overflow-clip">
+      {/* The title bar holds nothing of a page's any more (the project
+          picker left it, FE-145), so it spans the rail only: the window's
+          controls and its drag region above "Back to app", and the card
+          rises to the top of the window beside it. */}
       <WindowTitlebarHost
-        className="settings-titlebar"
+        className="settings-titlebar absolute top-0 left-0 z-10 w-60"
         style={{ "--titlebar-split": "15rem" } as CSSProperties}
-        // On every page, not only the Projects ones: which project the
-        // Projects pages are about is worth seeing from anywhere here.
-        lead={<SettingsProjectPicker />}
       />
       <div className="flex min-h-0 flex-1">
-        <aside className="settings-sidebar flex w-60 shrink-0 flex-col overflow-y-auto px-2.5">
+        <aside className="settings-sidebar flex w-60 shrink-0 flex-col overflow-y-auto px-2.5 pt-11">
           <Link
             to="/"
             className="hover:bg-rail-hover mt-2 flex h-[30px] shrink-0 items-center gap-2.5 rounded-md px-2 text-[13px] transition-[background-color,scale] duration-150 ease-out active:scale-[0.98]"
@@ -92,12 +92,18 @@ export function SettingsShell({ children }: { children: ReactNode }) {
         {wide ? (
           <div className={`${CARD} min-w-0 overflow-hidden`}>{children}</div>
         ) : (
-          // NOTE: `relative` so a section's `sr-only` heading (absolute) is
-          // placed in this scroller. Without it the heading's containing
-          // block is the window: a long page grows <html> and the whole
-          // window scrolls past the shell.
-          <div className={`${CARD} relative overflow-y-auto`}>
-            <div className="mx-auto max-w-3xl px-10 pt-8 pb-20">{children}</div>
+          // The header stays put above the scroller, as a chat's does.
+          <div className={`${CARD} flex min-w-0 flex-col overflow-hidden`}>
+            <SettingsHeader />
+            {/* NOTE: `relative` so a section's `sr-only` heading (absolute) is
+                placed in this scroller. Without it the heading's containing
+                block is the window: a long page grows <html> and the whole
+                window scrolls past the shell. */}
+            <div className="relative min-h-0 flex-1 overflow-y-auto">
+              <div className="mx-auto max-w-3xl px-10 pt-4 pb-20">
+                {children}
+              </div>
+            </div>
           </div>
         )}
       </div>

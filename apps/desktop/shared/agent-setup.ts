@@ -158,7 +158,39 @@ export const agentSetupChannels = {
   readGlobal: "agent-setup:read-global",
   open: "agent-setup:open",
   reveal: "agent-setup:reveal",
+  editMcp: "agent-setup:edit-mcp",
 } as const;
+
+/** What can be done to an MCP server from Settings → MCP (FE-147). */
+export type McpServerAction = "remove" | "disable" | "enable";
+
+export function isMcpServerAction(value: unknown): value is McpServerAction {
+  return value === "remove" || value === "disable" || value === "enable";
+}
+
+/** A name safe to hand a CLI and to match a TOML table header with. */
+const SAFE_MCP_NAME = /^[A-Za-z0-9._-]{1,64}$/;
+
+/**
+ * Whether `action` can be done to `server`, and if not, why: shown on the
+ * row before anyone tries, and checked again in main before a write.
+ */
+export function mcpActionRefusal(
+  server: Pick<SetupMcpServer, "name" | "agent" | "scope" | "plugin">,
+  action: McpServerAction,
+): string | null {
+  if (server.plugin)
+    return `It comes with the plugin ${server.plugin}: change the plugin instead.`;
+  if (server.name === "lanework")
+    return "Lanework's own server: turn it on or off on the Harness page.";
+  if (server.agent === "codex" && !SAFE_MCP_NAME.test(server.name))
+    return "Its name cannot be edited safely in config.toml.";
+  if (action === "remove") return null;
+  // Claude Code has a switch only for a repo's `.mcp.json` servers.
+  if (server.agent === "claude" && server.scope !== "project")
+    return "Claude Code has no switch for this one: remove it instead.";
+  return null;
+}
 
 /** An id main handed out — not a path, and never more than this long. */
 export function isSetupId(value: unknown): value is string {
@@ -191,4 +223,16 @@ export interface DesktopAgentSetupApi {
     agent: SetupAgent,
     on: boolean,
   ) => Promise<ProjectTrust>;
+  /**
+   * Remove, disable or enable an MCP server (FE-147), by the id a read gave
+   * it: `slug` null for the global page, a project's for one of its own.
+   * Only on the user's confirmed click.
+   *
+   * @returns The setup read again.
+   */
+  editMcp: (
+    slug: string | null,
+    id: string,
+    action: McpServerAction,
+  ) => Promise<AgentSetup>;
 }

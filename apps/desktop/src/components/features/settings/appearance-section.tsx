@@ -1,10 +1,15 @@
-import { ThemeChoice } from "#/components/shared/common/theme-choice";
 import { SettingsPage } from "#/components/shared/settings/settings-page";
 import { Switch } from "#/components/ui/switch";
 import { usePreferences } from "#/stores/preferences";
 import { AccentPicker } from "./accent-picker";
 import { CodePreview } from "./code-preview";
 import { FontPicker } from "./font-picker";
+import {
+  ContentFontPreview,
+  TerminalPreview,
+  UiFontPreview,
+} from "./font-previews";
+import { ThemeToggle } from "./theme-toggle";
 
 export function AppearanceSection() {
   const groupProjects = usePreferences((state) => state.groupProjects);
@@ -15,23 +20,16 @@ export function AppearanceSection() {
       description="Theme, accent colour, fonts and the project list."
       sections={[
         {
+          // One row each, as the accent's (FE-145): onboarding keeps the
+          // large previews; the code preview sits under the fonts it shows.
           title: "Theme",
-          keywords:
-            "theme dark light system colour color mode appearance preview",
-          // The same control onboarding's second step draws, so a change here
-          // cannot leave the first-run screen behind. The preview under it
-          // shows the theme and the code font picked below (FE-21/D4a), which
-          // is why it sits between the two.
-          content: (
-            <div className="flex flex-col gap-4">
-              <ThemeChoice />
-              <CodePreview />
-            </div>
-          ),
-        },
-        {
-          title: "Colour",
           rows: [
+            {
+              label: "Theme",
+              description: "Light, dark, or as macOS is set.",
+              keywords: "theme dark light system mode appearance",
+              control: <ThemeToggle />,
+            },
             {
               label: "Accent colour",
               description:
@@ -49,18 +47,27 @@ export function AppearanceSection() {
               label: "UI font",
               keywords: "font typeface family weight interface",
               control: <FontPicker font="ui" label="UI font" />,
+              preview: <UiFontPreview />,
             },
             {
               label: "Content font",
               description: "Issues, comments and pull request summaries.",
               keywords: "font typeface family weight markdown body",
               control: <FontPicker font="content" label="Content font" />,
+              preview: <ContentFontPreview />,
             },
             {
               label: "Code font",
               description: "Terminal, diffs and code blocks.",
               keywords: "font typeface family weight monospace terminal",
               control: <FontPicker font="code" label="Code font" />,
+              // Each font's sample under its own row (FE-145).
+              preview: (
+                <div className="flex flex-col gap-2">
+                  <CodePreview />
+                  <TerminalPreview />
+                </div>
+              ),
             },
           ],
         },

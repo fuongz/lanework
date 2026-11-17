@@ -197,7 +197,7 @@ export function lockAgentConfig(reason: string): void {
 }
 
 /** @throws The lock's reason, when the agents' config is locked. */
-function assertUnlocked(): void {
+export function assertUnlocked(): void {
   if (agentConfigLock) throw new Error(agentConfigLock);
   // A dev build never writes the real agents' config, not even on a click.
   if (currentShimRefusal() === "dev")

@@ -22,7 +22,9 @@ import { app, shell } from "electron";
 import {
   type AgentSetup,
   agentSetupChannels,
+  isMcpServerAction,
   isSetupId,
+  type McpServerAction,
   type ProjectTrust,
   type SetupAgent,
   type SetupFile,
@@ -60,6 +62,7 @@ import {
   setMcpHome,
   syncLaneworkMcp,
 } from "./mcp-entry";
+import { editMcpServer } from "./mcp-servers";
 import { readAgentSetup, readSetupFile } from "./read";
 
 /**
@@ -274,6 +277,24 @@ async function mcpSetToolset(
   return mcpStatus();
 }
 
+/**
+ * Remove, disable or enable one MCP server (FE-147), found again by its id
+ * in a fresh read, so the renderer names a server, never a path.
+ */
+async function editMcp(
+  slug: string | null,
+  id: string,
+  action: McpServerAction,
+): Promise<AgentSetup> {
+  refuseInPreview();
+  const folder = slug === null ? null : await terminalFolder(slug);
+  const setup = slug === null ? await readGlobal() : await read(slug);
+  const server = setup.mcp.find((entry) => entry.id === id);
+  if (!server) throw new Error("That server is not there any more.");
+  await editMcpServer(server, action, where(), folder);
+  return slug === null ? readGlobal() : read(slug);
+}
+
 export function registerAgentSetup(devUrl?: string): void {
   setMcpHome(where);
   handle(laneworkMcpChannels.status, devUrl, (args) => {
@@ -345,6 +366,21 @@ export function registerAgentSetup(devUrl?: string): void {
   handle(agentSetupChannels.reveal, devUrl, (args) => {
     if (args.length !== 2) throw new Error("reveal takes a project and an id");
     return reveal(slugArg(args[0]), idArg(args[1]));
+  });
+  handle(agentSetupChannels.editMcp, devUrl, (args) => {
+    if (
+      args.length !== 3 ||
+      (args[0] !== null && typeof args[0] !== "string") ||
+      !isMcpServerAction(args[2])
+    )
+      throw new Error(
+        'editMcp takes a project or null, an id, and "remove", "disable" or "enable"',
+      );
+    return editMcp(
+      args[0] === null ? null : slugArg(args[0]),
+      idArg(args[1]),
+      args[2],
+    );
   });
   handle(agentSetupChannels.trust, devUrl, (args) => {
     if (args.length !== 1) throw new Error("trust takes one project");

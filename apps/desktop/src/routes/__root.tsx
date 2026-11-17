@@ -11,6 +11,7 @@ import { AuthGate } from "#/components/features/auth/auth-gate";
 import { UpdaterDialogs } from "#/components/features/updater/updater-dialogs";
 import { StartupLoading } from "#/components/shared/loading/startup-loading";
 import { useAccent } from "#/hooks/use-accent";
+import { useCustomModels } from "#/hooks/use-custom-models";
 import { useFonts } from "#/hooks/use-fonts";
 import { useNotificationRouting } from "#/hooks/use-notification-routing";
 import { useTheme } from "#/hooks/use-theme";
@@ -36,6 +37,7 @@ function RootShell() {
   useTheme();
   useFonts();
   useAccent();
+  useCustomModels();
   useNotificationRouting();
   // Hydrated here, once for the whole app, so a route outside `AppShell` reads
   // the user's saved preference rather than the store's defaults.

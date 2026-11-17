@@ -1,6 +1,6 @@
 // The window's title bar: one row across the whole window, the way Codex has
 // it. The window controls and the shell's own buttons sit on the left, then
-// the shell's `lead` (the session tabs, Settings' project picker).
+// the shell's `lead` (the session tabs).
 //
 // A page's own header is no longer put in it: `<WindowTitlebar>` draws at the
 // top of the page's card (FE-144).
@@ -34,7 +34,7 @@ export function WindowTitlebarHost({
   children?: ReactNode;
   /**
    * Drawn at the start of the slot, before whatever the page puts there:
-   * Settings' project picker, on every settings page.
+   * the app shell's session tabs.
    *
    * NOTE: React's own child of the slot, so it is in the DOM before any
    * page's portal is appended after it. A portal of the shell's would land on

@@ -1,5 +1,4 @@
 import {
-  AiChipIcon,
   Archive02Icon,
   BatteryEcoChargingIcon,
   CommandLineIcon,
@@ -22,7 +21,7 @@ import type { LinkProps } from "@tanstack/react-router";
 /** An icon from `@hugeicons/core-free-icons`: data, not a component. */
 type SettingsIcon = typeof Sun01Icon;
 
-interface SettingsItem {
+export interface SettingsItem {
   /** Typed destination, checked against the generated route tree. */
   to: LinkProps["to"];
   label: string;
@@ -116,14 +115,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         label: "Harness",
         icon: CommandLineIcon,
         keywords:
-          "harness cli agent agents claude code codex version update install usage limit quota handoff checkpoint resume hook push wip lanework mcp sign in pull sessions import conversations transcripts",
-      },
-      {
-        to: "/settings/models",
-        label: "Models",
-        icon: AiChipIcon,
-        keywords:
-          "models model picker show hide visible hidden claude codex opencode provider go",
+          "models model picker favourite favorite star order reorder show hide visible hidden slug provider harness cli agent agents claude code codex version update install usage limit quota handoff checkpoint resume hook push wip lanework mcp sign in pull sessions import conversations transcripts",
       },
       {
         to: "/settings/decision",
@@ -136,47 +128,37 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         to: "/settings/skills",
         label: "Skills",
         icon: MagicWand01Icon,
-        keywords: "skills skill SKILL.md claude codex agents edit global user",
+        keywords:
+          "skills skill SKILL.md claude codex agents edit global user project .claude .agents .codex repo",
       },
       {
         to: "/settings/mcp",
         label: "MCP",
         icon: McpServerIcon,
         keywords:
-          "mcp server servers global user claude.json config.toml stdio http sse",
-      },
-    ],
-  },
-  {
-    // Its pages are about ONE project, picked in each page's title bar
-    // (`SettingsProjectPicker`) and shared by all three.
-    label: "Project",
-    items: [
-      {
-        to: "/settings/projects",
-        label: "General",
-        icon: DashboardSquare02Icon,
-        keywords:
-          "project projects workspace general rename folder folders import readiness ready danger delete remove issues sync cloud",
+          "mcp server servers global user claude.json config.toml stdio http sse project .mcp.json local repo",
       },
       {
-        to: "/settings/project-skills",
-        label: "Skills",
-        icon: MagicWand01Icon,
-        keywords: "project skills skill SKILL.md .claude .agents .codex repo",
-      },
-      {
-        to: "/settings/project-mcp",
-        label: "MCP",
-        icon: McpServerIcon,
-        keywords: "project mcp server servers .mcp.json local repo",
-      },
-      {
-        to: "/settings/project-archived",
+        to: "/settings/archived",
         label: "Archived",
         icon: Archive02Icon,
         keywords:
           "project archived archive unarchive agents conversations sessions claude codex",
+      },
+    ],
+  },
+  {
+    // One row: the list of projects, each opening its own page
+    // (`/settings/projects/$slug`). Skills, MCP and Archived above carry
+    // a project picker of their own (FE-145).
+    label: "Code",
+    items: [
+      {
+        to: "/settings/projects",
+        label: "Projects",
+        icon: DashboardSquare02Icon,
+        keywords:
+          "project projects workspace general rename folder folders import readiness ready danger delete remove issues sync cloud",
       },
     ],
   },
@@ -193,6 +175,37 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     ],
   },
 ];
+
+/**
+ * Pages with a route but no nav item, by the name their breadcrumb shows.
+ *
+ * Hidden for now (see {@link SETTINGS_GROUPS}), yet their address still
+ * answers, and a header must not go blank there.
+ */
+const HIDDEN_TITLES: Record<string, string> = {
+  "/settings/config": "Config files",
+  "/settings/memory": "Memory",
+  "/settings/instructions": "Instructions",
+};
+
+/**
+ * The name of the settings page at `pathname`, for its breadcrumb.
+ *
+ * Read from the nav, so a page's header and its sidebar row never disagree.
+ * A sub-page (`/settings/projects/acme`) gets its section's name.
+ *
+ * @returns Null outside any known page.
+ */
+export function settingsTitle(pathname: string): string | null {
+  const path = pathname.replace(/\/+$/, "");
+  const within = (to: string) => path === to || path.startsWith(`${to}/`);
+  for (const group of SETTINGS_GROUPS)
+    for (const item of group.items)
+      if (typeof item.to === "string" && within(item.to)) return item.label;
+  for (const [to, title] of Object.entries(HIDDEN_TITLES))
+    if (within(to)) return title;
+  return null;
+}
 
 /**
  * Whether `query` matches any of `text`.

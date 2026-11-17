@@ -310,6 +310,8 @@ const conversation: DesktopConversationApi = {
   awaiting: () => ipcRenderer.invoke(conversationChannels.awaiting),
   lastSettings: () => ipcRenderer.invoke(conversationChannels.lastSettings),
   claudeModels: () => ipcRenderer.invoke(conversationChannels.claudeModels),
+  setCustomModels: (models) =>
+    ipcRenderer.invoke(conversationChannels.customModels, models),
   codexModels: () => ipcRenderer.invoke(conversationChannels.codexModels),
   opencodeModels: () => ipcRenderer.invoke(conversationChannels.opencodeModels),
   linkPreview: (url) =>
@@ -507,6 +509,8 @@ const agentSetup: DesktopAgentSetupApi = {
   trust: (slug) => ipcRenderer.invoke(agentSetupChannels.trust, slug),
   setTrust: (slug, agent, on) =>
     ipcRenderer.invoke(agentSetupChannels.setTrust, slug, agent, on),
+  editMcp: (slug, id, action) =>
+    ipcRenderer.invoke(agentSetupChannels.editMcp, slug, id, action),
 };
 
 const laneworkMcp: DesktopLaneworkMcpApi = {

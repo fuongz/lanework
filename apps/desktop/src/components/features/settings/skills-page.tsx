@@ -1,4 +1,8 @@
-import { MagicWand01Icon, Search01Icon } from "@hugeicons/core-free-icons";
+import {
+  CommandLineIcon,
+  MagicWand01Icon,
+  RefreshIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
@@ -7,16 +11,25 @@ import {
   parseSkillId,
   type SkillRoot,
 } from "#/../shared/agent-config";
+import {
+  FilterMenu,
+  type MenuField,
+} from "#/components/shared/common/filter-menu";
+import {
+  LIST_ACTION,
+  LIST_ACTION_ICON,
+  ListSearch,
+} from "#/components/shared/common/list-search";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
-import {
-  WINDOW_TITLE,
-  WindowTitlebar,
-} from "#/components/shared/navigation/window-titlebar";
 import {
   CodeEditor,
   useConfigFile,
 } from "#/components/shared/settings/agent-config-editor";
+import { SettingsHeader } from "#/components/shared/settings/settings-header";
+import { SettingsScope } from "#/components/shared/settings/settings-scope";
+import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
+import { Button } from "#/components/ui/button";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -31,17 +44,11 @@ import {
   EmptyTitle,
 } from "#/components/ui/empty";
 import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "#/components/ui/input-group";
-import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "#/components/ui/resizable";
 import { ScrollArea } from "#/components/ui/scroll-area";
-import { Separator } from "#/components/ui/separator";
 import { ClaudeAiIcon } from "#/components/ui/svgs/claudeAiIcon";
 import { CodexDark } from "#/components/ui/svgs/codexDark";
 import { CodexLight } from "#/components/ui/svgs/codexLight";
@@ -52,6 +59,8 @@ import { fileSize } from "#/lib/file-size";
 import { ipcMessage } from "#/lib/ipc-error";
 import { relativeTime } from "#/lib/relative-time";
 import { cn } from "#/lib/utils";
+import { useSettingsProjectPick } from "#/stores/settings-project";
+import { ProjectSkillsPage } from "./project-skills-page";
 
 const ROUTE = "/settings/skills";
 
@@ -61,6 +70,19 @@ const ROOTS: Record<SkillRoot, { folder: string; order: number }> = {
   agents: { folder: "~/.agents/skills", order: 1 },
   codex: { folder: "~/.codex/skills", order: 2 },
   opencode: { folder: "~/.config/opencode/skills", order: 3 },
+};
+
+/** The list's one filter: which CLIs' skills to show (any number). */
+const CLI_FIELD: MenuField = {
+  key: "cli",
+  label: "Harness",
+  icon: CommandLineIcon,
+  multiple: true,
+  options: [
+    { value: "claude", label: "Claude Code" },
+    { value: "codex", label: "Codex" },
+    { value: "opencode", label: "OpenCode" },
+  ],
 };
 
 /** Whose skill a file is, for the open file's title. */
@@ -75,7 +97,29 @@ function rootOf(file: ConfigFile): SkillRoot {
 }
 
 /**
- * Settings › Skills (FE-47/D9): the user's skills for every project.
+ * Settings › Skills: one page with a scope row (FE-145). "All projects" (the
+ * default) shows the user's own skills, which every project gets; a project
+ * shows the ones its folder brings.
+ */
+export function SkillsPage() {
+  const all = useSettingsProjectPick((state) => state.all);
+  // A row across the card, under the header, on both views.
+  const scope = (
+    <SettingsScope
+      allowAll
+      className="border-border h-12 shrink-0 border-b px-4"
+    />
+  );
+  return all ? (
+    <GlobalSkills scope={scope} />
+  ) : (
+    <ProjectSkillsPage scope={scope} />
+  );
+}
+
+/**
+ * Settings › Skills, All projects (FE-47/D9): the user's skills for every
+ * project.
  *
  * One list of every skill on the left, by name, each with the mark of the
  * folder it is in. The open one fills the rest as its text, read-only for
@@ -85,12 +129,14 @@ function rootOf(file: ConfigFile): SkillRoot {
  * The open skill is in the URL (`?file=<id>`), so Back returns to the
  * previous one.
  */
-export function SkillsPage() {
+function GlobalSkills({ scope }: { scope: ReactNode }) {
   const { file: openId } = useSearch({ strict: false });
   const navigate = useNavigate();
   const [files, setFiles] = useState<ConfigFile[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  /** The CLIs the filter keeps, comma-separated; empty is every one. */
+  const [picked, setPicked] = useState("");
   const { defaultLayout, onLayoutChanged } = usePersistedLayout(
     "lanework:skills",
     ["list", "file"],
@@ -124,13 +170,13 @@ export function SkillsPage() {
         ROOTS[rootOf(a)].order - ROOTS[rootOf(b)].order,
     );
   const needle = query.trim().toLowerCase();
-  const shown = needle
-    ? skills.filter(
-        (file) =>
-          file.label.toLowerCase().includes(needle) ||
-          file.description.toLowerCase().includes(needle),
-      )
-    : skills;
+  const shown = skills.filter(
+    (file) =>
+      (!picked || picked.split(",").includes(file.agent)) &&
+      (!needle ||
+        file.label.toLowerCase().includes(needle) ||
+        file.description.toLowerCase().includes(needle)),
+  );
   const current = skills.find((file) => file.id === openId) ?? null;
 
   const skill = useConfigFile(current, () => {});
@@ -167,27 +213,8 @@ export function SkillsPage() {
   return (
     // A column: the header on top, the panels in the rest of the card.
     <div className="flex h-full min-h-0 flex-col">
-      <WindowTitlebar>
-        <h1 className={WINDOW_TITLE}>Skills</h1>
-        <InputGroup className="ml-auto w-56 shrink">
-          <InputGroupAddon>
-            <HugeiconsIcon
-              icon={Search01Icon}
-              className="size-3.5"
-              strokeWidth={1.8}
-              aria-hidden="true"
-            />
-          </InputGroupAddon>
-          <InputGroupInput
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search skills…"
-            aria-label="Search skills"
-            className="text-xs"
-          />
-        </InputGroup>
-      </WindowTitlebar>
+      <SettingsHeader heading />
+      {scope}
 
       <ResizablePanelGroup
         className="h-auto min-h-0 flex-1"
@@ -204,8 +231,49 @@ export function SkillsPage() {
         >
           <aside
             aria-label="Skill list"
-            className="bg-sidebar flex h-full min-h-0 flex-col"
+            className="bg-background flex h-full min-h-0 flex-col"
           >
+            {/* The search heads the list it narrows. */}
+            {/* Search, then the CLIs to show and Refresh, as the issue list
+                heads its column. */}
+            <ListSearch
+              query={query}
+              onQuery={setQuery}
+              label="Search skills"
+              className="shrink-0 px-2 pt-2 pb-2"
+              actions={
+                <>
+                  {/* The issue list's own filter menu, with one field. */}
+                  <FilterMenu
+                    fields={[CLI_FIELD]}
+                    selected={() => picked || undefined}
+                    glyph={(_field, option) => (
+                      <TerminalKindIcon
+                        kind={option.value as ConfigFile["agent"]}
+                        className="size-3.5 shrink-0"
+                      />
+                    )}
+                    active={picked ? 1 : 0}
+                    onPick={(_key, value) => setPicked(value ?? "")}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Refresh skills"
+                    title="Refresh"
+                    onClick={() => void refresh()}
+                    className={LIST_ACTION}
+                  >
+                    <HugeiconsIcon
+                      icon={RefreshIcon}
+                      className={LIST_ACTION_ICON}
+                      strokeWidth={1.8}
+                      aria-hidden="true"
+                    />
+                  </Button>
+                </>
+              }
+            />
             {listError ? (
               <p
                 role="alert"
@@ -244,6 +312,7 @@ export function SkillsPage() {
           >
             {current ? (
               <>
+                <PathBar file={current} />
                 {base ? (
                   <CodeEditor
                     key={current.id}
@@ -380,7 +449,9 @@ function RootMark({ root }: { root: SkillRoot }) {
   let mark: ReactNode;
   if (root === "claude")
     mark = <ClaudeAiIcon aria-hidden="true" className="size-3.5" />;
-  else if (root === "codex")
+  // `~/.agents/skills` is Codex's too (shared/agent-config.ts): its mark,
+  // not OpenCode's, or a Codex skill looked like an OpenCode one.
+  else if (root === "codex" || root === "agents")
     mark = (
       <>
         <CodexLight aria-hidden="true" className="size-3.5 dark:hidden" />
@@ -411,7 +482,19 @@ function RootMark({ root }: { root: SkillRoot }) {
   );
 }
 
-/** The open skill's folder mark, path, size and age, under its text. */
+/** The open skill's header: whose folder it is, and its path. */
+function PathBar({ file }: { file: ConfigFile }) {
+  return (
+    <header className="border-border text-muted-foreground flex h-9 shrink-0 items-center gap-2 border-b px-3 text-[12px]">
+      <RootMark root={rootOf(file)} />
+      <span className="text-foreground min-w-0 truncate" title={file.path}>
+        {file.path}
+      </span>
+    </header>
+  );
+}
+
+/** The open skill's size and age, under its text; its path heads it. */
 function StatusBar({ file }: { file: ConfigFile }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -421,15 +504,8 @@ function StatusBar({ file }: { file: ConfigFile }) {
   const age = relativeTime(file.modifiedAt, now);
   return (
     <footer className="border-border text-muted-foreground flex h-7 shrink-0 items-center gap-3 border-t px-3 text-[11px] tabular-nums">
-      <RootMark root={rootOf(file)} />
-      <span className="min-w-0 truncate" title={file.path}>
-        {file.path}
-      </span>
       {file.size !== null && (
-        <>
-          <Separator orientation="vertical" className="my-2" />
-          <span className="shrink-0">{fileSize(file.size)}</span>
-        </>
+        <span className="shrink-0">{fileSize(file.size)}</span>
       )}
       <span className="ml-auto shrink-0">{age && `Changed ${age}`}</span>
     </footer>

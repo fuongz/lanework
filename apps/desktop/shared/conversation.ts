@@ -45,6 +45,11 @@ export interface AgentModel {
   efforts?: readonly Effort[];
   /** False when it has no fast mode; unset when its CLI does not say. */
   fast?: boolean;
+  /**
+   * Added by the user in Settings → Harness (FE-146), not listed by its
+   * CLI: the CLI is given the id as typed.
+   */
+  custom?: boolean;
 }
 
 /**
@@ -130,6 +135,8 @@ let claudeList: readonly AgentModel[] = CLAUDE_MODELS;
 let codexList: readonly AgentModel[] = CODEX_MODELS;
 /** OpenCode's models as main last read them from its service. */
 let opencodeList: readonly AgentModel[] = OPENCODE_MODELS;
+/** The user's own models (FE-146), after their CLI's. */
+let customList: readonly AgentModel[] = [];
 let everyModel: readonly AgentModel[] = [
   ...claudeList,
   ...codexList,
@@ -137,10 +144,67 @@ let everyModel: readonly AgentModel[] = [
 ];
 const listeners = new Set<() => void>();
 
-/** One list again from the three, and every picker told. */
+/** One list again from the four, and every picker told. */
 function relist(): void {
-  everyModel = [...claudeList, ...codexList, ...opencodeList];
+  const listed = [...claudeList, ...codexList, ...opencodeList];
+  const ids = new Set(listed.map((entry) => entry.id));
+  // A custom id its CLI has since listed is the CLI's, once.
+  everyModel = [...listed, ...customList.filter((entry) => !ids.has(entry.id))];
   for (const listener of listeners) listener();
+}
+
+/** Whether `id` can be given to `agent`'s CLI as its model. */
+export function isModelIdFor(agent: ConversationAgent, id: string): boolean {
+  if (agent === "claude") return CLAUDE_MODEL_ID.test(id);
+  if (agent === "codex")
+    return CODEX_MODEL_ID.test(id) && !id.startsWith("claude-");
+  return OPENCODE_MODEL_ID.test(id);
+}
+
+/** A model the user added (FE-146), as kept and as sent to main. */
+export interface CustomModel {
+  agent: ConversationAgent;
+  id: string;
+  /** What the picker calls it; the id when left empty. */
+  label: string;
+}
+
+/** At most this many custom models are kept. */
+export const CUSTOM_MODELS_MAX = 100;
+
+/**
+ * Take `list` as the user's own models (FE-146): each given to its CLI as
+ * typed. Ids its CLI would refuse are dropped, and so is anything past
+ * {@link CUSTOM_MODELS_MAX}.
+ */
+export function setCustomModels(list: readonly CustomModel[]): void {
+  const next: AgentModel[] = [];
+  for (const entry of list.slice(0, CUSTOM_MODELS_MAX)) {
+    if (
+      !entry ||
+      (entry.agent !== "claude" &&
+        entry.agent !== "codex" &&
+        entry.agent !== "opencode") ||
+      typeof entry.id !== "string" ||
+      !isModelIdFor(entry.agent, entry.id) ||
+      next.some((kept) => kept.id === entry.id)
+    )
+      continue;
+    const label =
+      typeof entry.label === "string" && entry.label.trim()
+        ? entry.label.trim().slice(0, 80)
+        : entry.id;
+    next.push({
+      id: entry.id,
+      label,
+      agent: entry.agent,
+      custom: true,
+      ...(entry.agent === "opencode" ? { group: "Custom" } : {}),
+    });
+  }
+  if (JSON.stringify(next) === JSON.stringify(customList)) return;
+  customList = next;
+  relist();
 }
 
 /**
@@ -898,6 +962,8 @@ export function isPreviewUrl(value: unknown): value is string {
  * service: that would hand it every host the chats name.
  */
 export const FAVICON_HOSTS: readonly string[] = [
+  // Lanework's own site, and its docs and app under it
+  "lanework.dev",
   // Platforms and code hosts
   "apple.com",
   "google.com",
@@ -1052,6 +1118,8 @@ export const conversationChannels = {
   codexModels: "conversation:codex-models",
   /** OpenCode's models, as its service lists them (FE-104). */
   opencodeModels: "conversation:opencode-models",
+  /** The user's own models, sent so main runs them too (FE-146). */
+  customModels: "conversation:custom-models",
   linkPreview: "conversation:link-preview",
   /** Slash commands, or files in the project's folder, matching a query. */
   suggest: "conversation:suggest",
@@ -1133,6 +1201,8 @@ export interface DesktopConversationApi {
    * fixed list before it has.
    */
   claudeModels: () => Promise<AgentModel[]>;
+  /** Tell main the user's own models (FE-146), so a turn may run on one. */
+  setCustomModels: (models: CustomModel[]) => Promise<void>;
   /** Codex's models, read from `~/.codex/models_cache.json` by main. */
   codexModels: () => Promise<AgentModel[]>;
   /**

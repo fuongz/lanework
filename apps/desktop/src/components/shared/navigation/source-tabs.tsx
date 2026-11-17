@@ -1,13 +1,8 @@
-import {
-  GitPullRequestIcon,
-  ListViewIcon,
-  Search01Icon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { GitPullRequestIcon, ListViewIcon } from "@hugeicons/core-free-icons";
 import { useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { ListSearch } from "#/components/shared/common/list-search";
 import { SegmentedControl } from "#/components/shared/common/segmented-control";
-import { Input } from "#/components/ui/input";
 
 type Source = "issues" | "pulls";
 
@@ -77,31 +72,12 @@ export function SourceHeader({
     <div className="flex shrink-0 flex-col gap-1.5 px-2 pt-2 pb-2">
       <SourceTabs slug={slug} value={value} />
       {search && (
-        <div className="flex items-center gap-1">
-          <div className="relative min-w-0 flex-1">
-            <HugeiconsIcon
-              icon={Search01Icon}
-              className="text-muted-foreground pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2"
-              strokeWidth={1.8}
-              aria-hidden="true"
-            />
-            <Input
-              value={search.query}
-              onChange={(event) => search.onQuery(event.target.value)}
-              onKeyDown={(event) => {
-                // Escape clears the box first, and leaves it on the next press.
-                if (event.key === "Escape" && search.query) {
-                  event.preventDefault();
-                  search.onQuery("");
-                }
-              }}
-              placeholder={search.label}
-              aria-label={search.label}
-              className="pl-7"
-            />
-          </div>
-          {actions}
-        </div>
+        <ListSearch
+          query={search.query}
+          onQuery={search.onQuery}
+          label={search.label}
+          actions={actions}
+        />
       )}
       {children}
     </div>

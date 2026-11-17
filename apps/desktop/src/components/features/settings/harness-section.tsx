@@ -2,6 +2,7 @@ import {
   Copy01Icon,
   Loading03Icon,
   MultiplicationSignIcon,
+  RefreshIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -9,6 +10,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { useHarnessAccounts } from "#/components/shared/agents/harness-account";
 import { HARNESS_NAMES } from "#/components/shared/agents/harness-island";
+import logo from "#/components/shared/common/lanework-logo.png";
 import {
   SETTINGS_BUTTON,
   SettingsPage,
@@ -65,8 +67,10 @@ import type {
 } from "../../../../shared/handoff";
 import type { HarnessAgent } from "../../../../shared/harness";
 import { HarnessCard } from "./harness-section.card";
+import { HarnessList } from "./harness-section.list";
 import { useIsPreview } from "./harness-section.preview";
 import { usePullAllSection } from "./harness-section.pull";
+import { HarnessModels } from "./models-section";
 
 /** What each toolset is called in its select (FE-119/D1). */
 const TOOLSET_LABELS: Record<LaneworkMcpToolset, string> = {
@@ -128,14 +132,14 @@ const rowWords = (rows: SettingsRowSpec[]) =>
  * Sessions, under the cards, pulls every project's conversations in from the
  * CLIs ticked (FE-112).
  */
-export function HarnessSection() {
+export function HarnessSection({ cli }: { cli?: HarnessAgent } = {}) {
   const accounts = useHarnessAccounts();
   const [status, setStatus] = useState<HandoffStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const now = useClock();
   const [copied, copy] = useCopy();
-  const pullSection = usePullAllSection();
+  const pullSection = usePullAllSection(cli);
   // "Approve in Codex" opens Codex in the app's own terminal, in the project
   // last open, so its hook review is one keypress away rather than a trip to
   // another window. The approval itself is still Codex's (FE-29/D7).
@@ -661,7 +665,8 @@ export function HarnessSection() {
             usage={usage[kind]}
             account={accounts[kind]}
             now={now}
-            rows={rows}
+            // Its switches are the page's "Lanework" section, below the card.
+            rows={[]}
             onUpdate={() => void updateHarness(kind)}
           />
         ),
@@ -687,14 +692,26 @@ export function HarnessSection() {
           },
         ]
       : []),
-    ...cardSections,
-    pullSection,
+    {
+      title: "Agents",
+      hideTitle: true,
+      keywords: cardSections.map((card) => card.keywords ?? "").join(" "),
+      content: (
+        <HarnessList
+          rows={CLIS.map(({ harness: kind }) => ({
+            kind,
+            info: harnessLoaded
+              ? (harness.find((entry) => entry.agent === kind) ?? null)
+              : undefined,
+          }))}
+        />
+      ),
+    },
   ];
 
-  if (handoff)
-    sections.push({
-      title: "All agents",
-      rows: [
+  // Lanework's switches for every agent, shown on each CLI's page.
+  const pushRows: SettingsRowSpec[] = handoff
+    ? [
         {
           label: "Also push unfinished code to GitHub",
           // Tracked changes only: new files can be keys or scratch notes that
@@ -749,141 +766,206 @@ export function HarnessSection() {
             />
           ),
         },
-      ],
-    });
+      ]
+    : [];
 
-  sections.push({
-    title: "Updates",
-    rows: [
-      {
-        label: "Check for updates",
-        description: harnessError
-          ? harnessError
-          : checkedAt
-            ? `Last checked ${relativeTime(checkedAt, now)}.`
-            : "Lanework also checks on its own.",
-        keywords:
-          "check updates harness version latest claude codex opencode upgrade",
-        control: (
-          <Button
-            size="lg"
-            className={SETTINGS_BUTTON}
-            variant="outline"
-            disabled={checking || !window.desktop?.harness}
-            aria-busy={checking}
-            onClick={() => void check()}
-          >
-            {checking && (
-              <HugeiconsIcon
-                icon={Loading03Icon}
-                className="size-3.5 animate-spin motion-reduce:animate-none"
-                strokeWidth={1.5}
-                aria-hidden="true"
-              />
-            )}
-            {checking ? "Checking…" : "Check for updates"}
-          </Button>
+  // The hook's whereabouts and the last checkpoint, for one CLI's page.
+  const statusSection = (only: HarnessAgent): SettingsSectionSpec | null =>
+    handoff && anyOn && status
+      ? {
+          title: "Status",
+          rows: [
+            ...(only === "claude" && status.claude.installed
+              ? [
+                  {
+                    label: "Claude Code hook",
+                    description: "Where Claude Code finds it.",
+                    control: (
+                      <SettingsValue>
+                        {status.claude.settingsPath}
+                      </SettingsValue>
+                    ),
+                  },
+                ]
+              : []),
+            ...(only === "codex" && status.codex.installed
+              ? [
+                  {
+                    label: "Codex hook",
+                    description: "Where Codex finds it.",
+                    control: (
+                      <SettingsValue>{status.codex.settingsPath}</SettingsValue>
+                    ),
+                  },
+                ]
+              : []),
+            ...(only === "opencode" && status.opencode.installed
+              ? [
+                  {
+                    label: "OpenCode plugin",
+                    description: "Where OpenCode finds it.",
+                    control: (
+                      <SettingsValue>
+                        {status.opencode.settingsPath}
+                      </SettingsValue>
+                    ),
+                  },
+                ]
+              : []),
+            ...(local
+              ? []
+              : [
+                  {
+                    label: "Credential",
+                    description: status.credential
+                      ? "Stored in the Keychain."
+                      : "Missing. Turn a switch off and on again.",
+                    control: (
+                      <span
+                        className={
+                          status.credential
+                            ? "text-muted-foreground text-[13px]"
+                            : "text-destructive text-[13px]"
+                        }
+                      >
+                        {status.credential ? "In the Keychain" : "Missing"}
+                      </span>
+                    ),
+                  },
+                ]),
+            {
+              label: "Last checkpoint",
+              description: "From the last turn that worked on a card.",
+              control: (
+                <span className="text-muted-foreground text-[13px]">
+                  {status.last
+                    ? `${status.last.taskId}, ${relativeTime(status.last.at, now)}`
+                    : "None yet"}
+                </span>
+              ),
+            },
+          ],
+        }
+      : null;
+
+  const resumeSection: SettingsSectionSpec | null = handoff
+    ? {
+        title: "Resuming",
+        rows: [
+          {
+            label: "Hand a card to another agent",
+            description: "Tell any connected agent: resume <task id>.",
+            keywords: "resume codex claude opencode command",
+          },
+        ],
+      }
+    : null;
+
+  const problemSection: SettingsSectionSpec | null = error
+    ? {
+        title: "Problem",
+        content: (
+          <p role="alert" className="text-destructive text-[13px]">
+            {error}
+          </p>
         ),
+      }
+    : null;
+
+  // One CLI's own page (FE-146): its card, what Lanework adds to it, its
+  // models, then its sessions and its handoff's status. The list page keeps
+  // a row per CLI, the update check and any problem.
+  if (cli) {
+    const at = CLIS.findIndex(({ harness: kind }) => kind === cli);
+    const card = cardSections[at];
+    const laneworkRows =
+      handoff && at >= 0
+        ? [
+            ...mcpRows(CLIS[at].agent),
+            ...HOOK_ROWS[CLIS[at].agent],
+            ...pushRows,
+          ]
+        : [];
+    const page: (SettingsSectionSpec | null | undefined)[] = [
+      card,
+      laneworkRows.length
+        ? {
+            title: "Lanework",
+            icon: (
+              <img
+                src={logo}
+                alt=""
+                className="size-4 shrink-0 rounded-[4px]"
+              />
+            ),
+            rows: laneworkRows,
+          }
+        : null,
+      {
+        title: "Models",
+        keywords:
+          "models model picker favourite favorite star order reorder hide show slug id",
+        content: <HarnessModels agent={cli} />,
       },
-    ],
-  });
+      pullSection,
+      statusSection(cli),
+      resumeSection,
+      problemSection,
+    ];
+    return (
+      <SettingsPage
+        title={HARNESS_NAMES[cli]}
+        description="Its version, usage and handoff, and the models the composer offers: star one to put it first, drag or step it to set the order."
+        sections={page.filter((section): section is SettingsSectionSpec =>
+          Boolean(section),
+        )}
+      />
+    );
+  }
 
-  if (handoff && anyOn && status)
-    sections.push({
-      title: "Status",
-      rows: [
-        ...(status.claude.installed
-          ? [
-              {
-                label: "Claude Code hook",
-                description: "Where Claude Code finds it.",
-                control: (
-                  <SettingsValue>{status.claude.settingsPath}</SettingsValue>
-                ),
-              },
-            ]
-          : []),
-        ...(status.codex.installed
-          ? [
-              {
-                label: "Codex hook",
-                description: "Where Codex finds it.",
-                control: (
-                  <SettingsValue>{status.codex.settingsPath}</SettingsValue>
-                ),
-              },
-            ]
-          : []),
-        ...(status.opencode.installed
-          ? [
-              {
-                label: "OpenCode plugin",
-                description: "Where OpenCode finds it.",
-                control: (
-                  <SettingsValue>{status.opencode.settingsPath}</SettingsValue>
-                ),
-              },
-            ]
-          : []),
-        ...(local
-          ? []
-          : [
-              {
-                label: "Credential",
-                description: status.credential
-                  ? "Stored in the Keychain."
-                  : "Missing. Turn a switch off and on again.",
-                control: (
-                  <span
-                    className={
-                      status.credential
-                        ? "text-muted-foreground text-[13px]"
-                        : "text-destructive text-[13px]"
-                    }
-                  >
-                    {status.credential ? "In the Keychain" : "Missing"}
-                  </span>
-                ),
-              },
-            ]),
-        {
-          label: "Last checkpoint",
-          description: "From the last turn that worked on a card.",
-          control: (
-            <span className="text-muted-foreground text-[13px]">
-              {status.last
-                ? `${status.last.taskId}, ${relativeTime(status.last.at, now)}`
-                : "None yet"}
-            </span>
-          ),
-        },
-      ],
-    });
+  if (problemSection) sections.push(problemSection);
 
-  if (handoff)
+  // The CLIs' update check, as the page's one action (FE-146): when it last
+  // ran on hover, an error under the title.
+  const checkButton = (
+    <Button
+      size="sm"
+      variant="outline"
+      title={
+        checkedAt
+          ? `Last checked ${relativeTime(checkedAt, now)}`
+          : "Lanework also checks on its own"
+      }
+      disabled={checking || !window.desktop?.harness}
+      aria-busy={checking}
+      onClick={() => void check()}
+      className="h-8 shrink-0 gap-1.5 rounded-lg px-3 text-[13px]"
+    >
+      <HugeiconsIcon
+        icon={checking ? Loading03Icon : RefreshIcon}
+        className={cn(
+          "size-3.5",
+          checking && "animate-spin motion-reduce:animate-none",
+        )}
+        strokeWidth={1.8}
+        aria-hidden="true"
+      />
+      {checking ? "Checking…" : "Check for updates"}
+    </Button>
+  );
+  if (harnessError)
     sections.push({
-      title: "Resuming",
-      rows: [
-        {
-          label: "Hand a card to another agent",
-          description: "Tell any connected agent: resume <task id>.",
-          keywords: "resume codex claude opencode command",
-        },
-      ],
-    });
-
-  if (error)
-    sections.push({
-      title: "Problem",
+      title: "Updates",
       content: (
         <p role="alert" className="text-destructive text-[13px]">
-          {error}
+          {harnessError}
         </p>
       ),
     });
 
   return (
     <SettingsPage
+      actions={checkButton}
       title="Harness"
       description={
         handoff

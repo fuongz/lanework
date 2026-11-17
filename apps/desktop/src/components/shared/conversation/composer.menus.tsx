@@ -53,33 +53,13 @@ import {
   EmptyTitle,
 } from "#/components/ui/empty";
 import { Switch } from "#/components/ui/switch";
-import { readStored, writeStored } from "#/lib/stored";
 import { cn } from "#/lib/utils";
 import { usePreferences } from "#/stores/preferences";
-import { useModels } from "./composer.models";
+import { arrangeModels, useModels } from "./composer.models";
 
 /** A pill in the composer's bottom row. */
 const PILL =
   "text-foreground hover:bg-foreground/[0.08] aria-expanded:bg-foreground/[0.08] flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[13px] transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50";
-
-const FAVORITES_KEY = "lanework.conversation.favorite-models";
-
-function readFavorites(): string[] {
-  try {
-    const raw = readStored(FAVORITES_KEY);
-    const list: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(list)
-      ? list.filter((id): id is string => typeof id === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeFavorites(ids: string[]) {
-  // A favourite that is not kept is only a convenience lost.
-  writeStored(FAVORITES_KEY, JSON.stringify(ids));
-}
 
 /** Every CLI a chat runs on, in {@link AGENT_LABELS}' order: one tab each. */
 const AGENTS = Object.keys(AGENT_LABELS) as readonly ConversationAgent[];
@@ -117,21 +97,24 @@ function ModelPanel({
   const navigate = useNavigate();
   const all = useModels();
   const hiddenModels = usePreferences((state) => state.hiddenModels);
+  // Stars and order from Settings → Harness (FE-146), shared with the star
+  // here: starred first in each group, then the user's order.
+  const favorites = usePreferences((state) => state.favoriteModels);
+  const setFavorite = usePreferences((state) => state.setModelFavorite);
+  const modelOrder = usePreferences((state) => state.modelOrder);
   const models = useMemo(
-    () => all.filter((entry) => !exclude.includes(entry.agent)),
-    [all, exclude],
+    () =>
+      arrangeModels(
+        all.filter((entry) => !exclude.includes(entry.agent)),
+        modelOrder,
+        favorites,
+      ),
+    [all, exclude, modelOrder, favorites],
   );
-  // Settings → Models hides a model from here; the one picked stays, so the
+  // Settings → Harness → <CLI> hides a model from here; the one picked stays, so the
   // tick still says what runs.
   const hidden = useMemo(() => new Set(hiddenModels), [hiddenModels]);
-  const [favorites, setFavorites] = useState(readFavorites);
-  const toggle = (id: string) => {
-    const next = favorites.includes(id)
-      ? favorites.filter((entry) => entry !== id)
-      : [...favorites, id];
-    setFavorites(next);
-    writeFavorites(next);
-  };
+  const toggle = (id: string) => setFavorite(id, !favorites.includes(id));
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return models.filter(
@@ -253,7 +236,15 @@ function ModelPanel({
         <DropdownMenuItem
           aria-label="Manage models"
           title="Manage models"
-          onClick={() => void navigate({ to: "/settings/models" })}
+          // The tab's CLI page, where its models are (FE-146).
+          onClick={() =>
+            void navigate({
+              to: "/settings/harness/$cli",
+              params: {
+                cli: only === "favorites" ? (agent ?? "claude") : only,
+              },
+            })
+          }
           className="text-muted-foreground hover:text-foreground mt-auto flex size-8 items-center justify-center rounded-lg p-0"
         >
           <HugeiconsIcon

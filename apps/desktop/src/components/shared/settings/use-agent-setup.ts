@@ -15,6 +15,12 @@ const FOCUS_MIN_AGE_MS = 30_000;
  * NOTE: Filed under the slug it was read for, so a read that lands after
  * another project was picked is never shown on it.
  */
+/**
+ * Fired on `window` when Settings wrote one of the agents' config files
+ * (an MCP server removed or switched, FE-147): every setup read reads again.
+ */
+export const SETUP_CHANGED = "lanework:agent-setup-changed";
+
 export function useAgentSetup(
   slug: string,
   folders: string[],
@@ -51,9 +57,12 @@ export function useAgentSetup(
       if (Date.now() - readAt >= FOCUS_MIN_AGE_MS) read();
     };
     window.addEventListener("focus", onFocus);
+    // Settings changed a file of the setup (FE-147): read it again now.
+    window.addEventListener(SETUP_CHANGED, read);
     return () => {
       gone = true;
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener(SETUP_CHANGED, read);
     };
   }, [slug, key]);
 

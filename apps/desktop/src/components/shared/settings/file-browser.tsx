@@ -1,6 +1,6 @@
 // The Files screen's pieces for Settings pages that browse files that are
-// not a working tree (Skills, a project's skills, Config files): the title in
-// the window's title bar, the tree in the sidebar beside the open files as
+// not a working tree (Skills, a project's skills, Config files): the
+// breadcrumb in the page's header, the tree in the sidebar beside the open files as
 // tabs, each with its path above it.
 //
 // Drawn the way `files-layout.tsx`, `files-tree.tsx` and `FileTabs` draw
@@ -25,10 +25,6 @@ import {
   treeHostStyle,
 } from "#/components/shared/diff/tree-style";
 import {
-  WINDOW_TITLE,
-  WindowTitlebar,
-} from "#/components/shared/navigation/window-titlebar";
-import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
@@ -41,6 +37,7 @@ import {
 import { useDark } from "#/hooks/use-dark";
 import { usePersistedLayout } from "#/hooks/use-persisted-layout";
 import { cn } from "#/lib/utils";
+import { SettingsHeader } from "./settings-header";
 
 /** One file in the tree: its id for the page, and where it sits. */
 interface BrowserEntry {
@@ -72,22 +69,24 @@ function folder(
 /**
  * The page around a file browser.
  *
- * Its title (and actions) in the title bar, the tree on the left on the
- * sidebar's surface, and `children` (tabs and the open file) on the right.
+ * Its breadcrumb (and actions) in the header, an optional `toolbar` under
+ * it, the tree on the left on the sidebar's surface, and `children` (tabs and
+ * the open file) on the right.
  */
 export function FileBrowserLayout({
   id,
   title,
-  heading,
+  toolbar,
   actions,
   sidebar,
   children,
 }: {
   /** Keys the panel sizes, per page. */
   id: string;
+  /** Names the tree for screen readers; the header reads the address. */
   title: string;
-  /** Drawn in the title bar instead of `title`: a project picker. */
-  heading?: ReactNode;
+  /** A row under the header, across the page: Skills' scope row. */
+  toolbar?: ReactNode;
   actions?: ReactNode;
   sidebar: ReactNode;
   children: ReactNode;
@@ -99,11 +98,8 @@ export function FileBrowserLayout({
   return (
     // A column: the header on top, the panels in the rest of the card.
     <div className="flex h-full min-h-0 flex-col">
-      <WindowTitlebar>
-        {heading ?? <h1 className={WINDOW_TITLE}>{title}</h1>}
-        <span className="ml-auto" />
-        {actions}
-      </WindowTitlebar>
+      <SettingsHeader heading>{actions}</SettingsHeader>
+      {toolbar}
       <ResizablePanelGroup
         className="h-auto min-h-0 flex-1"
         id={id}
@@ -119,7 +115,7 @@ export function FileBrowserLayout({
         >
           <aside
             aria-label={title}
-            className="bg-sidebar flex h-full min-h-0 flex-col"
+            className="bg-background flex h-full min-h-0 flex-col"
           >
             {sidebar}
           </aside>

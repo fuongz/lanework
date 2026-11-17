@@ -12,15 +12,12 @@ import { MarkdownBody } from "#/components/shared/common/markdown-body";
 import { EditorTabs } from "#/components/shared/editor/editor-tabs";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
-  WINDOW_TITLE,
-  WindowTitlebar,
-} from "#/components/shared/navigation/window-titlebar";
-import {
   FileBrowserLayout,
   FileBrowserPath,
   FileBrowserTree,
   treePath,
 } from "#/components/shared/settings/file-browser";
+import { SettingsHeader } from "#/components/shared/settings/settings-header";
 import { useAgentSetup } from "#/components/shared/settings/use-agent-setup";
 import { Alert, AlertDescription } from "#/components/ui/alert";
 import { Button, buttonVariants } from "#/components/ui/button";
@@ -153,7 +150,7 @@ function Placeholder({
 const NO_SKILLS =
   "Skills in the project's .claude, .agents or .codex folder show here.";
 
-function Skills({ project }: { project: Project }) {
+function Skills({ project, scope }: { project: Project; scope: ReactNode }) {
   // Read again when the project's folder changes, like Projects › General.
   const { setup, error } = useAgentSetup(project.slug, [project.path ?? ""]);
   // NOTE: Open tabs by id. An id is stable across reads, so a tab survives
@@ -191,10 +188,11 @@ function Skills({ project }: { project: Project }) {
         description="Link a folder to see its skills."
       >
         <Link
-          to="/settings/projects"
-          className={buttonVariants({ variant: "outline", size: "sm" })}
+          to="/settings/projects/$slug"
+          params={{ slug: project.slug }}
+          className={buttonVariants({ variant: "secondary", size: "sm" })}
         >
-          Open General
+          Open project settings
         </Link>
       </Placeholder>
     );
@@ -220,6 +218,7 @@ function Skills({ project }: { project: Project }) {
     <FileBrowserLayout
       id="lanework:project-skills"
       title="Skills"
+      toolbar={scope}
       sidebar={
         error ? (
           <p role="alert" className="text-destructive px-3.5 py-2 text-[13px]">
@@ -270,20 +269,20 @@ function Skills({ project }: { project: Project }) {
 }
 
 /**
- * Settings › Projects › Skills: the skills the picked project's folder brings.
+ * Settings › Skills with a project picked in its scope row (FE-145): the
+ * skills that project's folder brings.
  *
  * `.claude/skills` for Claude Code, `.agents/skills` and `.codex/skills` for
  * Codex, as a tree by folder beside the open ones in tabs. Read-only: the
- * user's own skills live in Settings › Skills, and are edited there.
+ * user's own skills are under "All projects", and are edited there.
  */
-export function ProjectSkillsPage() {
+export function ProjectSkillsPage({ scope }: { scope: ReactNode }) {
   const project = useSettingsProject();
   if (!project)
     return (
       <div className="flex h-full flex-col">
-        <WindowTitlebar>
-          <h1 className={WINDOW_TITLE}>Skills</h1>
-        </WindowTitlebar>
+        <SettingsHeader heading />
+        {scope}
         <Placeholder
           title="No projects yet"
           description="Add a project to see its skills."
@@ -291,5 +290,5 @@ export function ProjectSkillsPage() {
       </div>
     );
   // Keyed by slug: another project's tabs never carry over.
-  return <Skills key={project.slug} project={project} />;
+  return <Skills key={project.slug} project={project} scope={scope} />;
 }

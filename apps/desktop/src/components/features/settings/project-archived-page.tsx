@@ -10,6 +10,7 @@ import {
   SettingsPage,
   type SettingsSectionSpec,
 } from "#/components/shared/settings/settings-page";
+import { SettingsScope } from "#/components/shared/settings/settings-scope";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -250,6 +251,7 @@ function Archived({ project }: { project: Project }) {
   return (
     <>
       <SettingsPage
+        scope={<SettingsScope />}
         title="Archived"
         description={DESCRIPTION}
         sections={sections}
@@ -313,8 +315,11 @@ function Archived({ project }: { project: Project }) {
 }
 
 /**
- * Settings › Projects › Archived: the picked project's archived Claude Code
- * and Codex conversations, each to bring back or delete for good.
+ * Settings › Archived: the picked project's archived Claude Code and Codex
+ * conversations, each to bring back or delete for good.
+ *
+ * Always one project: an archive belongs to a project's folder, so its scope
+ * row has no "All projects" (FE-145).
  *
  * Archived from the Agents group's menu, in each CLI's own archive (FE-72/D1).
  */
@@ -323,6 +328,7 @@ export function ProjectArchivedPage() {
   if (!project)
     return (
       <SettingsPage
+        scope={<SettingsScope />}
         title="Archived"
         description={DESCRIPTION}
         sections={[

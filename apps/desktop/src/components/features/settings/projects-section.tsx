@@ -1,6 +1,11 @@
-import { CloudDownloadIcon, CloudUploadIcon } from "@hugeicons/core-free-icons";
+import {
+  CloudDownloadIcon,
+  CloudUploadIcon,
+  DashboardSquare02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useState } from "react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import type { Project } from "#/../shared/projects";
 import { ImportLocalDialog } from "#/components/features/projects/import-local-dialog";
 import {
@@ -14,6 +19,7 @@ import {
   SETTINGS_BUTTON,
   SettingsPage,
 } from "#/components/shared/settings/settings-page";
+import { SettingsScope } from "#/components/shared/settings/settings-scope";
 import { Alert, AlertDescription, AlertTitle } from "#/components/ui/alert";
 import {
   AlertDialog,
@@ -25,60 +31,26 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "#/components/ui/alert-dialog";
-import { Button } from "#/components/ui/button";
+import { Button, buttonVariants } from "#/components/ui/button";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import { useBoard } from "#/stores/board";
 import { isLocalProject, useSession } from "#/stores/session";
-import { useSettingsProject } from "#/stores/settings-project";
+import { useFolderPaths } from "./projects-section.folders";
 import { Row, SelectedProjectSection } from "./selected-project-section";
 
 const NONE: Project[] = [];
 
 /**
- * The folders linked to each project on this machine, primary first.
- *
- * NOTE: It hands back the read (`refresh`) as well as the result. Editing a
- * project's folders changes nothing about the project list, so no
- * dependency would change and the page would keep the old paths. A counter in
- * the dependency array would be a dependency the effect does not use.
- */
-function useFolderPaths(projects: Project[]) {
-  const [paths, setPaths] = useState<Record<string, string[]>>({});
-  // The slugs as one string: a new array every render must not re-read every
-  // project's folders.
-  const slugs = projects.map((project) => project.slug).join(" ");
-
-  const read = useCallback(async () => {
-    const api = window.desktop?.projects.folder;
-    if (!api) return;
-    const entries = await Promise.all(
-      slugs
-        .split(" ")
-        .filter(Boolean)
-        .map(
-          async (slug) =>
-            // A failed folder read is not worth failing the page over: the row
-            // still names the project, and the folder line stays empty.
-            [
-              slug,
-              (await api.list(slug).catch(() => [])).map(
-                (folder) => folder.path,
-              ),
-            ] as const,
-        ),
-    );
-    setPaths(Object.fromEntries(entries));
-  }, [slugs]);
-
-  useEffect(() => {
-    void read();
-  }, [read]);
-
-  return { paths, refresh: read };
-}
-
-/**
- * Settings › Projects › General: the project picked in the sidebar's Projects
- * heading, and what this app can do to it.
+ * Settings › Projects › <name> (`/settings/projects/$slug`): one project,
+ * and what this app can do to it. Its scope row goes to another project's
+ * page (FE-145).
  *
  * NOTE: Create, rename and delete all use the machine surface this app holds
  * a credential for: `POST`, `PATCH` and `DELETE /v1/sync/state/workspace`.
@@ -91,11 +63,19 @@ function useFolderPaths(projects: Project[]) {
  * - Delete here is not the web app's archive. The service removes the row
  *   and every machine's recorded path for it, so the confirmation says that
  *   rather than asking "are you sure?".
- * - No project list: the sidebar's picker chooses the project, and the order
- *   lives in the project switcher.
+ * - The list is the page above (`projects-list.tsx`); the order lives in the
+ *   project switcher.
  */
-export function ProjectsSection() {
-  const selected = useSettingsProject();
+export function ProjectsSection({ slug }: { slug: string }) {
+  const navigate = useNavigate();
+  const projects = useBoard((state) => state.projects);
+  const ready = useBoard((state) => state.ready);
+  const hydrate = useBoard((state) => state.hydrate);
+  // A project's page can be opened straight from a cold start.
+  useEffect(() => {
+    if (!ready) void hydrate();
+  }, [ready, hydrate]);
+  const selected = projects.find((project) => project.slug === slug) ?? null;
   const deleteProject = useBoard((state) => state.deleteProject);
 
   const [editing, setEditing] = useState<Project | null>(null);
@@ -142,13 +122,57 @@ export function ProjectsSection() {
   return (
     <>
       <SettingsPage
-        title="General"
-        description={
-          signedIn
-            ? "The project picked at the top."
-            : "The project picked at the top."
+        scope={
+          <SettingsScope
+            current={selected}
+            onChoose={(next) =>
+              void navigate({
+                to: "/settings/projects/$slug",
+                params: { slug: next },
+              })
+            }
+          />
         }
+        title="General"
+        description="Its name, folders, readiness and board."
         sections={[
+          // Read, and no project by that slug: deleted, or an old link.
+          ...(ready && !selected
+            ? [
+                {
+                  title: "Not found",
+                  hideTitle: true,
+                  content: (
+                    <Empty className="mt-6">
+                      <EmptyHeader>
+                        <EmptyMedia variant="icon">
+                          <HugeiconsIcon
+                            icon={DashboardSquare02Icon}
+                            strokeWidth={1.8}
+                          />
+                        </EmptyMedia>
+                        <EmptyTitle>That project is not here</EmptyTitle>
+                        <EmptyDescription>
+                          It may have been deleted, or it belongs to another
+                          account.
+                        </EmptyDescription>
+                      </EmptyHeader>
+                      <EmptyContent>
+                        <Link
+                          to="/settings/projects"
+                          className={buttonVariants({
+                            variant: "outline",
+                            size: "sm",
+                          })}
+                        >
+                          All projects
+                        </Link>
+                      </EmptyContent>
+                    </Empty>
+                  ),
+                },
+              ]
+            : []),
           ...(exportNote && !failure
             ? [
                 {
@@ -177,88 +201,94 @@ export function ProjectsSection() {
                 },
               ]
             : []),
-          {
-            title: "Project",
-            hideTitle: true,
-            keywords:
-              "project rename folders import danger remove all issues purge delete clear reset ready readiness sync cloud",
-            content: (
-              <SelectedProjectSection
-                // A fresh section per project, so a "Removed 12 issues" line
-                // never follows the selection onto a different board.
-                key={selected?.slug ?? "none"}
-                project={selected}
-                folders={selected ? (paths[selected.slug] ?? []) : []}
-                onRename={setRenaming}
-                onFolders={setEditing}
-                onImport={setImporting}
-                onDelete={setConfirming}
-                onFailed={setFailed}
-                extraRows={
-                  canExport && selected ? (
-                    <Row
-                      label="Export to local"
-                      description="Copy this project's board to this machine. The board on your account stays as it is."
-                    >
-                      <Button
-                        size="lg"
-                        className={SETTINGS_BUTTON}
-                        variant="outline"
-                        aria-label={`Export ${selected.name} to local`}
-                        disabled={exporting !== null}
-                        onClick={() => {
-                          setFailed(null);
-                          setExported(null);
-                          void exportBoard(selected).then((result) => {
-                            if (!result) return;
-                            setExported({
-                              slug: selected.slug,
-                              text: `${result.cards} ${result.cards === 1 ? "issue" : "issues"} copied to the local project ${result.localSlug}. Syncing it to the cloud later makes a second project there.`,
-                            });
-                          });
-                        }}
-                      >
-                        <HugeiconsIcon
-                          icon={CloudDownloadIcon}
-                          strokeWidth={1.8}
-                          data-icon="inline-start"
-                          aria-hidden="true"
-                        />
-                        {exporting === selected.id
-                          ? "Copying…"
-                          : "Export to local"}
-                      </Button>
-                    </Row>
-                  ) : canSync && selected ? (
-                    <Row
-                      label="Sync to cloud"
-                      description="Move this project and its board to your account."
-                    >
-                      <Button
-                        size="lg"
-                        className={SETTINGS_BUTTON}
-                        variant="outline"
-                        aria-label={`Sync ${selected.name} to cloud`}
-                        disabled={syncing !== null}
-                        onClick={() => {
-                          setFailed(null);
-                          void sync(selected);
-                        }}
-                      >
-                        <HugeiconsIcon
-                          icon={CloudUploadIcon}
-                          strokeWidth={1.8}
-                          data-icon="inline-start"
-                          aria-hidden="true"
-                        />
-                        {syncing === selected.id ? "Moving…" : "Sync to cloud"}
-                      </Button>
-                    </Row>
-                  ) : null
-                }
-              />
-            ),
-          },
+          ...(ready && !selected
+            ? []
+            : [
+                {
+                  title: "Project",
+                  hideTitle: true,
+                  keywords:
+                    "project rename folders import danger remove all issues purge delete clear reset ready readiness sync cloud",
+                  content: (
+                    <SelectedProjectSection
+                      // A fresh section per project, so a "Removed 12 issues" line
+                      // never follows the selection onto a different board.
+                      key={selected?.slug ?? "none"}
+                      project={selected}
+                      folders={selected ? (paths[selected.slug] ?? []) : []}
+                      onRename={setRenaming}
+                      onFolders={setEditing}
+                      onImport={setImporting}
+                      onDelete={setConfirming}
+                      onFailed={setFailed}
+                      extraRows={
+                        canExport && selected ? (
+                          <Row
+                            label="Export to local"
+                            description="Copy this project's board to this machine. The board on your account stays as it is."
+                          >
+                            <Button
+                              size="lg"
+                              className={SETTINGS_BUTTON}
+                              variant="outline"
+                              aria-label={`Export ${selected.name} to local`}
+                              disabled={exporting !== null}
+                              onClick={() => {
+                                setFailed(null);
+                                setExported(null);
+                                void exportBoard(selected).then((result) => {
+                                  if (!result) return;
+                                  setExported({
+                                    slug: selected.slug,
+                                    text: `${result.cards} ${result.cards === 1 ? "issue" : "issues"} copied to the local project ${result.localSlug}. Syncing it to the cloud later makes a second project there.`,
+                                  });
+                                });
+                              }}
+                            >
+                              <HugeiconsIcon
+                                icon={CloudDownloadIcon}
+                                strokeWidth={1.8}
+                                data-icon="inline-start"
+                                aria-hidden="true"
+                              />
+                              {exporting === selected.id
+                                ? "Copying…"
+                                : "Export to local"}
+                            </Button>
+                          </Row>
+                        ) : canSync && selected ? (
+                          <Row
+                            label="Sync to cloud"
+                            description="Move this project and its board to your account."
+                          >
+                            <Button
+                              size="lg"
+                              className={SETTINGS_BUTTON}
+                              variant="outline"
+                              aria-label={`Sync ${selected.name} to cloud`}
+                              disabled={syncing !== null}
+                              onClick={() => {
+                                setFailed(null);
+                                void sync(selected);
+                              }}
+                            >
+                              <HugeiconsIcon
+                                icon={CloudUploadIcon}
+                                strokeWidth={1.8}
+                                data-icon="inline-start"
+                                aria-hidden="true"
+                              />
+                              {syncing === selected.id
+                                ? "Moving…"
+                                : "Sync to cloud"}
+                            </Button>
+                          </Row>
+                        ) : null
+                      }
+                    />
+                  ),
+                },
+              ]),
         ]}
       />
 
@@ -343,7 +373,8 @@ export function ProjectsSection() {
                 setFailed(null);
                 void deleteProject(target.id, target.slug).then((result) => {
                   if (result.error) setFailed(result.error);
-                  else void refresh();
+                  // Its page has nothing left to show: back to the list.
+                  else void navigate({ to: "/settings/projects" });
                 });
               }}
             >

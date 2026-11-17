@@ -63,8 +63,10 @@ function agentProgress(pull: AgentPull, agent: TerminalAgent): string {
  * NOTE: The CLIs ticked are this page's choice, not a setting: every CLI here
  * starts ticked again the next time it opens.
  */
-export function usePullAllSection(): SettingsSectionSpec {
-  const agents = useTerminal((state) => state.agents);
+export function usePullAllSection(only?: TerminalAgent): SettingsSectionSpec {
+  // On one CLI's page (FE-146), that CLI alone: no ticks to choose from.
+  const installed = useTerminal((state) => state.agents);
+  const agents = only ? installed.filter((agent) => agent === only) : installed;
   const asked = useTerminal((state) => state.agentsAsked);
   const loadAgents = useTerminal((state) => state.loadAgents);
   useEffect(() => {
@@ -122,14 +124,15 @@ export function usePullAllSection(): SettingsSectionSpec {
       rows: [
         {
           label: "Pull all projects",
-          description:
-            "No agent CLI on this machine. Install Claude Code, Codex or OpenCode first.",
+          description: only
+            ? `${HARNESS_NAMES[only]} is not on this machine.`
+            : "No agent CLI on this machine. Install Claude Code, Codex or OpenCode first.",
           keywords: KEYWORDS,
         },
       ],
     };
 
-  const agentRows: SettingsRowSpec[] = agents.map((agent) => ({
+  const agentRows: SettingsRowSpec[] = (only ? [] : agents).map((agent) => ({
     label: HARNESS_NAMES[agent],
     description: mine
       ? agentProgress(mine, agent)

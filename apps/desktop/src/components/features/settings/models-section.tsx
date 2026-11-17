@@ -1,21 +1,24 @@
 import {
+  Add01Icon,
   ArrowDown01Icon,
   ArrowRight01Icon,
+  ArrowUp01Icon,
+  Delete02Icon,
+  DragDropVerticalIcon,
   Search01Icon,
+  StarIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Reorder, useDragControls } from "motion/react";
 import { useMemo, useState } from "react";
+import type { AgentModel, ConversationAgent } from "#/../shared/conversation";
 import {
-  AGENT_LABELS,
-  type AgentModel,
-  type ConversationAgent,
-} from "#/../shared/conversation";
-import { useModels } from "#/components/shared/conversation/composer.models";
-import {
-  SettingsCard,
-  SettingsPage,
-} from "#/components/shared/settings/settings-page";
-import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
+  arrangeModels,
+  modelGroupKey,
+  useModels,
+} from "#/components/shared/conversation/composer.models";
+import { SettingsCard } from "#/components/shared/settings/settings-page";
+import { Button } from "#/components/ui/button";
 import {
   Empty,
   EmptyDescription,
@@ -23,92 +26,353 @@ import {
   EmptyTitle,
 } from "#/components/ui/empty";
 import { Switch } from "#/components/ui/switch";
+import { cn } from "#/lib/utils";
 import { usePreferences } from "#/stores/preferences";
-
-/** Every CLI a chat runs on, in {@link AGENT_LABELS}' order. */
-const AGENTS = Object.keys(AGENT_LABELS) as readonly ConversationAgent[];
+import { AddModelDialog } from "./models-section.add";
 
 /** One group's models: a CLI's, or one OpenCode provider's. */
 interface ModelGroup {
   key: string;
   title: string;
-  agent: ConversationAgent;
   entries: AgentModel[];
 }
 
-/**
- * The picker's models as groups: Claude's and Codex's whole, OpenCode's one
- * per provider, in the order main sorted them (OpenCode Go first for a
- * subscriber). The CLI's mark tells an OpenCode provider from a CLI.
- */
-function groupsOf(models: readonly AgentModel[]): ModelGroup[] {
+/** `models` by group, each in the user's order (stars are not lifted here). */
+function groupsOf(
+  models: readonly AgentModel[],
+  order: Readonly<Record<string, readonly string[]>>,
+): ModelGroup[] {
   const out: ModelGroup[] = [];
-  for (const agent of AGENTS) {
-    const own = models.filter((entry) => entry.agent === agent);
-    if (agent !== "opencode") {
-      if (own.length)
-        out.push({
-          key: agent,
-          title: AGENT_LABELS[agent],
-          agent,
-          entries: own,
-        });
-      continue;
-    }
-    for (const entry of own) {
-      const title = entry.group ?? "Other";
-      const key = `opencode:${title}`;
-      const last = out.at(-1);
-      if (last?.key === key) last.entries.push(entry);
-      else out.push({ key, title, agent, entries: [entry] });
-    }
+  for (const entry of arrangeModels(models, order)) {
+    const key = modelGroupKey(entry);
+    const last = out.at(-1);
+    if (last?.key === key) last.entries.push(entry);
+    else
+      out.push({
+        key,
+        title: entry.agent === "opencode" ? (entry.group ?? "Other") : "",
+        entries: [entry],
+      });
   }
   return out;
 }
 
-/** `groups` narrowed to the models `query` matches, by name, id or group. */
-function matching(groups: ModelGroup[], query: string): ModelGroup[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return groups;
-  return groups.flatMap((group) => {
-    if (group.title.toLowerCase().includes(q)) return [group];
-    const entries = group.entries.filter(
-      (entry) =>
-        entry.label.toLowerCase().includes(q) ||
-        entry.id.toLowerCase().includes(q),
-    );
-    return entries.length ? [{ ...group, entries }] : [];
-  });
+const ICON_BUTTON =
+  "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] grid size-6 shrink-0 place-items-center rounded-md transition-colors disabled:pointer-events-none disabled:opacity-30";
+
+/**
+ * One model: a handle to drag it, up and down, its star, its name with its
+ * id as a slug, and whether the picker offers it.
+ */
+function ModelRow({
+  entry,
+  first,
+  last,
+  searching,
+  favorite,
+  shown,
+  onMove,
+  onFavorite,
+  onShown,
+}: {
+  entry: AgentModel;
+  first: boolean;
+  last: boolean;
+  /** While searching the list is a subset: it is not reordered. */
+  searching: boolean;
+  favorite: boolean;
+  shown: boolean;
+  onMove: (step: -1 | 1) => void;
+  onFavorite: () => void;
+  onShown: (shown: boolean) => void;
+}) {
+  const drag = useDragControls();
+  const removeCustom = usePreferences((state) => state.removeCustomModel);
+  return (
+    <Reorder.Item
+      as="li"
+      value={entry.id}
+      dragListener={false}
+      dragControls={drag}
+      className="bg-card relative flex h-10 items-center gap-1.5 px-2.5"
+      whileDrag={{ zIndex: 10, boxShadow: "0 6px 20px -6px rgb(0 0 0 / 0.25)" }}
+    >
+      <button
+        type="button"
+        aria-label={`Drag ${entry.label}`}
+        title="Drag to reorder"
+        disabled={searching}
+        onPointerDown={(event) => drag.start(event)}
+        className={cn(
+          ICON_BUTTON,
+          "cursor-grab touch-none active:cursor-grabbing",
+        )}
+      >
+        <HugeiconsIcon
+          icon={DragDropVerticalIcon}
+          className="size-3.5"
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
+      </button>
+      <button
+        type="button"
+        aria-label={`Move ${entry.label} up`}
+        title="Move up"
+        disabled={searching || first}
+        onClick={() => onMove(-1)}
+        className={ICON_BUTTON}
+      >
+        <HugeiconsIcon
+          icon={ArrowUp01Icon}
+          className="size-3.5"
+          strokeWidth={2}
+          aria-hidden="true"
+        />
+      </button>
+      <button
+        type="button"
+        aria-label={`Move ${entry.label} down`}
+        title="Move down"
+        disabled={searching || last}
+        onClick={() => onMove(1)}
+        className={ICON_BUTTON}
+      >
+        <HugeiconsIcon
+          icon={ArrowDown01Icon}
+          className="size-3.5"
+          strokeWidth={2}
+          aria-hidden="true"
+        />
+      </button>
+      <button
+        type="button"
+        aria-label={`${favorite ? "Unstar" : "Star"} ${entry.label}`}
+        aria-pressed={favorite}
+        title={
+          favorite ? "Favourite: first in the picker" : "Add to favourites"
+        }
+        onClick={onFavorite}
+        className={cn(
+          ICON_BUTTON,
+          favorite && "text-tone-amber hover:text-tone-amber",
+        )}
+      >
+        <HugeiconsIcon
+          icon={StarIcon}
+          className={cn("size-3.5", favorite && "fill-current")}
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
+      </button>
+      <span className="ml-1 flex min-w-0 flex-1 items-baseline gap-2">
+        <span className="shrink-0 truncate text-[13px]">{entry.label}</span>
+        <span className="text-muted-foreground min-w-0 truncate font-mono text-[12px]">
+          {entry.id}
+        </span>
+      </span>
+      {entry.legacy && (
+        <span className="text-muted-foreground shrink-0 text-xs">
+          Deprecated
+        </span>
+      )}
+      {entry.custom && (
+        <>
+          <span className="text-muted-foreground shrink-0 text-xs">Custom</span>
+          <button
+            type="button"
+            aria-label={`Remove ${entry.label}`}
+            title="Remove this model"
+            onClick={() => removeCustom(entry.id)}
+            className={ICON_BUTTON}
+          >
+            <HugeiconsIcon
+              icon={Delete02Icon}
+              className="size-3.5"
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+          </button>
+        </>
+      )}
+      <Switch
+        size="sm"
+        aria-label={`Show ${entry.label} in the picker`}
+        checked={shown}
+        onCheckedChange={onShown}
+      />
+    </Reorder.Item>
+  );
 }
 
 /**
- * The model list: a search, then each group behind a disclosure with a
- * switch for all of it, and a switch per model.
- *
- * Only the first group starts open; a search opens every group it matches.
+ * One group's rows, dragged or stepped into the user's order, with a
+ * header (OpenCode's providers) that folds it and puts its order back.
  */
-function ModelList() {
-  const models = useModels();
-  const hiddenModels = usePreferences((state) => state.hiddenModels);
+function GroupList({
+  group,
+  query,
+  open,
+  onToggle,
+  titled,
+}: {
+  group: ModelGroup;
+  query: string;
+  open: boolean;
+  onToggle: () => void;
+  /** OpenCode's providers have a header; a CLI's one list does not. */
+  titled: boolean;
+}) {
+  const hidden = usePreferences((state) => state.hiddenModels);
   const setModelsHidden = usePreferences((state) => state.setModelsHidden);
-  const hidden = useMemo(() => new Set(hiddenModels), [hiddenModels]);
-  const groups = useMemo(() => groupsOf(models), [models]);
+  const favorites = usePreferences((state) => state.favoriteModels);
+  const setFavorite = usePreferences((state) => state.setModelFavorite);
+  const custom = usePreferences((state) => state.modelOrder[group.key]);
+  const setOrder = usePreferences((state) => state.setModelOrder);
+  const hiddenSet = useMemo(() => new Set(hidden), [hidden]);
+  const ids = group.entries.map((entry) => entry.id);
+  const q = query.trim().toLowerCase();
+  const shown = q
+    ? group.entries.filter(
+        (entry) =>
+          entry.label.toLowerCase().includes(q) ||
+          entry.id.toLowerCase().includes(q),
+      )
+    : group.entries;
+  const visible = ids.filter((id) => !hiddenSet.has(id)).length;
+
+  const move = (id: string, step: -1 | 1) => {
+    const at = ids.indexOf(id);
+    const to = at + step;
+    if (at < 0 || to < 0 || to >= ids.length) return;
+    const next = [...ids];
+    [next[at], next[to]] = [next[to], next[at]];
+    setOrder(group.key, next);
+  };
+
+  const reset = custom ? (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={() => setOrder(group.key, null)}
+      className="text-muted-foreground h-7 shrink-0 rounded-lg px-2 text-[12px]"
+    >
+      Reset order
+    </Button>
+  ) : null;
+
+  return (
+    <section aria-label={group.title || "Models"}>
+      {titled ? (
+        <div className="flex h-11 items-center gap-2 pr-4 pl-2.5">
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={open}
+            disabled={Boolean(q)}
+            className="hover:bg-foreground/[0.05] flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 text-left transition-colors disabled:hover:bg-transparent"
+          >
+            <HugeiconsIcon
+              icon={open ? ArrowDown01Icon : ArrowRight01Icon}
+              className="text-muted-foreground size-3.5 shrink-0"
+              strokeWidth={2}
+              aria-hidden="true"
+            />
+            <span className="truncate text-[13px] font-medium">
+              {group.title}
+            </span>
+            <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+              {visible}/{ids.length}
+            </span>
+          </button>
+          {reset}
+          <Switch
+            aria-label={`Show every ${group.title} model`}
+            checked={visible === ids.length}
+            onCheckedChange={(checked) => setModelsHidden(ids, !checked)}
+          />
+        </div>
+      ) : (
+        reset && <div className="flex justify-end px-2.5 pt-1.5">{reset}</div>
+      )}
+      {open && (
+        <Reorder.Group
+          as="ul"
+          axis="y"
+          values={ids}
+          onReorder={(next) => setOrder(group.key, next)}
+          className="divide-border divide-y pb-1"
+        >
+          {shown.map((entry) => (
+            <ModelRow
+              key={entry.id}
+              entry={entry}
+              first={entry.id === ids[0]}
+              last={entry.id === ids[ids.length - 1]}
+              searching={Boolean(q)}
+              favorite={favorites.includes(entry.id)}
+              shown={!hiddenSet.has(entry.id)}
+              onMove={(step) => move(entry.id, step)}
+              onFavorite={() =>
+                setFavorite(entry.id, !favorites.includes(entry.id))
+              }
+              onShown={(on) => setModelsHidden([entry.id], !on)}
+            />
+          ))}
+        </Reorder.Group>
+      )}
+    </section>
+  );
+}
+
+/**
+ * A CLI's models in Settings → Harness → <CLI> (FE-146): which the composer's
+ * picker offers, which are starred (first in it, and its Favourites) and in
+ * what order. OpenCode's are one group per provider, each folding and
+ * reordered on its own; the first starts open.
+ *
+ * Lanework's own list, kept on this machine. A CLI's own picker is neither
+ * read nor changed, and a hidden model still runs the chats already on it.
+ */
+export function HarnessModels({ agent }: { agent: ConversationAgent }) {
+  const all = useModels();
+  const order = usePreferences((state) => state.modelOrder);
+  const groups = useMemo(
+    () =>
+      groupsOf(
+        all.filter((entry) => entry.agent === agent),
+        order,
+      ),
+    [all, agent, order],
+  );
   const [query, setQuery] = useState("");
   /** Groups opened or closed by hand, against the default (first open). */
   const [flipped, setFlipped] = useState<ReadonlySet<string>>(new Set());
-  const searching = query.trim().length > 0;
-  const shown = matching(groups, query);
-
-  const flip = (key: string) =>
-    setFlipped((current) => {
-      const next = new Set(current);
-      if (!next.delete(key)) next.add(key);
-      return next;
-    });
+  const count = groups.reduce((sum, group) => sum + group.entries.length, 0);
+  const hidden = usePreferences((state) => state.hiddenModels);
+  const setModelsHidden = usePreferences((state) => state.setModelsHidden);
+  const [adding, setAdding] = useState(false);
+  const allIds = groups.flatMap((group) => group.entries.map((e) => e.id));
+  // "Disable all" while any is offered; once every one is hidden, "Enable".
+  const noneHidden = allIds.some((id) => !hidden.includes(id));
+  const titled = agent === "opencode";
+  const q = query.trim().toLowerCase();
+  const matching = groups.filter(
+    (group) =>
+      !q ||
+      group.title.toLowerCase().includes(q) ||
+      group.entries.some(
+        (entry) =>
+          entry.label.toLowerCase().includes(q) ||
+          entry.id.toLowerCase().includes(q),
+      ),
+  );
 
   return (
     <SettingsCard className="overflow-hidden">
-      <label className="flex h-11 items-center gap-2.5 px-4">
+      {/* The list's header: a search, then the whole CLI shown or hidden at
+          once, and a model of the user's own (FE-146). */}
+      <div className="flex h-11 items-center gap-2 pr-2.5 pl-4">
         <HugeiconsIcon
           icon={Search01Icon}
           className="text-muted-foreground size-4 shrink-0"
@@ -122,117 +386,63 @@ function ModelList() {
           aria-label="Search models"
           className="placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-[13px] outline-none"
         />
-      </label>
-      {shown.length === 0 ? (
+        {count > 0 && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setModelsHidden(allIds, noneHidden)}
+            className="text-muted-foreground h-7 shrink-0 rounded-lg px-2 text-[12px]"
+          >
+            {noneHidden ? "Disable all" : "Enable all"}
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setAdding(true)}
+          className="h-7 shrink-0 gap-1 rounded-lg px-2 text-[12px]"
+        >
+          <HugeiconsIcon
+            icon={Add01Icon}
+            strokeWidth={2}
+            data-icon="inline-start"
+            aria-hidden="true"
+          />
+          Add model
+        </Button>
+      </div>
+      <AddModelDialog agent={agent} open={adding} onOpenChange={setAdding} />
+      {matching.length === 0 ? (
         <Empty className="py-8">
           <EmptyHeader>
-            <EmptyTitle>{searching ? "No matches" : "No models"}</EmptyTitle>
+            <EmptyTitle>{q ? "No matches" : "No models"}</EmptyTitle>
             <EmptyDescription>
-              {searching
+              {q
                 ? `No model matches “${query.trim()}”.`
-                : "No CLI lists any model yet."}
+                : "This CLI lists no model yet."}
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
       ) : (
-        shown.map((group) => {
-          const index = groups.findIndex((entry) => entry.key === group.key);
-          const open = searching || (index === 0) !== flipped.has(group.key);
-          // The whole group's ids, not only the ones the search shows.
-          const all =
-            groups[index]?.entries.map((entry) => entry.id) ??
-            group.entries.map((entry) => entry.id);
-          const visible = all.filter((id) => !hidden.has(id)).length;
-          return (
-            <section key={group.key} aria-label={group.title}>
-              <div className="flex h-11 items-center gap-2 pr-4 pl-2.5">
-                <button
-                  type="button"
-                  onClick={() => flip(group.key)}
-                  aria-expanded={open}
-                  disabled={searching}
-                  className="hover:bg-foreground/[0.05] flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 text-left transition-colors disabled:hover:bg-transparent"
-                >
-                  <HugeiconsIcon
-                    icon={open ? ArrowDown01Icon : ArrowRight01Icon}
-                    className="text-muted-foreground size-3.5 shrink-0"
-                    strokeWidth={2}
-                    aria-hidden="true"
-                  />
-                  <TerminalKindIcon
-                    kind={group.agent}
-                    className="size-4 shrink-0"
-                  />
-                  <span className="truncate text-[13px] font-medium">
-                    {group.title}
-                  </span>
-                  <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-                    {visible}/{all.length}
-                  </span>
-                </button>
-                <Switch
-                  aria-label={`Show every ${group.title} model`}
-                  checked={visible === all.length}
-                  onCheckedChange={(checked) => setModelsHidden(all, !checked)}
-                />
-              </div>
-              {open && (
-                <ul className="divide-border divide-y pb-1">
-                  {group.entries.map((entry) => (
-                    <li
-                      key={entry.id}
-                      title={entry.id}
-                      className="mx-4 flex h-9 items-center gap-3"
-                    >
-                      <span className="min-w-0 flex-1 truncate text-[13px]">
-                        {entry.label}
-                      </span>
-                      {entry.legacy && (
-                        <span className="text-muted-foreground shrink-0 text-xs">
-                          Deprecated
-                        </span>
-                      )}
-                      <Switch
-                        size="sm"
-                        aria-label={`Show ${entry.label}`}
-                        checked={!hidden.has(entry.id)}
-                        onCheckedChange={(checked) =>
-                          setModelsHidden([entry.id], !checked)
-                        }
-                      />
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          );
-        })
+        matching.map((group, index) => (
+          <GroupList
+            key={group.key}
+            group={group}
+            query={q && group.title.toLowerCase().includes(q) ? "" : query}
+            titled={titled}
+            open={
+              !titled || Boolean(q) || (index === 0) !== flipped.has(group.key)
+            }
+            onToggle={() =>
+              setFlipped((current) => {
+                const next = new Set(current);
+                if (!next.delete(group.key)) next.add(group.key);
+                return next;
+              })
+            }
+          />
+        ))
       )}
     </SettingsCard>
-  );
-}
-
-/**
- * Settings → Models: which models the composer's picker offers.
- *
- * Lanework's own list, kept on this machine with the other preferences. A
- * CLI's own picker (OpenCode's model visibility, say) is neither read nor
- * changed. A hidden model still runs a conversation that already uses it.
- */
-export function ModelsSection() {
-  return (
-    <SettingsPage
-      title="Models"
-      description="Which models the composer's picker offers. A hidden model keeps running the conversations already on it."
-      sections={[
-        {
-          title: "Models",
-          hideTitle: true,
-          keywords:
-            "models model picker show hide visible hidden claude codex opencode provider go search",
-          content: <ModelList />,
-        },
-      ]}
-    />
   );
 }

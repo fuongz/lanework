@@ -4,24 +4,35 @@ import type { Project } from "#/../shared/projects";
 import { useBoard } from "#/stores/board";
 
 /**
- * The project Settings › Projects is about.
+ * Which project the Settings pages with a scope row are about (FE-145).
  *
- * Picked in the group's heading and shared by General, Skills and MCP, so
- * moving between them keeps it.
+ * Picked in each page's "Applying settings for" row and shared by Skills, MCP
+ * and Archived, so moving between them keeps it.
+ *
+ * `all` is Skills' and MCP's "All projects": the user's own skills and
+ * servers rather than one project's. It is kept apart from `picked` so
+ * choosing it there does not lose the project Archived (which has no "All
+ * projects") is showing.
  *
  * Local to Settings. Picking a project here does not switch to it: the app's
  * open project stays where it was.
  */
 export const useSettingsProjectPick = create<{
   picked: string | null;
+  /** Skills and MCP show what every project gets. The default. */
+  all: boolean;
+  /** Picks one project, which also leaves "All projects". */
   pick: (slug: string) => void;
+  setAll: (all: boolean) => void;
 }>((set) => ({
   picked: null,
-  pick: (slug) => set({ picked: slug }),
+  all: true,
+  pick: (slug) => set({ picked: slug, all: false }),
+  setAll: (all) => set({ all }),
 }));
 
 /**
- * The project Settings › Projects shows.
+ * The project the scoped Settings pages show.
  *
  * Reads the project list from {@link useBoard} on a cold start.
  *

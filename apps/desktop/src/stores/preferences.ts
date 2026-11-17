@@ -1,6 +1,11 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { readAccent } from "#/lib/accent";
+import {
+  CUSTOM_MODELS_MAX,
+  type CustomModel,
+  isModelIdFor,
+} from "../../shared/conversation";
 import { isThemeSource, type ThemeSource } from "../../shared/desktop";
 import {
   type DictationCorrection,
@@ -84,6 +89,48 @@ function readHidden(value: unknown): string[] {
   ].slice(0, HIDDEN_MAX);
 }
 
+/** The picker's stars from before FE-146, under their own key. */
+function legacyFavorites(): unknown {
+  try {
+    const raw = localStorage.getItem("lanework.conversation.favorite-models");
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function readCustomModels(value: unknown): CustomModel[] {
+  if (!Array.isArray(value)) return [];
+  const out: CustomModel[] = [];
+  for (const entry of value.slice(0, CUSTOM_MODELS_MAX)) {
+    if (!entry || typeof entry !== "object") continue;
+    const { agent, id, label } = entry as Record<string, unknown>;
+    if (
+      (agent !== "claude" && agent !== "codex" && agent !== "opencode") ||
+      typeof id !== "string" ||
+      !isModelIdFor(agent, id) ||
+      out.some((kept) => kept.id === id)
+    )
+      continue;
+    out.push({
+      agent,
+      id,
+      label: typeof label === "string" ? label.slice(0, 80) : "",
+    });
+  }
+  return out;
+}
+
+function readModelOrder(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== "object") return {};
+  const out: Record<string, string[]> = {};
+  for (const [group, ids] of Object.entries(value)) {
+    const kept = readHidden(ids);
+    if (group.length <= 200 && kept.length) out[group] = kept;
+  }
+  return out;
+}
+
 function isProjectSort(value: unknown): value is ProjectSort {
   return (
     typeof value === "string" &&
@@ -149,6 +196,26 @@ interface Preferences {
   hiddenModels: string[];
   setModelsHidden: (ids: readonly string[], hidden: boolean) => void;
   /**
+   * The models starred in Settings → Harness or the picker (FE-146): the
+   * picker's Favourites, and first in their CLI's tab.
+   */
+  favoriteModels: string[];
+  setModelFavorite: (id: string, favorite: boolean) => void;
+  /**
+   * The order the user put a group's models in, by group key: `claude`,
+   * `codex`, or `opencode:<provider>` (FE-146). A group without one keeps
+   * the CLI's own order; models the order does not name follow it.
+   */
+  modelOrder: Record<string, string[]>;
+  setModelOrder: (group: string, ids: readonly string[] | null) => void;
+  /**
+   * Models the user added in Settings → Harness (FE-146), given to their CLI
+   * as typed. Main is told them too (`useCustomModels`).
+   */
+  customModels: CustomModel[];
+  addCustomModel: (model: CustomModel) => void;
+  removeCustomModel: (id: string) => void;
+  /**
    * Whether the island's toasts make a sound: a short synthesized cue per
    * new toast or change of status. Off unless turned on.
    */
@@ -203,6 +270,35 @@ export const usePreferences = create<Preferences>()(
             else next.delete(id);
           return { hiddenModels: readHidden([...next]) };
         }),
+      favoriteModels: [],
+      setModelFavorite: (id, favorite) =>
+        set((state) => {
+          const next = state.favoriteModels.filter((entry) => entry !== id);
+          return {
+            favoriteModels: readHidden(favorite ? [...next, id] : next),
+          };
+        }),
+      modelOrder: {},
+      customModels: [],
+      addCustomModel: (model) =>
+        set((state) => ({
+          customModels: readCustomModels([
+            ...state.customModels.filter((entry) => entry.id !== model.id),
+            model,
+          ]),
+        })),
+      removeCustomModel: (id) =>
+        set((state) => ({
+          customModels: state.customModels.filter((entry) => entry.id !== id),
+          favoriteModels: state.favoriteModels.filter((entry) => entry !== id),
+        })),
+      setModelOrder: (group, ids) =>
+        set((state) => {
+          const next = { ...state.modelOrder };
+          if (ids === null) delete next[group];
+          else next[group] = readHidden([...ids]);
+          return { modelOrder: next };
+        }),
       islandSound: false,
       setIslandSound: (islandSound) => set({ islandSound }),
       hydrated: false,
@@ -223,6 +319,9 @@ export const usePreferences = create<Preferences>()(
         dictationLocale,
         dictationCorrections,
         hiddenModels,
+        favoriteModels,
+        modelOrder,
+        customModels,
         islandSound,
       }) => ({
         theme,
@@ -235,6 +334,9 @@ export const usePreferences = create<Preferences>()(
         dictationLocale,
         dictationCorrections,
         hiddenModels,
+        favoriteModels,
+        modelOrder,
+        customModels,
         islandSound,
       }),
       onRehydrateStorage: () => () =>
@@ -263,6 +365,14 @@ export const usePreferences = create<Preferences>()(
             : "vi_VN",
           dictationCorrections: readCorrections(saved?.dictationCorrections),
           hiddenModels: readHidden(saved?.hiddenModels),
+          // Before FE-146 the picker kept its stars under a key of its own:
+          // read once from there, so nobody loses theirs.
+          favoriteModels:
+            saved?.favoriteModels === undefined
+              ? readHidden(legacyFavorites())
+              : readHidden(saved.favoriteModels),
+          modelOrder: readModelOrder(saved?.modelOrder),
+          customModels: readCustomModels(saved?.customModels),
           // Missing, or anything but true, reads as off.
           islandSound: saved?.islandSound === true,
           // A record without this key belongs to someone who has already used

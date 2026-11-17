@@ -1,4 +1,3 @@
-import { SettingsCard } from "#/components/shared/settings/settings-page";
 import { cn } from "#/lib/utils";
 
 type Kind = "kw" | "id" | "type" | "prop" | "str" | "num" | "plain";
@@ -17,34 +16,66 @@ const TOKEN: Record<Kind, string> = {
 type Line = Array<[Kind, string]>;
 
 const OPEN: Line = [
-  ["kw", "const "],
-  ["id", "themePreview"],
-  ["plain", ": "],
-  ["type", "ThemeConfig"],
-  ["plain", " = {"],
+  ["kw", "function "],
+  ["id", "ModelPanel"],
+  ["plain", "() {"],
 ];
-const CLOSE: Line = [["plain", "};"]];
+const CLOSE: Line = [["plain", "}"]];
 
-const field = (name: string, value: Line[number]): Line => [
-  ["plain", "  "],
-  ["prop", name],
-  ["plain", ": "],
-  value,
-  ["plain", ","],
-];
-
+// The picker's stars moving into preferences (FE-146), as a diff.
 const BEFORE: Line[] = [
   OPEN,
-  field("surface", ["str", '"sidebar"']),
-  field("accent", ["str", '"#2563eb"']),
-  field("contrast", ["num", "42"]),
+  [
+    ["plain", "  "],
+    ["kw", "const "],
+    ["plain", "["],
+    ["prop", "favorites"],
+    ["plain", "] = "],
+    ["id", "useState"],
+    ["plain", "("],
+    ["prop", "readFavorites"],
+    ["plain", ");"],
+  ],
+  [
+    ["plain", "  "],
+    ["kw", "const "],
+    ["prop", "limit"],
+    ["plain", " = "],
+    ["num", "12"],
+    ["plain", ";"],
+  ],
+  [
+    ["plain", "  "],
+    ["kw", "return "],
+    ["str", '"favorites"'],
+    ["plain", ";"],
+  ],
   CLOSE,
 ];
 const AFTER: Line[] = [
   OPEN,
-  field("surface", ["str", '"sidebar-elevated"']),
-  field("accent", ["str", '"#0ea5e9"']),
-  field("contrast", ["num", "68"]),
+  [
+    ["plain", "  "],
+    ["kw", "const "],
+    ["prop", "favorites"],
+    ["plain", " = "],
+    ["id", "usePreferences"],
+    ["plain", "(…);"],
+  ],
+  [
+    ["plain", "  "],
+    ["kw", "const "],
+    ["prop", "limit"],
+    ["plain", " = "],
+    ["num", "24"],
+    ["plain", ";"],
+  ],
+  [
+    ["plain", "  "],
+    ["kw", "return "],
+    ["str", '"favourites"'],
+    ["plain", ";"],
+  ],
   CLOSE,
 ];
 
@@ -96,10 +127,11 @@ function Pane({ lines, side }: { lines: Line[]; side: "removed" | "added" }) {
 export function CodePreview() {
   return (
     <figure aria-label="Code font preview" className="m-0">
-      <SettingsCard className="font-mono grid grid-cols-2 gap-3 overflow-hidden text-[12.5px] leading-[1.7] divide-y-0 [font-weight:var(--code-font-weight)]">
+      {/* A plain box, not a card: it sits inside the Code font's row. */}
+      <div className="border-border grid grid-cols-2 gap-3 overflow-hidden rounded-lg border font-mono text-[12.5px] leading-[1.7] [font-weight:var(--code-font-weight)]">
         <Pane lines={BEFORE} side="removed" />
         <Pane lines={AFTER} side="added" />
-      </SettingsCard>
+      </div>
     </figure>
   );
 }
