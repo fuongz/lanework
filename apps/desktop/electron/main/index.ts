@@ -361,7 +361,9 @@ function applyDevCsp(devUrl: string): void {
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline'",
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
+    // `blob:` for the composer's thumbnails of dropped images (an object URL
+    // of the file the user gave), as in production (protocol.ts).
+    "img-src 'self' data: blob:",
     "font-src 'self'",
     `connect-src 'self' ws://${origin.host}`,
     "object-src 'none'",

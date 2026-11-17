@@ -61,7 +61,9 @@ export function registerAppProtocol(root: string) {
           headers: {
             "Content-Type": mime[extname(file)] ?? "application/octet-stream",
             "X-Content-Type-Options": "nosniff",
-            "Content-Security-Policy": `default-src 'self'; script-src 'self' ${hashes}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'; frame-ancestors 'none'; form-action 'none'`,
+            // `img-src blob:`: the composer draws a dropped image from an
+            // object URL of the file the user gave it.
+            "Content-Security-Policy": `default-src 'self'; script-src 'self' ${hashes}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'; frame-ancestors 'none'; form-action 'none'`,
           },
         },
       );
