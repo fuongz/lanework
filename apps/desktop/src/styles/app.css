@@ -214,7 +214,7 @@ html[data-window-inactive]
   /* The window's ground round the page card: a breath of the brand, so the
      frame reads as the app's own colour rather than a grey (FE-143). The
      accent picker rewrites these four with the picked hue (lib/accent.ts).
-     Under vibrancy the ground is also see-through: `.window-ground` below. */
+     It is opaque under vibrancy too, so the menu glass can blur. */
   --sidebar: oklch(0.975 0.006 45.4);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: var(--primary);
@@ -793,21 +793,9 @@ html[data-window-inactive]
   }
 }
 
-/* The window's ground under macOS vibrancy (FE-143): a little of the desktop
-   shows through the frame round the page card. The rail inside it paints no
-   ground of its own, or the two would stack into a darker rail. The page card
-   and every menu, dialog and popover stay opaque.
+/* The window's ground stays opaque, under vibrancy too (`bg-sidebar`).
 
-   NOTE: Unlayered, so it beats the `bg-sidebar` utility on the same element.
-   Dark mode keeps more of its colour: the material behind it is lighter than
-   the 0.148 ground, and much of it reads as a washed grey. */
-html[data-vibrancy="true"] .window-ground {
-  background-color: color-mix(in oklab, var(--sidebar) 84%, transparent);
-}
-html[data-vibrancy="true"].dark .window-ground {
-  background-color: color-mix(in oklab, var(--sidebar) 92%, transparent);
-}
-html[data-vibrancy="true"] .window-ground .app-sidebar,
-html[data-vibrancy="true"] .window-ground .settings-sidebar {
-  background-color: transparent;
-}
+   NOTE: It was see-through once (FE-143), and that broke the menu glass:
+   over a translucent ground Chromium's `backdrop-filter` blurs nothing, so
+   the rail's text showed sharp through every popover. Opaque, the glass
+   (`MENU_SURFACE`) blurs what is under it. */

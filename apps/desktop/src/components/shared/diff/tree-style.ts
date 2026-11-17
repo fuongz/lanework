@@ -16,11 +16,15 @@ import { TREE_ICON_TONES } from "./diff-icons";
  * does not (see `use-theme.ts`). Without it the tree renders a light palette
  * inside a dark window.
  */
-export function treeHostStyle(dark: boolean): CSSProperties {
+export function treeHostStyle(
+  dark: boolean,
+  /** The pane's ground: the sidebar's by default, white on a page's own. */
+  ground = "var(--color-sidebar)",
+): CSSProperties {
   return {
     ...TREE_ICON_TONES,
     colorScheme: dark ? "dark" : "light",
-    "--trees-bg-override": "var(--color-sidebar)",
+    "--trees-bg-override": ground,
     "--trees-fg-override": "var(--color-foreground)",
     "--trees-fg-muted-override": "var(--color-muted-foreground)",
     "--trees-accent-override": "var(--color-accent-brand)",

@@ -31,6 +31,7 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "#/components/ui/context-menu";
+import { commandProgram, commandText } from "#/lib/command-label";
 import {
   baseName,
   groupTitle,
@@ -132,12 +133,27 @@ function CallLine({ call }: { call: ToolCall }) {
         <FileChip path={call.filePath} />
       </span>
     );
-  if (call.kind === "command")
+  if (call.kind === "command") {
+    // `Ran rg`, as t3code labels it: the program, not the whole line. The
+    // line is in the row's tooltip and its panel.
+    const program = commandProgram(call.summary || "");
+    if (program)
+      return (
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="shrink-0">
+            {call.output === null ? "Running" : "Ran"}
+          </span>
+          <span className="text-foreground/80 min-w-0 truncate font-mono text-[12px]">
+            {program}
+          </span>
+        </span>
+      );
     return (
       <span className="min-w-0 truncate font-mono text-[12px]">
-        {call.summary || call.tool}
+        {call.summary ? commandText(call.summary) : call.tool}
       </span>
     );
+  }
   const name =
     call.kind === "mcp"
       ? mcpName(call.tool)
@@ -187,7 +203,11 @@ function CallRow({
       />
       <div className="flex min-w-0 items-center gap-1">
         <Collapsible.Trigger
-          title={call.summary || call.tool}
+          title={
+            call.kind === "command" && call.summary
+              ? commandText(call.summary)
+              : call.summary || call.tool
+          }
           className={cn(
             "hover:bg-foreground/[0.04] flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left text-[13px] transition-colors",
             call.error ? "text-destructive" : "text-muted-foreground",
@@ -221,7 +241,13 @@ function CallRow({
         {/* Wide output scrolls inside its own box; the page never scrolls sideways. */}
         <div className="bg-foreground/[0.04] my-1 ms-6 flex max-h-96 flex-col gap-2 overflow-auto rounded-lg p-3 font-mono text-[11px] leading-relaxed">
           <pre className="whitespace-pre-wrap break-all">
-            <code>{call.input || "{}"}</code>
+            <code>
+              {call.kind === "command" &&
+              call.input &&
+              !call.input.startsWith("{")
+                ? commandText(call.input)
+                : call.input || "{}"}
+            </code>
           </pre>
           {call.output !== null && (
             <>

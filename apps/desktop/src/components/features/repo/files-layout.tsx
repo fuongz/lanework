@@ -227,7 +227,7 @@ export function FilesLayout() {
           >
             <aside
               aria-label="Files"
-              className="bg-sidebar flex h-full min-h-0 flex-col"
+              className="bg-background flex h-full min-h-0 flex-col"
             >
               {switcher}
               {/* NOTE: Keyed by project and folder. The model's expansion and

@@ -729,7 +729,10 @@ export function FilesTree({
           <FileTree
             model={model}
             className="min-h-0 flex-1"
-            style={{ ...treeHostStyle(dark), ...COMPACT_TREE_STYLE }}
+            style={{
+              ...treeHostStyle(dark, "var(--color-background)"),
+              ...COMPACT_TREE_STYLE,
+            }}
             // A double click keeps the preview tab the first click opened
             // (FE-66/D3).
             onDoubleClick={() => {

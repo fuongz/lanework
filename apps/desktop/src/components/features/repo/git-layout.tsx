@@ -178,7 +178,7 @@ export function GitLayout() {
   // The title bar is drawn in every state, so the tabs and Refresh are there
   // while the repository is read, and when the folder is not one.
   const title = (
-    <WindowTitlebar>
+    <WindowTitlebar className="border-b">
       <GitTabs slug={slug} tab={tab} changed={files.length} go={go} />
       {tab === "changes" ? (
         <ChangesActions files={files} />
@@ -247,7 +247,7 @@ export function GitLayout() {
           >
             <aside
               aria-label="Commits"
-              className="bg-sidebar flex h-full min-h-0 flex-col"
+              className="bg-background flex h-full min-h-0 flex-col"
             >
               {seen.changes && (
                 <Shown

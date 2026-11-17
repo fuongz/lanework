@@ -18,8 +18,7 @@ const WIDE = /^\/settings\/(config|skills|memory|instructions)(\/|$)/;
  * would offer a second, competing one.
  *
  * The sidebar's background lives in CSS (`.settings-sidebar`), not a utility
- * class. On macOS it turns fully transparent so the window's vibrancy shows
- * through, and that depends on an ancestor attribute.
+ * class: the window's opaque ground (`.window-ground`, app.css).
  */
 const CARD =
   "bg-background border-panel-edge my-1.5 mr-1.5 flex-1 rounded-lg border";
