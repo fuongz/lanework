@@ -21,7 +21,6 @@
 // main-process module: only Node and the shared contract.
 import { randomUUID } from "node:crypto";
 import { openSync, readSync } from "node:fs";
-import { connect, isIP } from "node:net";
 import {
   isSessionAction,
   parseSessionInput,
@@ -35,10 +34,8 @@ import {
   CONTROL_ACTIONS,
   CONTROL_ENV,
   CONTROL_INPUT_MAX,
-  CONTROL_RESPONSE_MAX,
   type ControlAction,
   ControlInputError,
-  type ControlResponse,
   controlFields,
   isControlAction,
   parseControlInput,
@@ -46,13 +43,10 @@ import {
   REQUEST_ID_PATTERN,
   WAIT_MAX_SECONDS,
 } from "../../shared/orchestration";
+import { requestControl } from "./client";
 
 /** Set by the shim to its own path, so `--help` names a runnable command. */
 export const CONTROL_SELF_ENV = "LANEWORK_CONTROL_SELF";
-
-const CONNECT_TIMEOUT_MS = 3_000;
-/** Longer than the longest `wait`, so a full wait is never cut short. */
-const REPLY_TIMEOUT_MS = (WAIT_MAX_SECONDS + 15) * 1_000;
 
 /** One line per action: the JSON it takes, then what it does. */
 const ACTION_HELP: Record<ControlAction, string> = {
@@ -80,7 +74,9 @@ const ACTION_HELP: Record<ControlAction, string> = {
   wait: `  wait      {"timeoutSeconds":20}
             Block until a task changes, or until the timeout (0-${WAIT_MAX_SECONDS}).
             "changed" lists the taskIds that moved; it is empty on a timeout
-            or when nothing is left running or queued.`,
+            or when nothing is left running or queued. For one short wait
+            only (e.g. right after respond). Never loop on it: end your turn
+            instead, and Lanework sends you a turn when a task needs you.`,
   respond: `  respond   {"taskId":"...","requestId":"...","decision":"allow"|"deny"}
             Allow or deny the tool a worker is waiting on. Workers never
             prompt the user: list, get and wait show the request as that
@@ -121,9 +117,12 @@ ${SESSION_ACTIONS.map((action) => SESSION_HELP[action]).join("\n")}
 An orchestration run's actions, for its lead only:
 ${CONTROL_ACTIONS.map((action) => ACTION_HELP[action]).join("\n")}
 
-Usual loop: list -> delegate ... -> wait or get -> steer a worker that drifts,
-unblock one with respond or answer -> inspect its changes yourself -> message
-for corrections -> review each task -> finish.
+Usual loop: list -> delegate ... -> END YOUR TURN. Lanework sends you a turn
+when a task needs you (completed, needs input, blocked, failed, cancelled),
+with every task's status. Then: get -> unblock with respond or answer, steer a
+worker that drifts, inspect a completed one's changes yourself -> message for
+corrections or review it -> end your turn again. finish once every task is
+reviewed or cancelled. Do not poll: no shell loops around wait.
 
 When the run is paused, list, get and wait still return the reason and what
 to do next. Do not keep polling or retrying mutations: explain the pause and
@@ -294,148 +293,6 @@ export function parseArgs(args: readonly string[]): Parsed {
   };
 }
 
-/** A failure talking to the server; `sent` when the run may have applied it. */
-class SendError extends Error {
-  constructor(
-    message: string,
-    readonly sent: boolean,
-  ) {
-    super(message);
-  }
-}
-
-/** `127.0.0.1:<port>` (or `localhost`, `[::1]`) as host and port. */
-function loopbackAddress(endpoint: string): { host: string; port: number } {
-  const match = /^\[?([^\]]+?)\]?:(\d{1,5})$/.exec(endpoint.trim());
-  if (!match) throw new SendError("Invalid Lanework control endpoint", false);
-  const host = match[1] as string;
-  const port = Number(match[2]);
-  if (!port || port > 65535)
-    throw new SendError("Invalid Lanework control endpoint", false);
-  const loopback =
-    host === "localhost" ||
-    host === "::1" ||
-    (isIP(host) === 4 && host.startsWith("127."));
-  if (!loopback)
-    throw new SendError("Lanework control only connects to localhost", false);
-  return { host, port };
-}
-
-/** Send one request line and read one response line. */
-function send(
-  endpoint: string,
-  token: string,
-  call: {
-    action: ControlAction | SessionAction;
-    input: unknown;
-    requestId: string;
-  },
-): Promise<unknown> {
-  const { host, port } = loopbackAddress(endpoint);
-  const line = `${JSON.stringify({
-    token,
-    action: call.action,
-    input: call.input,
-    requestId: call.requestId,
-  })}\n`;
-  return new Promise((resolve, reject) => {
-    const socket = connect({ host, port });
-    let sent = false;
-    let settled = false;
-    const chunks: Buffer[] = [];
-    let size = 0;
-    const finish = (error: SendError | null, value?: unknown) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(connectTimer);
-      clearTimeout(replyTimer);
-      socket.destroy();
-      if (error) reject(error);
-      else resolve(value);
-    };
-    const connectTimer = setTimeout(
-      () =>
-        finish(
-          new SendError(
-            `Cannot connect to Lanework at ${endpoint}: timed out. The app may have restarted, or this agent's sandbox may be blocking localhost.`,
-            false,
-          ),
-        ),
-      CONNECT_TIMEOUT_MS,
-    );
-    let replyTimer: NodeJS.Timeout | undefined;
-    socket.on("connect", () => {
-      clearTimeout(connectTimer);
-      sent = true;
-      socket.write(line);
-      replyTimer = setTimeout(
-        () => finish(new SendError("No reply from Lanework: timed out", true)),
-        REPLY_TIMEOUT_MS,
-      );
-    });
-    socket.on("data", (chunk: Buffer) => {
-      const newline = chunk.indexOf(0x0a);
-      const part = newline === -1 ? chunk : chunk.subarray(0, newline);
-      size += part.length;
-      if (size > CONTROL_RESPONSE_MAX) {
-        finish(new SendError("Lanework's response is too large", true));
-        return;
-      }
-      chunks.push(part);
-      if (newline !== -1) parseReply();
-    });
-    const parseReply = () => {
-      const text = Buffer.concat(chunks).toString("utf8").trim();
-      if (!text) {
-        finish(
-          new SendError(
-            sent
-              ? "No reply from Lanework: the connection closed"
-              : "Lanework closed the connection",
-            sent,
-          ),
-        );
-        return;
-      }
-      try {
-        finish(null, JSON.parse(text));
-      } catch {
-        finish(new SendError("Lanework returned an invalid response", true));
-      }
-    };
-    socket.on("end", parseReply);
-    socket.on("close", parseReply);
-    socket.on("error", (error) =>
-      finish(
-        new SendError(
-          sent
-            ? `No reply from Lanework: ${error.message}`
-            : (error as NodeJS.ErrnoException).code === "ECONNREFUSED"
-              ? "Lanework app is not running. Open it and try again."
-              : `Cannot connect to Lanework at ${endpoint}: ${error.message}. The app may have restarted, or this agent's sandbox may be blocking localhost.`,
-          sent,
-        ),
-      ),
-    );
-  });
-}
-
-const isResponse = (value: unknown): value is ControlResponse =>
-  !!value &&
-  typeof value === "object" &&
-  !Array.isArray(value) &&
-  typeof (value as { ok?: unknown }).ok === "boolean";
-
-/** Name the id to retry with, unless the server said retrying cannot help. */
-function withRetryHint(output: Output, requestId: string): Output {
-  if (output.retryable === false) return output;
-  return {
-    ...output,
-    requestId: output.requestId ?? requestId,
-    retryWith: output.retryWith ?? `--request-id ${requestId}`,
-  };
-}
-
 /**
  * Run the CLI.
  *
@@ -487,30 +344,5 @@ export async function runControlCli(
         : "No Lanework control credential. Start the lead conversation from Lanework.",
       retryable: false,
     });
-  let reply: unknown;
-  try {
-    reply = await send(endpoint, token, parsed);
-  } catch (error) {
-    const failure =
-      error instanceof SendError
-        ? error
-        : new SendError((error as Error).message, true);
-    // NOTE: Once the line is on the wire the run may have applied it even
-    // though its answer was lost. Hand back the id so a retry cannot
-    // duplicate it.
-    return emit(
-      failure.sent
-        ? withRetryHint({ ok: false, error: failure.message }, parsed.requestId)
-        : { ok: false, error: failure.message },
-    );
-  }
-  if (!isResponse(reply))
-    return emit(
-      withRetryHint(
-        { ok: false, error: "Lanework returned an invalid response" },
-        parsed.requestId,
-      ),
-    );
-  if (reply.ok) return emit(reply as Output);
-  return emit(withRetryHint(reply as Output, parsed.requestId));
+  return emit(await requestControl(endpoint, token, parsed));
 }

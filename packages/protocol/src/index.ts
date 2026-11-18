@@ -14,4 +14,5 @@ export * from "./checkpoints";
 export * from "./common";
 export * from "./endpoints";
 export * from "./sync";
+export * from "./tools/control";
 export * from "./tools/index";

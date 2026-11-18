@@ -72,6 +72,13 @@ export function shellPath(path: string): string {
     : `'${path.replace(/'/g, "'\\''")}'`;
 }
 
+/**
+ * How a lead follows its workers: Lanework wakes it (`flushNotes` in
+ * runtime.ts), so it never polls.
+ */
+const WAKE_RULE =
+  "Do not poll: never loop on wait in a shell. Once you have acted, end your turn; Lanework sends you a turn as soon as a task needs you (it completed, needs input, is blocked, failed or was cancelled), with every task's status. Use wait only for one short wait, such as right after respond when the worker should go on within seconds.";
+
 /** What the lead is told once the user approved the run. */
 export function approvedTurn(run: OrchestrationRun, cli: string): string {
   const command = shellPath(cli);
@@ -85,8 +92,8 @@ export function approvedTurn(run: OrchestrationRun, cli: string): string {
   }));
   return `<${ORCHESTRATION_TAG}>
 The user approved orchestration run ${run.id}. Its workers are already queued below; do not delegate them again.
-Coordinate the run with ${command}. Run \`${command} --help\` first: it lists every action, its JSON fields and the retry rule. The credentials are already in your environment; never print them. The CLI only works while you are in a turn.
-Workers never ask the user: when one needs a tool approval or an answer, its task shows needsInput and you decide with respond or answer. Use wait to follow them, get for a full result, steer to correct a running worker, message or retry for a stopped one. completed means a turn ended, not that the work is right: check it, then review to merge it into this checkout. A task blocked for writing outside its scope stays blocked until you message, retry (with corrected files) or cancel it. Do not edit project files yourself while the run is active or paused: your edit tools are off, and a write into this checkout outside .agents/ pauses the run. Call finish when every task is reviewed or cancelled.
+Coordinate the run with the lanework_control run_* tools (run_list, run_get, run_review…) when they are listed; otherwise with ${command} (\`${command} --help\` lists every action, its JSON fields and the retry rule). The credentials are already in your environment; never print them. The CLI only works while you are in a turn.
+Workers never ask the user: when one needs a tool approval or an answer, its task shows needsInput and you decide with respond or answer. ${WAKE_RULE} Use get for a full result, steer to correct a running worker, message or retry for a stopped one. completed means a turn ended, not that the work is right: check it, then review to merge it into this checkout. A task blocked for writing outside its scope stays blocked until you message, retry (with corrected files) or cancel it. Do not edit project files yourself while the run is active or paused: your edit tools are off, and a write into this checkout outside .agents/ pauses the run. Call finish when every task is reviewed or cancelled.
 Queued workers: ${JSON.stringify(tasks)}
 </${ORCHESTRATION_TAG}>`;
 }
@@ -107,10 +114,13 @@ export function updateTurn(
           : "";
       return `- ${task.id} "${task.title}": ${task.status}${extra}`;
     });
+  const others = run.tasks
+    .filter((task) => !changed.includes(task.id))
+    .map((task) => `${task.id}: ${task.status}`);
   return `<${ORCHESTRATION_TAG}>
 Orchestration run ${run.id} changed while you were idle:
-${lines.join("\n")}
-Read the details with \`${shellPath(cli)} get\` and act on them.
+${lines.join("\n")}${others.length ? `\nThe other tasks: ${others.join(", ")}.` : ""}
+Read the details with run_get (or \`${shellPath(cli)} get\`) and act on them, then end your turn: you are sent another one when a task needs you again. Do not poll with wait.
 </${ORCHESTRATION_TAG}>`;
 }
 

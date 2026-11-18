@@ -6,7 +6,8 @@
 //   and again each time one of its turns ends.
 // - Main also writes the runs: one entry per orchestration run the conductor
 //   led, once, when the run finished or was stopped (FE-131).
-// - The conductor replaces its notes with `memory.write`; the user may edit
+// - The conductor adds to its notes with `memory.append` and replaces them
+//   with `memory.write`; the user may edit
 //   them from the conductor's settings (`leads.saveMemoryNotes`). Both go
 //   through the one store here, so neither overwrites the other's write.
 //
@@ -82,6 +83,33 @@ export class ConductorMemoryStore {
       const updatedAt = Date.now();
       await save(file, { ...memory, notes: clean, updatedAt });
       return { notesLength: clean.length, updatedAt };
+    });
+  }
+
+  /**
+   * Add `text` to the notes on a new line; the rest stays, the ledger too.
+   *
+   * @throws When `text` is empty, or the notes would grow past
+   *   {@link MEMORY_NOTES_MAX}; nothing is written then.
+   */
+  async appendNotes(
+    project: string,
+    conductorId: string,
+    text: string,
+  ): Promise<{ notesLength: number; updatedAt: number }> {
+    const clean = text.trim();
+    if (!clean) throw new Error("Nothing to add: the text is empty.");
+    const file = await this.deps.fileOf(project, conductorId);
+    return this.queue(file, async () => {
+      const memory = await load(file);
+      const notes = memory.notes ? `${memory.notes}\n${clean}` : clean;
+      if (notes.length > MEMORY_NOTES_MAX)
+        throw new Error(
+          `Notes would be ${notes.length} characters, more than ${MEMORY_NOTES_MAX}: nothing was added. Read them with memory.read and rewrite them shorter with memory.write.`,
+        );
+      const updatedAt = Date.now();
+      await save(file, { ...memory, notes, updatedAt });
+      return { notesLength: notes.length, updatedAt };
     });
   }
 

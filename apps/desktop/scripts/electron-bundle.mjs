@@ -60,6 +60,9 @@ export const electronBuildOptions = {
     // ~/.lanew/bin/lanework-kit-mcp. Its natives resolve from here to
     // `dist/electron/node_modules`, as main's do.
     "mcp-kit/server": "electron/mcp-kit/main.ts",
+    // FE-155: the lanework-control MCP server, on the same Node, from
+    // ~/.lanew/bin/lanework-control-mcp. Attached per conversation by flags.
+    "mcp-control/server": "electron/mcp-control/main.ts",
     // FE-87: the lead's `lanework-control`, on the same Node, from
     // ~/.lanew/bin/lanework-control.
     "control/lanework-control": "electron/control/main.ts",

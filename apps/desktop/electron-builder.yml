@@ -39,6 +39,9 @@ asarUnpack:
   # FE-152: the lanework-kit MCP server, run the same way from
   # ~/.lanew/bin/lanework-kit-mcp.
   - "dist/electron/mcp-kit/**"
+  # FE-155: the lanework-control MCP server, run the same way from
+  # ~/.lanew/bin/lanework-control-mcp.
+  - "dist/electron/mcp-control/**"
   # FE-87: the lead's control CLI, run the same way from ~/.lanew/bin/lanework-control.
   - "dist/electron/control/**"
   # FE-152: lwk's JS kit, run the same way by the native lwk when the app is
@@ -53,8 +56,9 @@ npmRebuild: false
 # INF-05 (SW-01): Electron fuses, flipped in the binary at package time.
 electronFuses:
   # Stays on: the Stop hook, the statusline, the offline MCP server, the
-  # lanework-kit MCP server, lwk's JS kit and lanework-control all run as
-  # `ELECTRON_RUN_AS_NODE=1 <Lanework> <script>` from the agents' configs.
+  # lanework-kit MCP server, lwk's JS kit, lanework-control and its MCP
+  # server all run as `ELECTRON_RUN_AS_NODE=1 <Lanework> <script>` from the
+  # agents' configs.
   # Turning it off needs them moved off the app binary first (out of scope
   # for INF-05).
   runAsNode: true

@@ -11,6 +11,12 @@
  *   shape `BoardToolOutputs` names for it (checked by hand below, field by
  *   field: the types do not exist at run time).
  *
+ * It then starts the built lanework-control server
+ * (`dist/electron/mcp-control/server.cjs`, FE-155) with a fake sessions token,
+ * a fake control token, both and neither, and checks that `tools/list` equals
+ * `controlToolsFor` for each (none for neither). Nothing is called: the
+ * tokens are fake and no app listens.
+ *
  * Run with Bun (it imports the contract's TypeScript), after `bun run build`:
  * `bun apps/desktop/scripts/mcp-parity.mjs`.
  *
@@ -23,10 +29,19 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BOARD_TOOLS, toolInputSchema } from "@lanework/protocol";
+import {
+  BOARD_TOOLS,
+  controlToolsFor,
+  toolInputSchema,
+} from "@lanework/protocol";
 
 const desktop = join(dirname(fileURLToPath(import.meta.url)), "..");
 const bundle = join(desktop, "dist/electron/mcp-local/server.cjs");
+const controlBundle = join(desktop, "dist/electron/mcp-control/server.cjs");
+/** The env lanework-control reads (`SESSIONS_ENV`, `CONTROL_ENV`). */
+const SESSIONS_TOKEN = "LANEWORK_SESSIONS_TOKEN";
+const CONTROL_TOKEN = "LANEWORK_CONTROL_TOKEN";
+const CONTROL_ENDPOINT = "LANEWORK_CONTROL_ENDPOINT";
 const REMOTE = "https://example.com/acme/parity.git";
 const TIMEOUT_MS = 15_000;
 
@@ -198,7 +213,12 @@ const OUTPUTS = {
   }),
   create_review: obj({ item: CARD_DETAIL, next: str }),
   update_review: obj({ item: CARD_DETAIL }),
-  toggle_item: obj({ ...DECISIONS, item: CARD_DETAIL }),
+  toggle_item: obj({
+    ...DECISIONS,
+    checklistItem: CHECKLIST_ITEM,
+    card: CARD_BRIEF,
+    progress: obj({ done: num, total: num }),
+  }),
   review_card: obj({
     ...DECISIONS,
     revision: num,
@@ -276,10 +296,20 @@ function mismatches(shape, value, path) {
 
 // ── The server ──────────────────────────────────────────────────────────────
 
-function startServer(home) {
+function startServer(home, script = bundle, extraEnv = {}) {
   const electron = createRequire(join(desktop, "package.json"))("electron");
-  const child = spawn(electron, [bundle], {
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", LANEWORK_HOME: home },
+  // NOTE: Run from a Lanework conversation, this process carries real
+  // control tokens; the server must see only the ones a check passes.
+  const env = { ...process.env };
+  for (const name of [SESSIONS_TOKEN, CONTROL_TOKEN, CONTROL_ENDPOINT])
+    delete env[name];
+  const child = spawn(electron, [script], {
+    env: {
+      ...env,
+      ELECTRON_RUN_AS_NODE: "1",
+      LANEWORK_HOME: home,
+      ...extraEnv,
+    },
     stdio: ["pipe", "pipe", "pipe"],
   });
   let stderr = "";
@@ -333,26 +363,28 @@ function startServer(home) {
 
 // ── The checks ──────────────────────────────────────────────────────────────
 
-function checkToolList(tools) {
-  const want = BOARD_TOOLS.map((tool) => tool.name);
+function checkToolList(tools, contracts = BOARD_TOOLS, label = "") {
+  const want = contracts.map((tool) => tool.name);
   const got = tools.map((tool) => tool.name);
   if (JSON.stringify(got) !== JSON.stringify(want))
     problem(
-      `tools/list names: got [${got.join(", ")}], the contract has [${want.join(", ")}]`,
+      `${label}tools/list names: got [${got.join(", ")}], the contract has [${want.join(", ")}]`,
     );
-  for (const contract of BOARD_TOOLS) {
+  for (const contract of contracts) {
     const served = tools.find((tool) => tool.name === contract.name);
     if (!served) continue;
     if (served.description !== contract.description)
-      problem(`${contract.name}: description differs from the contract`);
+      problem(
+        `${label}${contract.name}: description differs from the contract`,
+      );
     const schema = toolInputSchema(contract);
     if (JSON.stringify(served.inputSchema) !== JSON.stringify(schema))
       problem(
-        `${contract.name}: inputSchema differs from the contract\n  served:   ${JSON.stringify(served.inputSchema)}\n  contract: ${JSON.stringify(schema)}`,
+        `${label}${contract.name}: inputSchema differs from the contract\n  served:   ${JSON.stringify(served.inputSchema)}\n  contract: ${JSON.stringify(schema)}`,
       );
     if (served.annotations?.readOnlyHint !== contract.readOnly)
       problem(
-        `${contract.name}: readOnlyHint ${served.annotations?.readOnlyHint}, contract readOnly ${contract.readOnly}`,
+        `${label}${contract.name}: readOnlyHint ${served.annotations?.readOnlyHint}, contract readOnly ${contract.readOnly}`,
       );
   }
 }
@@ -471,13 +503,75 @@ async function scenario(server) {
   if (!gone.error) problem("search_sessions: still served by the board MCP");
 }
 
-async function main() {
-  if (!existsSync(bundle)) {
-    console.error(
-      `mcp-parity: ${bundle} is missing; run \`bun run build\` first`,
-    );
-    process.exit(1);
+/** lanework-control's tools/list for each set of tokens (FE-155). */
+async function controlParity(home) {
+  const cases = [
+    {
+      label: "sessions token",
+      env: { [SESSIONS_TOKEN]: "parity-sessions" },
+      roles: { conductor: true, lead: false },
+    },
+    {
+      label: "control token",
+      env: { [CONTROL_TOKEN]: "parity-control" },
+      roles: { conductor: false, lead: true },
+    },
+    {
+      label: "both tokens",
+      env: {
+        [SESSIONS_TOKEN]: "parity-sessions",
+        [CONTROL_TOKEN]: "parity-control",
+      },
+      roles: { conductor: true, lead: true },
+    },
+    { label: "no token", env: {}, roles: null },
+  ];
+  for (const { label, env, roles } of cases) {
+    const server = startServer(home, controlBundle, {
+      ...env,
+      // Never dialled: nothing is called.
+      [CONTROL_ENDPOINT]: "127.0.0.1:9",
+    });
+    const tag = `lanework-control (${label}): `;
+    try {
+      const init = await server.rpc("initialize", {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "mcp-parity", version: "1" },
+      });
+      if (!init.result) throw new Error(`initialize: ${init.error?.message}`);
+      if (init.result.serverInfo?.name !== "lanework-control")
+        problem(`${tag}serverInfo.name is ${init.result.serverInfo?.name}`);
+      const unavailable = /unavailable/.test(init.result.instructions ?? "");
+      if (unavailable !== (roles === null))
+        problem(`${tag}instructions: ${init.result.instructions}`);
+      server.notify("notifications/initialized");
+      const list = await server.rpc("tools/list");
+      checkToolList(
+        list.result.tools,
+        roles ? controlToolsFor(roles) : [],
+        tag,
+      );
+    } catch (error) {
+      problem(
+        `${tag}${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      const { code, stderr } = await server.stop();
+      if (code !== 0) problem(`${tag}server exited ${code}:\n${stderr}`);
+    }
   }
+  return cases.length;
+}
+
+async function main() {
+  for (const path of [bundle, controlBundle])
+    if (!existsSync(path)) {
+      console.error(
+        `mcp-parity: ${path} is missing; run \`bun run build\` first`,
+      );
+      process.exit(1);
+    }
   const home = mkdtempSync(join(tmpdir(), "lanework-parity-"));
   const server = startServer(home);
   try {
@@ -496,16 +590,21 @@ async function main() {
   } finally {
     const { code, stderr } = await server.stop();
     if (code !== 0) problem(`server exited ${code}:\n${stderr}`);
+  }
+  let controlCases = 0;
+  try {
+    controlCases = await controlParity(home);
+  } finally {
     rmSync(home, { recursive: true, force: true });
   }
   if (problems.length > 0) {
     console.error(
-      `mcp-parity: the offline board MCP drifts from the tool contract:\n- ${problems.join("\n- ")}`,
+      `mcp-parity: the MCP servers drift from the tool contract:\n- ${problems.join("\n- ")}`,
     );
     process.exit(1);
   }
   console.log(
-    `mcp-parity: ${BOARD_TOOLS.length} board tools match the contract`,
+    `mcp-parity: ${BOARD_TOOLS.length} board tools match the contract; lanework-control matches controlToolsFor in ${controlCases} token cases`,
   );
 }
 

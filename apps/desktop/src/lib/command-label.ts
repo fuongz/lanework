@@ -71,6 +71,26 @@ const SYNTAX = new Set([
 
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
 
+/**
+ * Keywords that lead into a command rather than name one: `do rg x` runs
+ * `rg`, `if grep -q y f` runs `grep`. `for`, `case` and the rest still name
+ * nothing.
+ */
+const LEADING = new Set([
+  "do",
+  "then",
+  "else",
+  "elif",
+  "if",
+  "while",
+  "until",
+  "{",
+  "!",
+]);
+
+/** Programs that only print: a row names one only when nothing else ran. */
+const PRINTERS = new Set(["echo", "printf"]);
+
 /** The command without its `zsh -lc '…'` wrapper. */
 export function commandText(command: string): string {
   const match = SHELL_WRAPPER.exec(command);
@@ -143,7 +163,15 @@ function programOf(words: string[]): string | null {
   let at = 0;
   while (at < words.length) {
     const word = words[at] as string;
+    if (LEADING.has(word)) {
+      at++;
+      continue;
+    }
     if (ASSIGNMENT.test(word)) {
+      // `out=$(rg x)` runs `rg`: the substitution's program.
+      const value = word.slice(word.indexOf("=") + 1);
+      if (value.startsWith("$(") && value.length > 2)
+        return nameOf(value.slice(2));
       at++;
       continue;
     }
@@ -167,7 +195,12 @@ function programOf(words: string[]): string | null {
   if (!word || SYNTAX.has(word) || /^[<>(){}[\]$`!%@:#]/.test(word))
     return null;
   if (word.endsWith("()")) return null;
-  const name = word.split("/").pop() ?? "";
+  return nameOf(word);
+}
+
+/** A program word's name: `/usr/bin/rg` is `rg`; null when empty. */
+function nameOf(word: string): string | null {
+  const name = word.replace(/\)+$/, "").split("/").pop() ?? "";
   return name || null;
 }
 
@@ -181,9 +214,12 @@ function programOf(words: string[]): string | null {
 export function commandProgram(command: string): string | null {
   const parsed = steps(commandText(command));
   if (!parsed) return null;
+  let printer: string | null = null;
   for (const words of parsed) {
     const program = programOf(words);
-    if (program && !SETUP.has(program)) return program;
+    if (!program || SETUP.has(program)) continue;
+    if (!PRINTERS.has(program)) return program;
+    printer ??= program;
   }
-  return null;
+  return printer;
 }

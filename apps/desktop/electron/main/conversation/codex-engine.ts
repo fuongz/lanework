@@ -50,7 +50,12 @@ import {
 } from "../orchestration/engine-tap";
 import type { ClaudeCli } from "./claude-cli";
 import type { ConversationEngine } from "./conversation-engine";
-import { codexHintArgs, codexMcpArgs } from "./mcp-args";
+import {
+  codexControlArgs,
+  codexHintArgs,
+  codexMcpArgs,
+  controlMcpFor,
+} from "./mcp-args";
 import type { ContentBlock } from "./outgoing";
 import { Held, type Outgoing, sameSettings } from "./queue";
 import { cut, inputText } from "./transcript";
@@ -443,6 +448,9 @@ export class CodexEngine implements ConversationEngine {
       folder: this.folder,
       named: () => this.conversation,
     });
+    // FE-155: the control tools, for a process holding a control token.
+    const control = controlMcpFor(env);
+    if (control) overrides.push(...codexControlArgs(control));
     // BE-01: how to save a conductor, unless the user's config already
     // gives Codex developer instructions (an override would replace them).
     if (

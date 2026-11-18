@@ -38,6 +38,7 @@ import { isWithin, realRoots } from "../kit";
 import { registerAgentConfig } from "./agent-config";
 import { registerAgentSetup } from "./agent-setup";
 import { installLwk } from "./agent-setup/lwk-install";
+import { ensureControlMcpShim } from "./agent-setup/mcp-entry";
 import { registerAuth } from "./auth";
 import {
   APP_CHANNEL,
@@ -603,6 +604,11 @@ app
     // on every launch so it follows the app when it moves or updates.
     void installLwk().catch((error: unknown) =>
       console.warn("Unable to install lwk", error),
+    );
+    // `~/.lanew/bin/lanework-control-mcp` (FE-155): the control MCP server a
+    // conductor's or lead's process is started with. Rewritten every launch.
+    void ensureControlMcpShim().catch((error: unknown) =>
+      console.warn("Unable to install lanework-control-mcp", error),
     );
     // The lead's CLI reaches runs through this; it listens on loopback only.
     startControlServer(

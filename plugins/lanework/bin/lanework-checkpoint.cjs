@@ -144,6 +144,32 @@ function withQuery(path, query) {
   const text = query === undefined ? "" : String(query);
   return text ? `${path}?${text}` : path;
 }
+// packages/protocol/src/tools/control.ts
+var CONTROL_TOOL_LIMITS = {
+  TITLE_MAX: 160,
+  PROMPT_MAX: 30000,
+  FILES_MAX: 64,
+  WAIT_MAX_SECONDS: 25,
+  AGENT_NAME_MAX: 120,
+  READ_LIMIT_MAX: 5,
+  READ_LIMIT_DEFAULT: 2,
+  READ_CHARS_MIN: 200,
+  READ_CHARS_MAX: 6000,
+  READ_CHARS_DEFAULT: 1500,
+  MEMORY_NOTES_MAX: 8000,
+  LEAD_NAME_MAX: 60,
+  LEAD_INSTRUCTIONS_MAX: 20000,
+  LEAD_CONTEXT_FILES_MAX: 20
+};
+var L = CONTROL_TOOL_LIMITS;
+var WORKER_TEXT = {
+  type: "string",
+  description: `Instructions for the worker, at most ${L.PROMPT_MAX} characters`
+};
+var SCOPES = {
+  type: "string[]",
+  description: `The write scope: at most ${L.FILES_MAX} project-relative paths; a directory covers what is under it, ["."] the whole checkout, [] edits no file`
+};
 // packages/protocol/src/tools/board.ts
 var BOARD_ID = {
   type: "string",
@@ -335,7 +361,7 @@ var BOARD_TOOLS = [
   },
   {
     name: "toggle_item",
-    description: "Tick or untick one checklist box on a card, and optionally leave a note under it, or tag a verify item with the stream it proves. `key` is the item's stable id, e.g. D1 or V3.",
+    description: "Tick or untick one checklist box on a card, and optionally leave a note under it, or tag a verify item with the stream it proves. `key` is the item's stable id, e.g. D1 or V3. Answers with that box, the card in one line and its progress, not the whole card: get_review has the rest.",
     readOnly: false,
     properties: {
       board_id: BOARD_ID,
@@ -2798,7 +2824,18 @@ var RUNS = {
     if (args.stream !== undefined)
       patch.stream = args.stream;
     const item = store.toggleChecklistItem(String(args.card), String(args.key), patch, { project: board.id });
-    return { item, ...decisionState(item.checklist) };
+    const changed = item.checklist.find((box) => box.key === String(args.key));
+    if (!changed)
+      fail("not_found", `checklist item ${String(args.key)} not found on this card`);
+    return {
+      checklistItem: changed,
+      card: brief(item),
+      progress: {
+        done: item.checklist.filter((box) => box.checked).length,
+        total: item.checklist.length
+      },
+      ...decisionState(item.checklist)
+    };
   },
   review_card(args, { store }) {
     const board = boardOf(store, args.board_id);

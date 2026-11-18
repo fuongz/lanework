@@ -250,7 +250,7 @@ export const BOARD_TOOLS: readonly ToolContract<BoardToolName>[] = [
   {
     name: "toggle_item",
     description:
-      "Tick or untick one checklist box on a card, and optionally leave a note under it, or tag a verify item with the stream it proves. `key` is the item's stable id, e.g. D1 or V3.",
+      "Tick or untick one checklist box on a card, and optionally leave a note under it, or tag a verify item with the stream it proves. `key` is the item's stable id, e.g. D1 or V3. Answers with that box, the card in one line and its progress, not the whole card: get_review has the rest.",
     readOnly: false,
     properties: {
       board_id: BOARD_ID,
@@ -436,7 +436,16 @@ export interface BoardToolOutputs {
   };
   create_review: { item: CardDetail; next: string };
   update_review: { item: CardDetail };
-  toggle_item: DecisionState & { item: CardDetail };
+  /**
+   * The box that changed and the card in one line, not the whole card: a
+   * card's detail is 2–3k tokens, and an agent ticks one box after another.
+   * `get_review` has the rest.
+   */
+  toggle_item: DecisionState & {
+    checklistItem: ChecklistItem;
+    card: CardBrief;
+    progress: { done: number; total: number };
+  };
   review_card: DecisionState & {
     revision: number;
     checklist: ChecklistItem[];

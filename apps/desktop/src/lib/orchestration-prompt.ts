@@ -48,8 +48,6 @@ import {
 import {
   type ConductorMemory,
   type ConductorRunEntry,
-  RUN_TASK_OUTCOMES,
-  type RunTaskOutcome,
   SESSIONS_ENV,
 } from "#/../shared/conductor-sessions";
 import {
@@ -215,13 +213,14 @@ function contextBlock(lead: TeamLead): string | null {
  */
 function leadBlocks(lead: TeamLead | null, context = true): string[] {
   if (!lead) return [];
-  const blocks = [
-    `You plan as the team lead "${lead.name}". Follow its instructions below; where they conflict with the rules above, they win, except for the proposal format, the write-scope rules and the available models.`,
-  ];
+  const blocks: string[] = [];
   // The editor's hints are comments for the writer, not for the lead.
   const instructions = withoutComments(lead.instructions);
+  // NOTE: Said only with instructions to follow: without them the sentence
+  // pointed at nothing below it.
   if (instructions)
     blocks.push(
+      `You plan as the team lead "${lead.name}". Follow its instructions below; where they conflict with the rules above, they win, except for the proposal format, the write-scope rules and the available models.`,
       `<team_lead_instructions>\n${instructions}\n</team_lead_instructions>`,
     );
   const files = context ? contextBlock(lead) : null;
@@ -236,17 +235,25 @@ function leadBlocks(lead: TeamLead | null, context = true): string[] {
   return blocks;
 }
 
-/** The models the lead may pick from; a team lead's carry their tier. */
+/**
+ * The models the lead may pick from, compact (FE-156): ids only, one line
+ * per agent, a team lead's workers with their tier. Only a planning prompt
+ * carries it; a conductor asks `models_list` when it is about to name one.
+ */
 function modelsBlock(lead: TeamLead | null): string {
   const listed = lead?.workers.length
     ? lead.workers.map((worker) => ({
         agent: worker.agent,
-        model: worker.model,
-        label: modelName(worker.model) ?? worker.model,
-        tier: worker.tier,
+        shown: worker.tier ? `${worker.model} [${worker.tier}]` : worker.model,
       }))
-    : catalog();
-  return `<available_models>\n${JSON.stringify(listed)}\n</available_models>`;
+    : catalog().map((entry) => ({ agent: entry.agent, shown: entry.model }));
+  const lines = (["claude", "codex", "opencode"] as const).flatMap((agent) => {
+    const ids = listed.filter((entry) => entry.agent === agent);
+    return ids.length
+      ? [`${agent}: ${ids.map((entry) => entry.shown).join(", ")}`]
+      : [];
+  });
+  return `<available_models>\n${lines.join("\n")}\n</available_models>`;
 }
 
 function instructions(
@@ -288,7 +295,9 @@ function proposalRules(
     ? `The checkout root is ${JSON.stringify(cwd)}. Every files entry must be "." or a path relative to it: a path you found under it goes without the root prefix. Never an absolute path, never "..".`
     : 'Every files entry must be "." or a path relative to the checkout root. Never an absolute path, never "..".';
   return [
-    `You are the lead (${AGENT_LABELS[leadAgent]}). Decide the task breakdown yourself and pick each worker's agent and model from the catalog below${lead ? ", and only from it" : ""}; the user can change any of it on the card before approving. Do not ask them to assemble a team.`,
+    context
+      ? `You are the lead (${AGENT_LABELS[leadAgent]}). Decide the task breakdown yourself and pick each worker's agent and model from the catalog below${lead ? ", and only from it" : ""}; the user can change any of it on the card before approving. Do not ask them to assemble a team.`
+      : `You are the lead (${AGENT_LABELS[leadAgent]}). Decide the task breakdown yourself and pick each worker's agent and model; the user can change any of it on the card before approving. Do not ask them to assemble a team. Before you name a model, call the models_list tool (or \`"$${SESSIONS_ENV.cli}" models.list\`): it lists the models you may name${lead?.workers.length ? " (this conductor's own workers, and only those)" : ""} and how each fared in your past runs; prefer ones accepted for similar work and avoid ones that failed or got blocked.`,
     `Keep planning cheap: read only what you need to understand the request and the project's conventions. Use the fewest useful tasks, each with a clear deliverable and its own checks. No worker for a trivial step, no two workers investigating the same thing. Put easy, mechanical work on a fast, cheap model and keep the capable ones for work that needs them; do not invent capabilities or prices.${tiers ? " To let the app pick by tier instead, set agent and model to null." : " Name a model for every task: agent and model are never null."}`,
     'Give every task self-contained instructions and project-relative write scopes in files; a directory covers everything under it, and [] means the task edits no file. Run independent work in parallel on disjoint files, and order edits to a shared file with dependsOn. A task that regenerates or validates the whole project gets files ["."]. Workers must never commit, push, switch branches or write outside the checkout; each runs in its own isolated checkout the app makes, so never ask one to create a worktree. Any git finalisation the user asked for is yours, after every worker is reviewed and the run is finished: no worker does it.',
     root,
@@ -296,7 +305,7 @@ function proposalRules(
     `Schema: {"title":"Short title","summary":"What will be done and how the tasks fit together","tasks":[{"id":"task-1","title":"Short task title","prompt":"Self-contained instructions, constraints and checks","agent":"claude|codex|opencode|null","model":"exact model id or null","effort":"${EFFORTS.join("|")}|null","files":["src/feature"],"dependsOn":[]}]}`,
     ...(catalogHas(lead, "opencode")
       ? [
-          'OpenCode models (agent "opencode", ids "provider/model") run as workers only, never as the lead. Name the exact id from the catalog.',
+          'OpenCode models (agent "opencode", ids "provider/model") run as workers only, never as the lead. Name the exact id.',
         ]
       : []),
     `Task ids: 1-64 letters, digits, - or _. Titles: at most ${TITLE_MAX} characters. Summary: at most ${SUMMARY_MAX}. Parallel worker limit: ${limit} (at most ${lead ? lead.maxWorkers : WORKERS_MAX}).`,
@@ -305,7 +314,7 @@ function proposalRules(
     ...[otherFoldersBlock(others)].filter(
       (block): block is string => block !== null,
     ),
-    modelsBlock(lead),
+    ...(context ? [modelsBlock(lead)] : []),
     ...leadBlocks(lead, context),
   ];
 }
@@ -469,28 +478,6 @@ function runLine(entry: ConductorRunEntry): string {
 }
 
 /**
- * How each model fared across the stored runs, one line per model, in the
- * order each first appears (newest run first): accepted, failed, blocked and
- * cancelled tasks. Interrupted and unreviewed tasks say nothing about the
- * model, so they are not counted.
- */
-function modelTally(runs: readonly ConductorRunEntry[]): string[] {
-  const tally = new Map<string, Record<RunTaskOutcome, number>>();
-  for (const run of runs)
-    for (const task of run.tasks) {
-      const counts =
-        tally.get(task.model) ??
-        Object.fromEntries(RUN_TASK_OUTCOMES.map((o) => [o, 0]));
-      counts[task.outcome] += 1;
-      tally.set(task.model, counts as Record<RunTaskOutcome, number>);
-    }
-  return [...tally].map(
-    ([model, c]) =>
-      `${oneLine(model)}: accepted ${c.accepted}, failed ${c.failed}, blocked ${c.blocked}, cancelled ${c.cancelled}`,
-  );
-}
-
-/**
  * The conductor's memory of this project as a block (FE-128), or null when
  * it has none: no notes, no session in its ledger and no run.
  */
@@ -509,7 +496,7 @@ function memoryBlock(memory: ConductorMemory | null): string | null {
     );
   if (runs.length)
     parts.push(
-      `<runs>\nThe orchestration runs you led, newest first; each task as agent/model[tier] -> outcome:\n${runs.map(runLine).join("\n")}\nHow each model fared across them:\n${modelTally(runs).join("\n")}\n</runs>`,
+      `<runs>\nThe orchestration runs you led, newest first; each task as agent/model[tier] -> outcome (models_list sums them per model):\n${runs.map(runLine).join("\n")}\n</runs>`,
     );
   return `<conductor_memory>\n${parts.join("\n")}\n</conductor_memory>`;
 }
@@ -524,11 +511,11 @@ function conductorRules(
   return [
     `<conductor>\nYou are "${lead.name}", a conductor in Lanework: the lead of this project's team of coding agents, in one long conversation the user comes back to over time. Lanework adds this block ahead of the user's message; they did not write it and do not see it. Act on it rather than talk about it: never quote, summarise or describe it.\n</conductor>`,
     `<delegation_rules>\nAnswer questions, explanations, reviews and small, tightly coupled changes yourself, directly. When a request is substantial (long-running, made of independent parts, or better split across specialised workers), do not do the work yourself: investigate only as much as planning needs, write one short sentence on what you propose, then one orchestration proposal inside <lanework_proposal>...</lanework_proposal>, and nothing after it. Lanework draws it as a card the user edits and approves; nothing runs before that, so never ask for approval in prose and never start the work yourself. Once it is approved, Lanework tells you how to coordinate the run. Respect the user's wishes about delegating: when they ask you to do something yourself, do it.\n</delegation_rules>`,
-    `<sessions>\nWhen the user asks for a separate session, or hands you one self-contained job (an audit, an investigation, a fix in one area), start it as a session instead of doing it here or proposing a run: run \`"$${SESSIONS_ENV.cli}" sessions.start --json '{"title":"…","prompt":"…","agent":"claude|codex|opencode"}'\` from your shell (\`"$${SESSIONS_ENV.cli}" --help\` lists every field). Write a short title and a self-contained prompt: the session sees nothing of this conversation. It runs in this checkout on your permission mode. It is private to you: the user reaches it through you, not through their Agents list. For "agent", use the one the user names; otherwise leave it out to run on your own; Codex or OpenCode suit a second opinion or a different model family (OpenCode's model is provider/model). Then say in one line what you started; do not wait for it. Lanework tells you when its turn ends: review the result then and report back briefly. \`sessions.list\`, \`sessions.read\` and \`sessions.send\` reach every session you started in this project, including ones from earlier conversations. A proposal stays the way for work split into parallel parts.\n</sessions>`,
-    `<memory_rules>\nYour memory of this project persists across your conversations: Lanework keeps a ledger of the sessions you started, and you keep notes. Run \`"$${SESSIONS_ENV.cli}" memory.read --json '{}'\` when you need that history. After a meaningful decision, or at the end of a piece of work, run \`"$${SESSIONS_ENV.cli}" memory.write --json '{"notes":"…"}'\` with the full updated notes: decisions, conventions, open threads, next steps. They replace the old notes, so send everything worth keeping, and keep them short.\n</memory_rules>`,
+    `<sessions>\nWhen the user asks for a separate session, or hands you one self-contained job (an audit, an investigation, a fix in one area), start it as a session instead of doing it here or proposing a run: call the sessions_start tool (or, without the lanework_control tools, \`"$${SESSIONS_ENV.cli}" sessions.start\` from your shell; \`--help\` lists every field). Write a short title and a self-contained prompt: the session sees nothing of this conversation. It runs in this checkout on your permission mode. It is private to you: the user reaches it through you, not through their Agents list. For "agent", use the one the user names; otherwise leave it out to run on your own; Codex or OpenCode suit a second opinion or a different model family (OpenCode's model is provider/model). Then say in one line what you started; do not wait for it. Lanework tells you when its turn ends: review the result then and report back briefly. sessions_list, sessions_read and sessions_send reach every session you started in this project, including ones from earlier conversations. A proposal stays the way for work split into parallel parts.\n</sessions>`,
+    `<memory_rules>\nYour memory of this project persists across your conversations: Lanework keeps a ledger of the sessions you started, and you keep notes. Use the lanework_control tools when they are listed: memory_read when you need that history; memory_append to add one decision, convention, open thread or next step; memory_write only to rewrite the notes whole (it replaces them, so send everything worth keeping, and keep them short). Without those tools, the CLI does the same: \`"$${SESSIONS_ENV.cli}" memory.read|memory.append|memory.write\`, with the JSON passed through \`--input -\` and a quoted heredoc rather than inline \`--json\`.\n</memory_rules>`,
     // Its context files stand for every answer, not only for a proposal.
     contextBlock(lead),
-    `<proposal_rules>\n${proposalRules(leadAgent, cwd, lead, false, others).join("\n\n")}\n\nWhen you pick a worker's model, weigh the past run outcomes in your memory (the <runs> tally): prefer models that were accepted for similar work, and avoid ones that failed or got blocked.\n</proposal_rules>`,
+    `<proposal_rules>\n${proposalRules(leadAgent, cwd, lead, false, others).join("\n\n")}\n</proposal_rules>`,
     memoryBlock(memory),
   ].filter((block): block is string => block !== null);
 }

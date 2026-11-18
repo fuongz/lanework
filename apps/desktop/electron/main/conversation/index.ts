@@ -61,7 +61,7 @@ import {
   workerFolderOf,
 } from "../orchestration";
 import { setSessionsEnv } from "../orchestration/engine-tap";
-import { createConductor } from "../orchestration/leads";
+import { createConductor, teamLeadOf } from "../orchestration/leads";
 import { conductorMemoryFile } from "../paths";
 import { knownProject, terminalFolder } from "../projects";
 import { accountDir, isSlug } from "../projects/store";
@@ -747,6 +747,7 @@ export function registerConversation(
     file: join(app.getPath("userData"), "conductor-sessions.json"),
     createConductor,
     memory: conductorMemory,
+    leadOf: (project, id) => teamLeadOf(project, id).catch(() => null),
     knowModels: async (agent, model) => {
       await ready.catch(() => {});
       if (agent === "codex") await codexModels();

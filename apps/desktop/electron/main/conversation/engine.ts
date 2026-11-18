@@ -57,7 +57,7 @@ import type { ClaudeCli } from "./claude-cli";
 import { claudeJsonFor, isClaudeTrusted } from "./claude-trust";
 import { CodexEngine } from "./codex-engine";
 import type { ConversationEngine } from "./conversation-engine";
-import { claudeMcpArgs } from "./mcp-args";
+import { claudeMcpArgs, controlMcpFor } from "./mcp-args";
 import { OpenCodeEngine, type OpenCodeEngineDeps } from "./opencode-engine";
 import { Held, type Outgoing, sameSettings } from "./queue";
 import { buildTurns, inputText, type Line } from "./transcript";
@@ -132,6 +132,7 @@ export function engineArgs(
   localMcp: string | null = null,
   hint: string | null = null,
   guarded = false,
+  controlMcp: string | null = null,
 ): string[] {
   const settings = checkSettings(value);
   if (!settings || !isAgentSessionId(id)) throw new Error("Unknown settings");
@@ -161,7 +162,8 @@ export function engineArgs(
     args.push("--settings", JSON.stringify({ fastMode: true }));
   if (!trusted) args.push("--setting-sources", "user");
   // FE-121/D9: this conversation's board is on this machine.
-  if (localMcp) args.push(...claudeMcpArgs(localMcp));
+  // FE-155: plus the control tools, for a process holding a control token.
+  args.push(...claudeMcpArgs(localMcp, controlMcp));
   // BE-01: what this process may ask of the app, fixed for its life.
   if (hint) args.push("--append-system-prompt", hint);
   if (guarded) args.push("--disallowedTools", [...WRITE_TOOLS].join(","));
@@ -457,6 +459,7 @@ class Engine implements ConversationEngine {
         localMcp,
         env[SESSIONS_ENV.token] ? CREATE_CONDUCTOR_HINT : null,
         guarded,
+        controlMcpFor(env),
       ),
       { cwd: this.folder, env, stdio: ["pipe", "pipe", "pipe"] },
     );

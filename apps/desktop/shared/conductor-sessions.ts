@@ -17,7 +17,8 @@
 // Memory (FE-128): each conductor keeps one {@link ConductorMemory} per
 // project, which outlives its conversations. Main appends to its ledger as
 // the conductor's sessions start and stop; the conductor reads it with
-// `memory.read` and replaces its free-form notes with `memory.write`.
+// `memory.read`, adds one fact to its free-form notes with `memory.append`
+// and replaces them wholesale with `memory.write`.
 //
 // NOTE: Shapes, limits and validators only. Imported by the CLI bundle and
 // the renderer, so no Node or Electron.
@@ -69,7 +70,9 @@ export const SESSION_ACTIONS = [
   "sessions.read",
   "sessions.send",
   "memory.read",
+  "memory.append",
   "memory.write",
+  "models.list",
   "conductors.create",
 ] as const;
 export type SessionAction = (typeof SESSION_ACTIONS)[number];
@@ -110,7 +113,10 @@ export const READ_CHARS_MAX = 6000;
 export const MEMORY_LEDGER_MAX = 30;
 /** Each ledger entry's summary, cut to this. */
 export const MEMORY_SUMMARY_MAX = 600;
-/** A conductor's notes: `memory.write` refuses longer. */
+/**
+ * A conductor's notes: `memory.write` refuses longer, and so does
+ * `memory.append` when the notes would grow past it.
+ */
 export const MEMORY_NOTES_MAX = 8000;
 /** The most orchestration runs a conductor's memory keeps, newest first. */
 export const MEMORY_RUNS_MAX = 20;
@@ -151,10 +157,17 @@ export interface SessionInputs {
   };
   "memory.read": Record<string, never>;
   /**
+   * Adds `text` to the notes on a new line; the rest stays. Refused when the
+   * notes would grow past {@link MEMORY_NOTES_MAX}.
+   */
+  "memory.append": { text: string };
+  /**
    * Replaces the notes wholesale: what is not sent is gone. An empty string
    * clears them. Never touches the ledger, which main keeps.
    */
   "memory.write": { notes: string };
+  /** The catalog a proposal may name, narrowed by agent or id text. */
+  "models.list": { agent?: TerminalAgent; query?: string };
   /**
    * A personal conductor of the caller's project. Every field left out takes
    * the default the rail's dialog gives, or the caller's own agent and model.
@@ -276,6 +289,24 @@ export interface ConductorRunEntry {
 }
 
 /**
+ * What `models.list` answers, kept short for an agent's context: ids only,
+ * an agent's list as one comma-separated string, OpenCode's per provider
+ * with the provider left out of each id.
+ */
+export interface ModelsListing {
+  /** `conductor`: the conductor's own workers; `catalog`: every model. */
+  source: "conductor" | "catalog";
+  models: Partial<Record<TerminalAgent, string | Record<string, string>>>;
+  /** Whether a task may leave agent and model null to be picked by tier. */
+  tiers: boolean;
+  /**
+   * How each model fared in the conductor's past runs: `model` → e.g.
+   * `"accepted 5, failed 1"`. Absent when it led none.
+   */
+  history?: Record<string, string>;
+}
+
+/**
  * What a conductor remembers of one project, across its conversations
  * (FE-128). One per conductor × project; main keeps the ledger and the
  * runs, the conductor its notes.
@@ -332,6 +363,9 @@ export interface SessionResults {
    * just sent are not echoed. `memory.read` returns the rest.
    */
   "memory.write": { notesLength: number; updatedAt: number };
+  /** As `memory.write`: the notes' new length, not the notes. */
+  "memory.append": { notesLength: number; updatedAt: number };
+  "models.list": ModelsListing;
   "conductors.create": {
     /** Its id, picked by the app: never one already taken. */
     id: string;
@@ -482,6 +516,32 @@ const SCHEMAS: {
     }),
   },
   "memory.read": { fields: [], parse: () => ({}) },
+  "models.list": {
+    fields: ["agent", "query"],
+    parse: (input) => {
+      const out: SessionInputs["models.list"] = {};
+      if (input.agent !== undefined)
+        out.agent = oneOf(input.agent, TERMINAL_AGENTS, "agent");
+      if (input.query !== undefined) {
+        if (typeof input.query !== "string" || input.query.length > 120)
+          fail("query must be a string of at most 120 characters");
+        if (input.query.trim()) out.query = input.query.trim();
+      }
+      return out;
+    },
+  },
+  "memory.append": {
+    fields: ["text"],
+    parse: (input) => {
+      if (typeof input.text !== "string" || !input.text.trim())
+        fail("Provide text as a non-empty string: the one fact to add");
+      if (input.text.length > MEMORY_NOTES_MAX)
+        fail(
+          `text is longer than ${MEMORY_NOTES_MAX} characters: add one short fact`,
+        );
+      return { text: input.text.trim() };
+    },
+  },
   "memory.write": {
     fields: ["notes"],
     parse: (input) => {
@@ -776,6 +836,17 @@ export const SESSION_HELP: Record<SessionAction, string> = {
             tier and outcome: accepted, cancelled, failed, blocked,
             interrupted or unreviewed), and your notes. Read it before you
             plan.`,
+  "memory.append": `  memory.append {"text":"One new decision or fact"}
+            Conductors only. Add the text to your notes for this project on
+            a new line; the rest stays. Refused when the notes would grow
+            past ${MEMORY_NOTES_MAX} characters: then rewrite them shorter
+            with memory.write. Prefer it for one new fact.`,
+  "models.list": `  models.list {"agent":"claude|codex|opencode","query":"sonnet"}
+            The models a proposal's tasks may name, grouped by agent
+            (OpenCode's by provider: the id is provider/model). A
+            conductor with its own workers gets those only, with their
+            tier, and every conductor how each model fared in its runs.
+            Both fields are optional.`,
   "memory.write": `  memory.write {"notes":"Decisions, open threads, what to check next"}
             Conductors only. Replace your notes for this project, at most
             ${MEMORY_NOTES_MAX} characters: send everything worth keeping, the
@@ -801,7 +872,7 @@ export const SESSION_HELP: Record<SessionAction, string> = {
  * once, when its process starts (BE-01). Fixed text, so a conversation's
  * prompt prefix never changes between its turns.
  */
-export const CREATE_CONDUCTOR_HINT = `Lanework: when the user asks you to create a conductor (a saved team lead in the Lanework app's Conductors rail), run \`"$${SESSIONS_ENV.cli}" conductors.create --json '{"name":"..."}'\` in the shell; add "instructions", "agent", "model", "effort", "contextFiles", "icon" or "permission" only when the user asked for them. Run it with --help for the fields. It prints one JSON line with the new conductor's id. Never print the LANEWORK_* environment variables.`;
+export const CREATE_CONDUCTOR_HINT = `Lanework: when the user asks you to create a conductor (a saved team lead in the Lanework app's Conductors rail), call the conductors_create tool (lanework_control), or without it run \`"$${SESSIONS_ENV.cli}" conductors.create --json '{"name":"..."}'\` in the shell; add "instructions", "agent", "model", "effort", "contextFiles", "icon" or "permission" only when the user asked for them. Run it with --help for the fields. It prints one JSON line with the new conductor's id. Never print the LANEWORK_* environment variables.`;
 
 // ─── Stop a conductor (the rail's Stop) ─────────────────────────────────────
 //

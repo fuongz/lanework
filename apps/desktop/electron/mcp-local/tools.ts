@@ -403,7 +403,21 @@ const RUNS: { [Name in BoardToolName]: Run<Name> } = {
       patch,
       { project: board.id },
     );
-    return { item, ...decisionState(item.checklist) };
+    const changed = item.checklist.find((box) => box.key === String(args.key));
+    if (!changed)
+      fail(
+        "not_found",
+        `checklist item ${String(args.key)} not found on this card`,
+      );
+    return {
+      checklistItem: changed,
+      card: brief(item),
+      progress: {
+        done: item.checklist.filter((box) => box.checked).length,
+        total: item.checklist.length,
+      },
+      ...decisionState(item.checklist),
+    };
   },
   review_card(args, { store }) {
     const board = boardOf(store, args.board_id);

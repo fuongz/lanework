@@ -1192,3 +1192,88 @@ export async function syncKitMcp(): Promise<void> {
     if (repoint || putBack) await installKitMcp(agent).catch(() => undefined);
   }
 }
+
+// ── lanework-control (FE-155) ────────────────────────────────────────────────
+//
+// The lanework-control MCP server (`dist/electron/mcp-control/server.cjs`),
+// through its own shim. Unlike the two entries above it is NEVER written to
+// an agent's config: the app attaches it by flags to the one process it
+// starts, with that conversation's tokens in its env, so a conversation the
+// app did not start never sees it.
+
+/** `~/.lanew/bin/lanework-control-mcp` — what a conversation's flags run. */
+export function controlShimPath(): string {
+  return join(appHomeDir(), "bin", "lanework-control-mcp");
+}
+
+/**
+ * The control MCP server bundle, `dist/electron/mcp-control/server.cjs`,
+ * outside the asar archive like {@link mcpServerPath}'s.
+ */
+export function controlServerPath(mainDir: string = __dirname): string {
+  return join(mainDir, "..", "mcp-control", "server.cjs").replace(
+    `app.asar${sep}`,
+    `app.asar.unpacked${sep}`,
+  );
+}
+
+/**
+ * The control server's shim, rewritten whenever it is ensured.
+ *
+ * NOTE: No `cd` and no tokens: the agent starts it in its own folder, and
+ * the tokens and endpoint reach it through the env the app set on the agent.
+ * `LANEWORK_HOME` is pinned like the other shims'.
+ */
+export function buildControlShim(options: {
+  execPath: string;
+  serverPath: string;
+  home: string;
+}): string {
+  return [
+    "#!/bin/sh",
+    "# Lanework's lanework-control MCP server (FE-155). The Lanework app",
+    "# rewrites this file; edits here are lost.",
+    "export ELECTRON_RUN_AS_NODE=1",
+    `export LANEWORK_HOME=${shellQuote(options.home)}`,
+    `exec ${shellQuote(options.execPath)} ${shellQuote(options.serverPath)} "$@"`,
+    "",
+  ].join("\n");
+}
+
+/**
+ * Write the control server's shim and return its path.
+ *
+ * @throws When this copy of the app may not write it ({@link shimRefusal}).
+ */
+async function writeControlShim(
+  execPath: string = process.execPath,
+): Promise<string> {
+  const refusal = currentShimRefusal();
+  if (refusal) throw new Error(shimRefusalMessage(refusal));
+  const path = controlShimPath();
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  await writeFile(
+    path,
+    buildControlShim({
+      execPath,
+      serverPath: controlServerPath(),
+      home: appHomeDir(),
+    }),
+    { mode: 0o700 },
+  );
+  await chmod(path, 0o700);
+  return path;
+}
+
+/**
+ * The control server's shim path, written now when this copy may write it,
+ * as {@link ensureMcpShim} does for the board's. Call it before attaching
+ * the server to a conversation.
+ *
+ * @returns null when there is no shim to run (a dev build with none on disk).
+ */
+export async function ensureControlMcpShim(): Promise<string | null> {
+  if (!currentShimRefusal()) return writeControlShim();
+  const path = controlShimPath();
+  return existsSync(path) ? path : null;
+}

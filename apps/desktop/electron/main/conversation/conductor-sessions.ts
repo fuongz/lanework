@@ -71,6 +71,7 @@ import {
 import type { EngineTarget } from "../orchestration/engine-tap";
 import { visibleText } from "../orchestration/prompts";
 import type { ConductorMemoryStore } from "./conductor-memory";
+import { modelsListing } from "./models-list";
 import type { Outgoing } from "./queue";
 
 /** The engines' calls this needs. */
@@ -152,12 +153,17 @@ export interface ConductorSessionsDeps {
     input: Omit<TeamLeadInput, "id">,
   ) => Promise<TeamLead>;
   /** Each conductor's memory of each project (FE-128). */
-  memory: Pick<ConductorMemoryStore, "read" | "writeNotes" | "record">;
+  memory: Pick<
+    ConductorMemoryStore,
+    "read" | "appendNotes" | "writeNotes" | "record"
+  >;
   /**
    * Make sure `agent`'s model list is read, `model` among it when it is one
    * of OpenCode's, before a session picks a model on it.
    */
   knowModels?: (agent: ConversationAgent, model?: string) => Promise<void>;
+  /** A conductor of the project, for its own workers (FE-156); null if gone. */
+  leadOf?: (project: string, id: string) => Promise<TeamLead | null>;
 }
 
 /** A session a conductor started. */
@@ -410,8 +416,13 @@ export class ConductorSessions {
     // user's own, and nothing runs until they open it (PD-04).
     if (call.action === "conductors.create")
       return this.createConductor(caller, call.input);
+    // Any conversation may ask which models a proposal may name (FE-156);
+    // a conductor's own also gets its workers and how its runs went.
+    if (call.action === "models.list") return this.models(caller, call.input);
     const memory =
-      call.action === "memory.read" || call.action === "memory.write";
+      call.action === "memory.read" ||
+      call.action === "memory.append" ||
+      call.action === "memory.write";
     const conductor = await this.conductorOf(
       caller,
       memory
@@ -429,6 +440,12 @@ export class ConductorSessions {
         return this.send(conductor, call.input);
       case "memory.read":
         return this.deps.memory.read(conductor.project, conductor.id);
+      case "memory.append":
+        return this.deps.memory.appendNotes(
+          conductor.project,
+          conductor.id,
+          call.input.text,
+        );
       case "memory.write":
         return this.deps.memory.writeNotes(
           conductor.project,
@@ -436,6 +453,33 @@ export class ConductorSessions {
           call.input.notes,
         );
     }
+  }
+
+  /** `models.list`: the catalog, or the conductor's own workers. */
+  private async models(
+    caller: Caller,
+    input: SessionInputs["models.list"],
+  ): Promise<SessionResults["models.list"]> {
+    const conductor = await this.conductorOf(caller, "").catch(() => null);
+    await Promise.all(
+      (["codex", "opencode"] as const).map((agent) =>
+        this.deps.knowModels?.(agent).catch(() => {}),
+      ),
+    );
+    const [lead, memory] = conductor
+      ? await Promise.all([
+          this.deps.leadOf?.(conductor.project, conductor.id) ?? null,
+          this.deps.memory
+            .read(conductor.project, conductor.id)
+            .catch(() => null),
+        ])
+      : [null, null];
+    return modelsListing({
+      input,
+      catalog: allModels(),
+      lead: lead ?? null,
+      runs: memory?.runs ?? [],
+    });
   }
 
   /**
@@ -1214,7 +1258,8 @@ export class ConductorSessions {
     return `<${SESSIONS_TAG}>
 Lanework adds this note: the user did not write it and does not see it. ${reports.length === 1 ? "A session you started has" : "Sessions you started have"} stopped:
 ${lines.join("\n")}
-Review the result (${cli} sessions.read for more), then tell the user in a few lines what was done and what is left. Do not start more work unless they asked for it.
+Review the result (sessions_read, or ${cli} sessions.read, for more), then tell the user in a few lines what was done and what is left. Do not start more work unless they asked for it.
+Use the lanework-control MCP tools (memory_read, memory_append, memory_write, sessions_*, conductors_create) when they are listed; otherwise run ${cli} with the matching action (memory.read, memory.append, …). To keep one new fact, prefer memory_append; use memory_write only to rewrite your notes in full.
 </${SESSIONS_TAG}>`;
   }
 
