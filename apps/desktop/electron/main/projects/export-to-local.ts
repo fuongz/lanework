@@ -22,7 +22,7 @@ import type {
   CheckpointRequest,
   Placement,
   WorkItemType,
-} from "@lanework/protocol";
+} from "@lanework/contracts";
 import type {
   BoardCard,
   BoardChecklistItem,

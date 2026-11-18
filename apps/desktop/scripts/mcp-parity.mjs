@@ -3,13 +3,14 @@
  * The board MCP parity gate (FE-152). Starts the built offline server
  * (`dist/electron/mcp-local/server.cjs`) over stdio, as an agent config does,
  * on a throwaway `LANEWORK_HOME`, and checks it against the tool contract in
- * `@lanework/protocol`:
+ * `@lanework/contracts`:
  *
  * - `tools/list` names, descriptions, input schemas and read-only flags equal
  *   `BOARD_TOOLS`, in order, and nothing else is served;
  * - a scripted board scenario calls every board tool, and each answer has the
- *   shape `BoardToolOutputs` names for it (checked by hand below, field by
- *   field: the types do not exist at run time).
+ *   shape `BoardToolOutputs` names for it, checked with the contract's own
+ *   run-time shapes (`boardToolOutputProblems`, `BOARD_TOOL_OUTPUT_SHAPES`):
+ *   the cloud's parity gate checks its server with the same ones.
  *
  * It then starts the built lanework-control server
  * (`dist/electron/mcp-control/server.cjs`, FE-155) with a fake sessions token,
@@ -30,16 +31,19 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  BOARD_INSTRUCTIONS,
   BOARD_TOOLS,
+  boardToolOutputProblems,
   controlToolsFor,
   toolInputSchema,
-} from "@lanework/protocol";
+} from "@lanework/contracts";
 
 const desktop = join(dirname(fileURLToPath(import.meta.url)), "..");
 const bundle = join(desktop, "dist/electron/mcp-local/server.cjs");
 const controlBundle = join(desktop, "dist/electron/mcp-control/server.cjs");
 /** The env lanework-control reads (`SESSIONS_ENV`, `CONTROL_ENV`). */
 const SESSIONS_TOKEN = "LANEWORK_SESSIONS_TOKEN";
+const CONTROL_AS = "LANEWORK_CONTROL_AS";
 const CONTROL_TOKEN = "LANEWORK_CONTROL_TOKEN";
 const CONTROL_ENDPOINT = "LANEWORK_CONTROL_ENDPOINT";
 const REMOTE = "https://example.com/acme/parity.git";
@@ -48,252 +52,6 @@ const TIMEOUT_MS = 15_000;
 const problems = [];
 const problem = (message) => problems.push(message);
 
-// ── Shapes ──────────────────────────────────────────────────────────────────
-// Each mirrors a type in packages/protocol/src (boards.ts, checkpoints.ts,
-// tools/board.ts). An object shape is exact: a missing key and an extra one
-// are both drift.
-
-const str = { kind: "string" };
-const num = { kind: "number" };
-const bool = { kind: "boolean" };
-const any = { kind: "any" };
-const nullable = (inner) => ({ kind: "nullable", inner });
-const optional = (inner) => ({ kind: "optional", inner });
-const list = (inner) => ({ kind: "list", inner });
-const record = (inner) => ({ kind: "record", inner });
-const obj = (fields) => ({ kind: "object", fields });
-const oneOf = (...values) => ({ kind: "enum", values });
-const and = (a, b) => obj({ ...a.fields, ...b.fields });
-
-const PRIORITY = nullable(oneOf("low", "medium", "high"));
-const COLUMN_ROLE = nullable(
-  oneOf("intake", "start", "active", "review", "done", "archive"),
-);
-
-const BOARD_SUMMARY = obj({
-  workspaceId: str,
-  name: str,
-  role: str,
-  changeSeq: num,
-  repo: nullable(str),
-});
-const BOARD_REF = obj({ workspaceId: str, name: str, repo: nullable(str) });
-const CHECKLIST_ITEM = obj({
-  key: str,
-  section: oneOf("decisions", "verify"),
-  text: str,
-  checked: bool,
-  checkedAt: nullable(str),
-  note: nullable(str),
-  group: nullable(str),
-  stream: nullable(str),
-  checkedBy: optional(any),
-  evidence: optional(any),
-});
-const STREAM = obj({
-  key: str,
-  title: str,
-  goal: str,
-  role: oneOf("research", "implement", "test"),
-  owns: list(str),
-  reads: list(str),
-  dependsOn: list(str),
-  isolation: oneOf("worktree", "shared"),
-  position: num,
-});
-const DISPATCH = obj({ waves: list(list(str)), briefs: record(str) });
-const CARD = obj({
-  id: str,
-  workspaceId: str,
-  seq: num,
-  revision: num,
-  type: oneOf("epic", "issue", "task"),
-  parentId: nullable(str),
-  columnKey: str,
-  rank: str,
-  title: str,
-  body: str,
-  priority: PRIORITY,
-  estimate: nullable(num),
-  categoryKey: nullable(str),
-  taskId: nullable(str),
-  tags: list(str),
-  checklistProgress: obj({ done: num, total: num }),
-  streams: list(STREAM),
-  metadata: nullable(any),
-  source: nullable(any),
-  createdAt: nullable(str),
-  updatedAt: nullable(str),
-  startedAt: nullable(str),
-  completedAt: nullable(str),
-  dueAt: nullable(str),
-  archivedAt: nullable(str),
-  stale: optional(nullable(any)),
-  changesRequested: optional(nullable(any)),
-});
-const CARD_DETAIL = and(
-  CARD,
-  obj({
-    checklist: list(CHECKLIST_ITEM),
-    dispatch: nullable(DISPATCH),
-    assignees: obj({ users: list(str), agents: list(str) }),
-    links: list(any),
-    attachments: list(any),
-    subscribers: list(str),
-    subscribed: bool,
-    favorite: bool,
-    commentCount: num,
-  }),
-);
-const CHECKPOINT_FIELDS = {
-  id: str,
-  agent: str,
-  userId: str,
-  machineId: nullable(str),
-  createdAt: str,
-  request: nullable(str),
-  summary: str,
-  nextStep: nullable(str),
-  files: list(str),
-  commands: list(obj({ command: str, ok: nullable(bool) })),
-  host: nullable(str),
-  session: nullable(str),
-  git: nullable(
-    obj({
-      branch: nullable(str),
-      head: nullable(str),
-      wipRef: nullable(str),
-      wipSha: nullable(str),
-      diffStat: nullable(str),
-    }),
-  ),
-};
-const CHECKPOINT = obj(CHECKPOINT_FIELDS);
-const LATEST_CHECKPOINT = obj({
-  ...CHECKPOINT_FIELDS,
-  nextStepFrom: nullable(obj({ id: str, agent: str, createdAt: str })),
-});
-const CARD_BRIEF = obj({
-  id: str,
-  taskId: nullable(str),
-  title: str,
-  column: str,
-  priority: PRIORITY,
-  revision: num,
-});
-const DECISIONS = { ready: bool, pending: list(str) };
-
-/** `BoardToolOutputs`, tool by tool. */
-const OUTPUTS = {
-  list_boards: obj({
-    repo: optional(str),
-    boards: list(BOARD_SUMMARY),
-    next: str,
-  }),
-  create_board: obj({
-    board_id: str,
-    board: and(BOARD_REF, obj({ slug: str })),
-    next: str,
-  }),
-  link_repo: obj({ board: BOARD_REF, replaced: nullable(str) }),
-  board_summary: obj({
-    board: BOARD_REF,
-    total: num,
-    lanes: list(obj({ key: str, name: str, role: COLUMN_ROLE, count: num })),
-    categories: list(obj({ key: str, name: str, prefix: str, next: num })),
-    tagPolicy: obj({ max: num, allowed: list(str) }),
-    tags: list(obj({ tag: str, count: num })),
-    labels: list(obj({ key: str, name: str, tone: str, position: num })),
-  }),
-  list_reviews: obj({ total: num, items: list(CARD), truncated: bool }),
-  get_review: obj({
-    item: CARD_DETAIL,
-    checkpoint: nullable(LATEST_CHECKPOINT),
-    dispatch: nullable(DISPATCH),
-  }),
-  create_review: obj({ item: CARD_DETAIL, next: str }),
-  update_review: obj({ item: CARD_DETAIL }),
-  toggle_item: obj({
-    ...DECISIONS,
-    checklistItem: CHECKLIST_ITEM,
-    card: CARD_BRIEF,
-    progress: obj({ done: num, total: num }),
-  }),
-  review_card: obj({
-    ...DECISIONS,
-    revision: num,
-    checklist: list(CHECKLIST_ITEM),
-    next: str,
-  }),
-  set_status: obj({ item: CARD_BRIEF }),
-  delete_review: obj({ archived: str, item: CARD_BRIEF }),
-  checkpoint: obj({ checkpoint: CHECKPOINT }),
-  lifecycle_status: obj({
-    waiting: list(and(CARD_BRIEF, obj({ pending: list(str) }))),
-    ready: list(CARD_BRIEF),
-    inFlight: list(and(CARD_BRIEF, obj({ verified: str }))),
-    review: list(CARD_BRIEF),
-  }),
-};
-
-/** Every way `value` differs from `shape`, as `path: what` lines. */
-function mismatches(shape, value, path) {
-  const out = [];
-  const check = (s, v, p) => {
-    switch (s.kind) {
-      case "any":
-        return;
-      case "optional":
-        if (v !== undefined) check(s.inner, v, p);
-        return;
-      case "nullable":
-        if (v !== null) check(s.inner, v, p);
-        return;
-      case "string":
-      case "number":
-      case "boolean":
-        if (typeof v !== s.kind)
-          out.push(`${p}: expected ${s.kind}, got ${JSON.stringify(v)}`);
-        return;
-      case "enum":
-        if (!s.values.includes(v))
-          out.push(
-            `${p}: ${JSON.stringify(v)} is not one of ${s.values.join(", ")}`,
-          );
-        return;
-      case "list":
-        if (!Array.isArray(v)) out.push(`${p}: expected a list`);
-        else
-          for (const [i, entry] of v.entries())
-            check(s.inner, entry, `${p}[${i}]`);
-        return;
-      case "record":
-        if (typeof v !== "object" || v === null || Array.isArray(v))
-          out.push(`${p}: expected an object`);
-        else
-          for (const [k, entry] of Object.entries(v))
-            check(s.inner, entry, `${p}.${k}`);
-        return;
-      case "object": {
-        if (typeof v !== "object" || v === null || Array.isArray(v)) {
-          out.push(`${p}: expected an object`);
-          return;
-        }
-        for (const [k, field] of Object.entries(s.fields)) {
-          if (!(k in v) && field.kind !== "optional")
-            out.push(`${p}.${k}: missing`);
-          else check(field, v[k], `${p}.${k}`);
-        }
-        for (const k of Object.keys(v))
-          if (!(k in s.fields)) out.push(`${p}.${k}: not in the contract`);
-        return;
-      }
-    }
-  };
-  check(shape, value, path);
-  return out;
-}
-
 // ── The server ──────────────────────────────────────────────────────────────
 
 function startServer(home, script = bundle, extraEnv = {}) {
@@ -301,7 +59,12 @@ function startServer(home, script = bundle, extraEnv = {}) {
   // NOTE: Run from a Lanework conversation, this process carries real
   // control tokens; the server must see only the ones a check passes.
   const env = { ...process.env };
-  for (const name of [SESSIONS_TOKEN, CONTROL_TOKEN, CONTROL_ENDPOINT])
+  for (const name of [
+    SESSIONS_TOKEN,
+    CONTROL_TOKEN,
+    CONTROL_ENDPOINT,
+    CONTROL_AS,
+  ])
     delete env[name];
   const child = spawn(electron, [script], {
     env: {
@@ -399,7 +162,8 @@ async function scenario(server) {
     const value = JSON.parse(answer.result.content[0].text);
     if (answer.result.isError)
       throw new Error(`${name} refused: ${value.message}`);
-    for (const line of mismatches(OUTPUTS[name], value, name)) problem(line);
+    // An exact object shape: a missing key and an extra one are both drift.
+    for (const line of boardToolOutputProblems(name, value)) problem(line);
     return value;
   };
 
@@ -451,24 +215,29 @@ async function scenario(server) {
   });
   const card = created.item.taskId ?? created.item.id;
   await call("list_reviews", { board_id: boardId });
-  await call("toggle_item", {
+  const toggled = await call("toggle_item", {
     board_id: boardId,
     card,
     key: "D1",
     checked: true,
     note: "approved",
   });
+  // The pick-ONE group is still open, named as `review_card` names it.
+  if (toggled.ready !== false || !toggled.open?.includes("pick (D2/D3)"))
+    problem(
+      `toggle_item: expected ready: false, open [pick (D2/D3)], got ${JSON.stringify({ ready: toggled.ready, open: toggled.open })}`,
+    );
   // Not every decision ticked: lifecycle_status lists the card as waiting.
-  await call("lifecycle_status", { board_id: boardId });
+  const before = await call("lifecycle_status", { board_id: boardId });
+  if (!before.waiting.some((entry) => entry.id === created.item.id))
+    problem("lifecycle_status: the card is not waiting before review_card");
   const reviewed = await call("review_card", {
     board_id: boardId,
     card,
     picks: [{ key: "D2", checked: true }],
   });
   if (reviewed.ready !== true)
-    problem(
-      `review_card: expected ready: true, got pending ${reviewed.pending}`,
-    );
+    problem(`review_card: expected ready: true, got open ${reviewed.open}`);
   await call("update_review", {
     board_id: boardId,
     card,
@@ -489,8 +258,17 @@ async function scenario(server) {
     problem("get_review: no checkpoint after checkpoint");
   if (got.dispatch === null)
     problem("get_review: no dispatch for a card with streams");
-  await call("lifecycle_status", { board_id: boardId });
-  await call("delete_review", { board_id: boardId, card });
+  const during = await call("lifecycle_status", { board_id: boardId });
+  if (!during.inFlight.some((entry) => entry.id === created.item.id))
+    problem("lifecycle_status: the card is not in flight after set_status");
+  // Into a review lane: no `retro` offline (no move history to read).
+  await call("set_status", { board_id: boardId, card, status: "review" });
+  const after = await call("lifecycle_status", { board_id: boardId });
+  if (!after.review.some((entry) => entry.id === created.item.id))
+    problem("lifecycle_status: the card is not in review after set_status");
+  const deleted = await call("delete_review", { board_id: boardId, card });
+  if (deleted.archived !== created.item.id)
+    problem(`delete_review: archived ${deleted.archived}, not the card`);
 
   for (const tool of BOARD_TOOLS)
     if (!called.has(tool.name)) problem(`scenario never called ${tool.name}`);
@@ -507,8 +285,16 @@ async function scenario(server) {
 async function controlParity(home) {
   const cases = [
     {
-      label: "sessions token",
+      label: "sessions token, plain session",
       env: { [SESSIONS_TOKEN]: "parity-sessions" },
+      roles: { conductor: false, lead: false },
+    },
+    {
+      label: "sessions token, conductor",
+      env: {
+        [SESSIONS_TOKEN]: "parity-sessions",
+        [CONTROL_AS]: "conductor",
+      },
       roles: { conductor: true, lead: false },
     },
     {
@@ -581,6 +367,9 @@ async function main() {
       clientInfo: { name: "mcp-parity", version: "1" },
     });
     if (!init.result) throw new Error(`initialize: ${init.error?.message}`);
+    // The rules ship with the tools: word for word the cloud server's text.
+    if (init.result.instructions !== BOARD_INSTRUCTIONS)
+      problem("initialize instructions differ from BOARD_INSTRUCTIONS");
     server.notify("notifications/initialized");
     const list = await server.rpc("tools/list");
     checkToolList(list.result.tools);

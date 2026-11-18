@@ -2,7 +2,7 @@
 //! socket, and the output. The JS kit (`electron/lwk/commands.ts`) is the
 //! same command for when no app answers, and both print the same bytes.
 //!
-//! - Flags mirror the tools' inputs (`KIT_TOOLS`, packages/protocol); the
+//! - Flags mirror the tools' inputs (`KIT_TOOLS`, lanework-dev/contracts); the
 //!   kit checks them, so a bad value fails with the kit's own words.
 //! - `--json` prints the tool's answer as the MCP server does. Otherwise one
 //!   line per hit: `path:line: text` for grep and sg, a path for find and

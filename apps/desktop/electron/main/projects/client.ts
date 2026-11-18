@@ -5,7 +5,7 @@ import {
   PRIORITIES,
   paths,
   stripUserinfo,
-} from "@lanework/protocol";
+} from "@lanework/contracts";
 import {
   type BoardActivity,
   type BoardActivityPage,

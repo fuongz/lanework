@@ -55,18 +55,18 @@ var import_node_crypto5 = require("node:crypto");
 var import_node_fs6 = require("node:fs");
 var import_node_os6 = require("node:os");
 var import_node_path9 = require("node:path");
-// packages/protocol/src/auth.ts
+// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/auth.ts
 var LOOPBACK_CALLBACK_PATH = "/oauth/callback";
-// packages/protocol/src/boards.ts
+// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/boards.ts
 var WORK_ITEM_TYPES = ["epic", "issue", "task"];
 var PRIORITIES = ["low", "medium", "high"];
 var CHECKLIST_SECTIONS = ["decisions", "verify"];
 var STREAM_ROLES = ["research", "implement", "test"];
 var STREAM_ISOLATIONS = ["worktree", "shared"];
-// packages/protocol/src/checkpoints.ts
+// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/checkpoints.ts
 var CHECKPOINTS_KEPT = 5;
 var CHECKPOINT_MAX_BYTES = 16 * 1024;
-// packages/protocol/src/common.ts
+// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/common.ts
 var DEFAULT_API_ORIGIN = "https://api.lanework.dev";
 var AGENT_HEADER = "x-lanework-agent";
 var TOKEN_PREFIXES = {
@@ -94,7 +94,7 @@ function stripUserinfo(remote) {
     return value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/]*@/i, "$1");
   }
 }
-// packages/protocol/src/endpoints.ts
+// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/endpoints.ts
 function seg(value) {
   if (value === "" || value === "." || value === "..")
     throw new Error(`Refusing the path segment ${JSON.stringify(value)}.`);
@@ -144,7 +144,7 @@ function withQuery(path, query) {
   const text = query === undefined ? "" : String(query);
   return text ? `${path}?${text}` : path;
 }
-// packages/protocol/src/tools/control.ts
+// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/tools/control.ts
 var CONTROL_TOOL_LIMITS = {
   TITLE_MAX: 160,
   PROMPT_MAX: 30000,
@@ -170,18 +170,18 @@ var SCOPES = {
   type: "string[]",
   description: `The write scope: at most ${L.FILES_MAX} project-relative paths; a directory covers what is under it, ["."] the whole checkout, [] edits no file`
 };
-// packages/protocol/src/tools/board.ts
+// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/tools/board.ts
 var BOARD_ID = {
   type: "string",
-  description: "The board's id (the local project id) from list_boards. There is no default."
+  description: "Workspace id of the board, from `list_boards`."
 };
 var CARD = {
   type: "string",
-  description: "Card id or task id (e.g. BE-07)"
+  description: "Card id or task id, e.g. BE-07"
 };
 var REPO = {
   type: "string",
-  description: "Output of `git remote get-url origin`, unmodified (ssh or https)"
+  description: "Output of `git remote get-url origin`, unmodified — ssh or https"
 };
 var PRIORITY = {
   type: "string",
@@ -189,75 +189,74 @@ var PRIORITY = {
 };
 var ASSIGNEES = {
   type: "object",
-  description: "Agents assigned to the card. `users` is accepted and ignored: a local board has no accounts.",
   properties: {
-    agents: { type: "string[]" },
-    users: { type: "string[]" }
+    users: { type: "string[]" },
+    agents: { type: "string[]" }
   }
 };
-var STREAMS = {
+var streams = (description) => ({
   type: "object[]",
-  description: "Sub-agent streams (BE-19). Only for 2+ independent write areas. `owns`: exact paths or directories ending in `/`, no globs; two streams never own the same path. Shared files go in a W0 stream the others depend on. At most 4 streams per wave. Every stream needs at least one verify item tagged with its key.",
+  description,
   properties: {
-    key: { type: "string", description: "W0…W999; minted when absent" },
-    title: { type: "string" },
-    goal: { type: "string" },
+    key: {
+      type: "string",
+      description: "W0, W1, … — minted for you if omitted"
+    },
+    title: { type: "string", description: "One line, e.g. 'MCP tools'" },
+    goal: {
+      type: "string",
+      description: "What the sub-agent must deliver, self-contained: it starts with none of your context"
+    },
     role: { type: "string", enum: ["research", "implement", "test"] },
-    owns: { type: "string[]" },
-    reads: { type: "string[]" },
-    depends_on: { type: "string[]", description: "Stream keys" },
+    owns: {
+      type: "string[]",
+      description: "Repo-relative paths it alone writes; a directory ends in '/'. No globs. Required unless role is research"
+    },
+    reads: { type: "string[]", description: "Paths it should read first" },
+    depends_on: {
+      type: "string[]",
+      description: "Stream keys that must finish before this one starts"
+    },
     isolation: {
       type: "string",
       enum: ["worktree", "shared"],
-      description: "Default worktree"
+      description: "worktree (default): its own git worktree. shared: the lead's checkout, for read-only research"
     }
   },
   required: ["title", "goal", "role"]
-};
-var CHECKLIST = {
-  type: "object[]",
-  description: "Decisions (what the user approves) and verify items (how the work is proved). Boxes sharing a `group` are pick-ONE options.",
-  properties: {
-    section: { type: "string", enum: ["decisions", "verify"] },
-    text: { type: "string" },
-    checked: { type: "boolean" },
-    group: { type: "string" },
-    key: { type: "string", description: "D1, V3…; minted if omitted" },
-    note: { type: "string" },
-    stream: {
-      type: "string",
-      description: "Verify items only: the stream key this item proves"
-    }
-  },
-  required: ["section", "text"]
-};
+});
 var BOARD_TOOLS = [
   {
     name: "list_boards",
-    description: "Every board on this machine, with its board id and linked repo. Call this FIRST: every other tool needs a `board_id` and there is no default. Pass `repo` (your `git remote get-url origin`, as is) to get only the board(s) linked to the repo you are working in.",
+    title: "List boards",
+    description: "Every board you can see, with its workspace id and linked repo. Call this FIRST: every other tool needs a `board_id` and there is no default. Pass `repo` (your `git remote get-url origin`, as is) to get only the board(s) linked to the repo you are working in.",
     readOnly: true,
-    properties: { repo: REPO }
+    properties: {
+      repo: REPO
+    }
   },
   {
     name: "create_board",
-    description: "Create a new board and link it to the git repo in one step. ONLY after the user chose to create a new board, never on your own initiative. Suggest `owner/name` from the remote as the name. Returns board_id for every other tool.",
+    title: "Create a board for this repo",
+    description: "Create a new board and link it to the git repo in one step. ONLY after the user chose to create a new board (offered next to the existing ones when list_boards({ repo }) found none) — never on your own initiative. Suggest `owner/name` from the remote as the name. Returns board_id for every other tool.",
     readOnly: false,
     properties: {
       name: {
         type: "string",
         description: "Board name the user agreed to, e.g. `acme/widgets`"
       },
-      repo: REPO,
       slug: {
         type: "string",
-        description: "Lower-case hyphenated key; omitted = derived from the name."
-      }
+        description: "Lower-case hyphenated key. Omit to derive it from the name."
+      },
+      repo: REPO
     },
     required: ["name", "repo"]
   },
   {
     name: "link_repo",
-    description: "Link a board to a git repo so list_boards({ repo }) finds it. Only after the USER confirmed which board the repo belongs to. A board links to ONE repo; refuses to replace a different linked repo unless `replace` is true. A repo another board held moves to this one.",
+    title: "Link a board to a repo",
+    description: "Link a board to a git repo so list_boards({ repo }) finds it. Only call this after the USER has confirmed which board the repo belongs to — never on a guess from the board's name. Owner only. Refuses to replace a different linked repo unless `replace` is true.",
     readOnly: false,
     properties: {
       board_id: BOARD_ID,
@@ -271,145 +270,142 @@ var BOARD_TOOLS = [
   },
   {
     name: "board_summary",
-    description: "Lane-by-lane counts of live cards, plus the board's categories and tag policy. Read this before creating a card so its category and tags match what the board already uses.",
+    title: "Board summary",
+    description: "Lane-by-lane counts of live cards, plus the board's categories and tag policy. Read this before creating a card so its category and tags match what the board already uses. `stale` counts in-progress cards no agent has touched for over 2 hours — list_reviews flags which ones.",
     readOnly: true,
-    properties: { board_id: BOARD_ID },
+    properties: {
+      board_id: BOARD_ID
+    },
+    required: ["board_id"]
+  },
+  {
+    name: "lifecycle_status",
+    title: "Lifecycle status",
+    description: "What the board is waiting on: cards whose decisions are not all ticked (waiting), cards cleared to start (ready), cards being worked (in flight), and cards waiting for a human to review (review). Call this to pick up work rather than guessing from a list.",
+    readOnly: true,
+    properties: {
+      board_id: BOARD_ID
+    },
     required: ["board_id"]
   },
   {
     name: "list_reviews",
-    description: "Cards on a board, in the order the board draws them. Filter by lane, category, tag or priority. Archived cards are excluded unless asked for.",
+    title: "List cards",
+    description: "Cards on a board, in the order the board draws them. Filter by lane, category, tag or priority. Archived cards are excluded unless asked for. Each card's `stale` is `{ since, lastAgent }` for in-progress work no agent has touched for over 2 hours, else null.",
     readOnly: true,
     properties: {
       board_id: BOARD_ID,
-      category: { type: "string", description: "Category key, e.g. backend" },
       column: {
         type: "string",
         description: "Lane key, e.g. todo | processing | done"
       },
-      include_archived: { type: "boolean" },
-      limit: { type: "integer", minimum: 1, maximum: 200 },
-      priority: PRIORITY,
+      category: { type: "string", description: "Category key, e.g. backend" },
       tag: { type: "string" },
+      priority: PRIORITY,
       task_id: {
         type: "string",
-        description: "Exact task id such as BE-07, matched on the field, not the title"
-      }
+        description: "Exact task id such as BE-07 — matched on the field, not the title"
+      },
+      include_archived: { type: "boolean" },
+      limit: { type: "integer", minimum: 1, maximum: 200 }
     },
     required: ["board_id"]
   },
   {
     name: "get_review",
-    description: "One card with its checklist, tags and `streams`, plus the latest `checkpoint` another agent left on it (or null) and `dispatch`: the card's run plan, `{ waves, briefs }`, or null when it has no streams. `card` takes either the card's id or its task id (e.g. BE-07).",
+    title: "Get a card",
+    description: "One card with its checklist, tags, assignees, links and `streams`, plus the latest `checkpoint` another agent left on it (or null) and `dispatch` — the card's run plan, `{ waves, briefs }`, or null when it has no streams. With a dispatch you are the lead: run it wave by wave, handing each stream's sub-agent its brief verbatim. `item.stale` is `{ since, lastAgent }` when the card sits in progress with no agent activity for over 2 hours (or null): resume it from its checkpoint. `card` takes either the card's id or its task id (e.g. BE-07).",
     readOnly: true,
-    properties: { board_id: BOARD_ID, card: CARD },
+    properties: {
+      board_id: BOARD_ID,
+      card: CARD
+    },
     required: ["board_id", "card"]
   },
   {
     name: "create_review",
-    description: "Open a new card on a board. Setting `category` also mints the card's permanent task id. Split into `streams` only for 2+ independent write areas. Shared files go in a W0 stream the others depend on. At most 4 streams per wave, no two streams in one wave own the same path, every stream needs at least one verify item tagged with its key. Isolation defaults to worktree.",
+    title: "Create a card",
+    description: "Open a new card on a board. Setting `category` also mints the card's permanent task id (BE-07 and so on), so pass it unless you mean to leave the card unfiled. Split a card into `streams` only when it touches two or more independent write areas (e.g. db + mcp + desktop); a 1–2 file card has none. Shared files (types, schema, contracts) go in a W0 stream the others depend on. At most 4 streams can run in one wave, no two streams that run together may own the same path, and every stream needs at least one verify item tagged with its key (`checklist[].stream`). Untagged verify items are the lead's: gate, build, e2e. Isolation defaults to worktree.",
     readOnly: false,
     properties: {
       board_id: BOARD_ID,
       title: { type: "string" },
-      body: { type: "string", description: "Markdown" },
-      category: {
-        type: "string",
-        description: "Category key; mints the task id"
-      },
-      checklist: CHECKLIST,
+      body: { type: "string", description: "Markdown body of the card" },
+      type: { type: "string", enum: ["epic", "issue", "task"] },
       column: {
         type: "string",
         description: "Lane key; defaults to the board's start lane"
       },
-      parent_id: { type: "string" },
+      category: {
+        type: "string",
+        description: "Category key — this is what mints the task id"
+      },
       priority: PRIORITY,
-      streams: STREAMS,
-      tags: { type: "string[]" },
-      type: { type: "string", enum: ["epic", "issue", "task"] },
-      assignees: ASSIGNEES
+      tags: {
+        type: "string[]",
+        description: "Reuse the board's existing tags"
+      },
+      assignees: ASSIGNEES,
+      checklist: {
+        type: "object[]",
+        properties: {
+          section: { type: "string", enum: ["decisions", "verify"] },
+          text: { type: "string" },
+          key: {
+            type: "string",
+            description: "Stable id like D1 — minted for you if omitted"
+          },
+          checked: { type: "boolean" },
+          group: {
+            type: "string",
+            description: "Same value on 2+ items makes them a 'pick ONE' group"
+          },
+          note: { type: "string" },
+          stream: {
+            type: "string",
+            description: "Verify items only: the stream key (W1…) this item proves. Each stream needs one"
+          }
+        },
+        required: ["section", "text"]
+      },
+      streams: streams("Sub-agent jobs a lead runs in waves (BE-19). Omit for a card one agent works end to end"),
+      parent_id: { type: "string" }
     },
     required: ["board_id", "title"]
   },
   {
     name: "update_review",
-    description: "Patch a card's title, body, priority, tags, assignees, category or streams. Omitted fields are left alone; `tags`, `assignees` and `streams` replace what is there (`streams: []` clears the plan). Streams are checked against the checklist: each needs a verify item tagged with its key (tag them in the same call with `checklist_streams`). Use set_status to move between lanes.",
+    title: "Update a card",
+    description: "Patch a card's title, body, priority, tags, assignees, category or streams. Omitted fields are left alone; `tags`, `assignees` and `streams` replace what is there (`streams: []` clears the plan). Streams are checked against the card's checklist: each one needs a verify item tagged with its key — tag them in the same call with `checklist_streams`, or one at a time with toggle_item's `stream`. Use set_status to move a card between lanes. Split a card into `streams` only when it touches two or more independent write areas (e.g. db + mcp + desktop); a 1–2 file card has none. Shared files (types, schema, contracts) go in a W0 stream the others depend on. At most 4 streams can run in one wave, no two streams that run together may own the same path, and every stream needs at least one verify item tagged with its key (`checklist[].stream`). Untagged verify items are the lead's: gate, build, e2e. Isolation defaults to worktree.",
     readOnly: false,
     properties: {
       board_id: BOARD_ID,
       card: CARD,
       title: { type: "string" },
       body: { type: "string" },
+      priority: PRIORITY,
+      tags: { type: "string[]", description: "Replaces the tag list" },
       category: {
         type: "string",
         description: "Setting this on a card with no task id yet mints one"
       },
-      priority: PRIORITY,
-      tags: { type: "string[]", description: "Replaces the card's tags" },
       assignees: ASSIGNEES,
-      streams: STREAMS,
+      streams: streams("Replaces the whole stream list; pass expected_revision so a concurrent edit is not lost"),
       checklist_streams: {
         type: "string-map",
-        description: 'Verify item key → stream key (null removes the tag), e.g. { "V3": "W1", "V4": null }'
+        description: 'Tag verify items with the stream they prove, applied with `streams` in one write: { V3: "W1", V4: null }'
       },
       expected_revision: {
         type: "integer",
-        description: "Refuse unless the card is still at this revision"
+        description: "Refuse the write unless the card is still at this revision — pass what get_review returned to avoid overwriting a concurrent edit."
       }
     },
     required: ["board_id", "card"]
   },
   {
-    name: "toggle_item",
-    description: "Tick or untick one checklist box on a card, and optionally leave a note under it, or tag a verify item with the stream it proves. `key` is the item's stable id, e.g. D1 or V3. Answers with that box, the card in one line and its progress, not the whole card: get_review has the rest.",
-    readOnly: false,
-    properties: {
-      board_id: BOARD_ID,
-      card: CARD,
-      key: { type: "string", description: "Checklist item key, e.g. D1 or V3" },
-      checked: {
-        type: "boolean",
-        description: "Omit to leave the tick alone"
-      },
-      note: { type: "string", description: "Empty string clears it" },
-      stream: {
-        type: "nullable-string",
-        description: "Verify items only; null removes the tag"
-      },
-      text: {
-        type: "string",
-        description: "Reword the item, keeping its key and tick"
-      }
-    },
-    required: ["board_id", "card", "key"]
-  },
-  {
-    name: "review_card",
-    description: "Write the user's review of a card's checklist in one call. ONLY with picks the user just made. Ticking one option of a pick-ONE group unticks the others; boxes not named are left as they are. Free text goes in `note`. Returns `ready: true` once every decision is settled; it does not move the card.",
-    readOnly: false,
-    properties: {
-      board_id: BOARD_ID,
-      card: CARD,
-      picks: {
-        type: "object[]",
-        minItems: 1,
-        properties: {
-          key: { type: "string" },
-          checked: { type: "boolean" },
-          note: { type: "string" }
-        },
-        required: ["key", "checked"]
-      },
-      revision: {
-        type: "integer",
-        description: "Refused if the card's revision changed since"
-      }
-    },
-    required: ["board_id", "card", "picks"]
-  },
-  {
     name: "set_status",
-    description: "Move a card to another lane, the board's status columns. Finished, verified work goes to the review lane, not done. Moving it to a done or archive lane clears its checkpoints.",
+    title: "Set a card's lane",
+    description: "Move a card to another lane — the board's status columns. Use list_boards then list_reviews to see the lane keys this board has. Finished, verified work goes to the review lane, not done. Review and done refuse a card while a verify item you ticked lacks passing `evidence` (toggle_item). Moving into review may return `retro` signals: propose lessons and ask the user before writing any.",
     readOnly: false,
     properties: {
       board_id: BOARD_ID,
@@ -420,31 +416,107 @@ var BOARD_TOOLS = [
       },
       reason: {
         type: "string",
-        description: "What to change when sending a card back from review. Accepted and not stored on a local board, which keeps no history."
+        maxLength: 2000,
+        description: "What to change — required when sending a card back from review to an in-progress lane, ignored on any other move."
       }
     },
     required: ["board_id", "card", "status"]
   },
   {
-    name: "delete_review",
-    description: "Take a card off the board. This ARCHIVES it: the card and its history stay in the database and can be restored. Nothing here deletes rows.",
-    readOnly: false,
-    properties: { board_id: BOARD_ID, card: CARD },
-    required: ["board_id", "card"]
-  },
-  {
-    name: "checkpoint",
-    description: "Record where you stopped on a card so another agent can resume it. Call after each checklist item you finish, and before you stop mid-task. `get_review` returns the latest checkpoint. Summarise; never paste transcripts, secrets, tokens or .env values. Refused on a finished or archived card.",
+    name: "toggle_item",
+    title: "Toggle a checklist item",
+    description: "Tick or untick one checklist box on a card, and optionally leave a note under it, or tag a verify item with the stream it proves (BE-19). `key` is the item's stable id, e.g. D1 or V3. Ticking a verify item, send `evidence`. Answers with that box and the card in one line, not the whole card: get_review has the rest.",
     readOnly: false,
     properties: {
       board_id: BOARD_ID,
       card: CARD,
-      summary: { type: "string" },
-      request: { type: "string" },
-      next_step: { type: "string" },
-      files: { type: "string[]" },
+      key: { type: "string", description: "Checklist item key, e.g. D1 or V3" },
+      checked: { type: "boolean", description: "Omit to leave the tick alone" },
+      note: {
+        type: "string",
+        description: "A note recorded under the item; empty string clears it"
+      },
+      text: {
+        type: "string",
+        description: "Reword the item, keeping its key and tick"
+      },
+      stream: {
+        type: "nullable-string",
+        description: "Verify items only: the stream key (W1…) this item proves; null removes the tag"
+      },
+      evidence: {
+        type: "object",
+        description: "Verify items: what you ran to prove it — required before the card can move to review or done.",
+        properties: {
+          command: { type: "string", maxLength: 1000 },
+          ok: { type: "boolean" },
+          url: {
+            type: "string",
+            maxLength: 2000,
+            pattern: "^https?:\\/\\/\\S+$"
+          }
+        },
+        required: ["command", "ok"]
+      }
+    },
+    required: ["board_id", "card", "key"]
+  },
+  {
+    name: "review_card",
+    title: "Record the user's review of a card",
+    description: "Write the user's review of a card's checklist in one call: every box they answered, with the tick it should end with. ONLY with picks the user just made (in the option picker, or said plainly in chat) — never tick a decision on your own judgement. Ticking one option of a pick-ONE group unticks the others; boxes not named are left as they are. Free text the user typed (\"Other\") goes in `note`. Returns `ready: true` once every decision is settled; it does not move the card.",
+    readOnly: false,
+    properties: {
+      board_id: BOARD_ID,
+      card: CARD,
+      picks: {
+        type: "object[]",
+        description: "Every box the user answered in this pass",
+        minItems: 1,
+        properties: {
+          key: { type: "string", description: "Checklist item key, e.g. D1" },
+          checked: { type: "boolean" },
+          note: {
+            type: "string",
+            description: "The user's own words; empty string clears the note"
+          }
+        },
+        required: ["key", "checked"]
+      },
+      revision: {
+        type: "integer",
+        description: "The card's `revision` from get_review; refused if it changed since"
+      }
+    },
+    required: ["board_id", "card", "picks"]
+  },
+  {
+    name: "checkpoint",
+    title: "Record a checkpoint",
+    description: "Record where you stopped on a card so another agent can resume it. Call after each checklist item you finish, and before you stop mid-task. `get_review` returns the latest checkpoint. Summarise — never paste transcripts, secrets, tokens or .env values. Refused on a finished or archived card.",
+    readOnly: false,
+    properties: {
+      board_id: BOARD_ID,
+      card: CARD,
+      summary: {
+        type: "string",
+        description: "What is done, what is verified (and how), what is not yet done"
+      },
+      next_step: {
+        type: "string",
+        description: "The first thing the next agent should do"
+      },
+      request: {
+        type: "string",
+        description: "What the user last asked for, in their words"
+      },
+      files: {
+        type: "string[]",
+        description: "Repo-relative paths you changed"
+      },
       commands: {
         type: "object[]",
+        description: "Verification commands you ran and whether they passed",
         properties: {
           command: { type: "string" },
           ok: { type: "boolean" }
@@ -453,6 +525,7 @@ var BOARD_TOOLS = [
       },
       git: {
         type: "object",
+        description: "Where the code is: branch, HEAD sha, and a pushed ref holding uncommitted work, if any",
         properties: {
           branch: { type: "string" },
           head: { type: "string" },
@@ -464,15 +537,19 @@ var BOARD_TOOLS = [
     required: ["board_id", "card", "summary"]
   },
   {
-    name: "lifecycle_status",
-    description: "What the board is waiting on: cards whose decisions are not all ticked (waiting), cards cleared to start (ready), cards being worked (in flight), and cards waiting for a human to review (review).",
-    readOnly: true,
-    properties: { board_id: BOARD_ID },
-    required: ["board_id"]
+    name: "delete_review",
+    title: "Archive a card",
+    description: "Take a card off the board. This ARCHIVES it — the card and its history stay in the database and can be restored. Nothing here deletes rows.",
+    readOnly: false,
+    properties: {
+      board_id: BOARD_ID,
+      card: CARD
+    },
+    required: ["board_id", "card"]
   }
 ];
 
-// packages/protocol/src/tools/kit.ts
+// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/tools/kit.ts
 var KIT_TOOL_LIMITS = {
   find_files: { default: 50, max: 200 },
   search_text: { default: 50, max: 200 },
@@ -589,12 +666,217 @@ var KIT_TOOLS = [
     required: ["query"]
   }
 ];
-// packages/protocol/src/tools/schema.ts
+// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/tools/instructions.ts
+var INTRO = "lanework is a Kanban board for AI-driven development. A card is a " + "review checklist: decisions to approve, then verify steps to prove. ";
+var FIND_BOARD = "Every tool needs a board_id and there is no default. A conversation " + "the Lanework app started is told its board_id when it starts: use that " + "one. Otherwise run `git remote get-url origin` and call " + "list_boards({ repo }) with the output as is. Exactly one board: use it. ";
+var NO_BOARD = "None: list_boards without repo and ask which board this repo belongs to, " + "offering also a new one (suggest `owner/name` from the remote); then " + "link_repo their pick, or create_board only if they asked. Linking a board " + "that has another repo MOVES the link. Several, or no remote: ask. Never " + "pick a board by its name. ";
+var NEW_CARD = "Before create_review, read board_summary and reuse its categories and " + "tags (the category mints the task id; never invent one). Every " + "create_review passes category, 1-3 tags and priority (high: blockers, " + "release prerequisites; medium: planned work; low: polish). Body: context, " + "out of scope, files touched. Checklist: decisions the user approves, " + "verify steps that prove the work; a pick-ONE choice is boxes sharing a " + "`group`, the recommendation marked. ";
+var REVIEW_GATE = "Behavior-changing work starts only once every decision is ticked; " + "read-only requests, obvious one-file fixes and work whose exact shape the " + "user gave need no card. toggle_item ticks boxes and notes (a verify tick " + "sends evidence: the command and whether it passed), update_review edits " + "metadata, set_status moves lanes. ";
+var CHECKPOINT_FLOW = "While working a card, call checkpoint after each item you finish and " + "before you stop. To resume: get_review and read its checkpoint; if " + "checkpoint.git.wipRef is set and this is not the checkout it came from " + "(another host, a fresh clone, a sandbox), check out checkpoint.git.head " + "and `git fetch origin <wipRef> && git cherry-pick --no-commit FETCH_HEAD " + "&& git reset`. Re-run every check it claims passed, then continue from " + "nextStep. ";
+var STALE = "A card with `stale` set was left mid-task: resume it from its checkpoint " + "rather than opening a duplicate. ";
+var HAND_OFF = "Finished, verified work goes to the review-role lane via set_status; only " + "a human moves it to done. A card sent back carries changesRequested.reason " + "in get_review: read it first. When set_status returns retro, propose at " + "most 3 lessons and ask before writing any. ";
+var STREAMS_FLOW = "A card with streams comes back from get_review with `dispatch: { waves, " + "briefs }`, and you are its lead. Run it wave by wave: spawn every stream " + "of a wave at once, one sub-agent per stream, each in its own git worktree " + "from the current HEAD (in the shared checkout when its isolation is " + "shared), and hand each one `dispatch.briefs[key]` verbatim. No " + "sub-agents? Run the streams yourself, one by one, in wave order. " + "Sub-agents never call Lanework and never commit. After each wave, merge " + "each worktree into the main checkout, revert anything outside the " + "stream's `owns`, re-run the stream's checks, tick its verify items, and " + "call checkpoint once for the wave. After the last wave, run the untagged " + "verify items. On resume, re-dispatch only the streams whose verify items " + "are not all ticked. A card without streams (dispatch: null) works as " + "before: one agent, end to end.";
+var WRITE_STREAMS = "Split a card into streams only when it touches two or more independent " + "write areas: each has a key (W0…), goal, role, exact `owns` paths no " + "other stream in its wave owns, and a verify item tagged with its key; " + "shared types go in a W0 the others depend on; at most 4 per wave. ";
+var REVIEW_FLOW = "To review a card with the user in the CLI: get_review it, then ask the " + "user with your option picker (AskUserQuestion) if you have one. Each " + "pick-ONE group (boxes sharing a `group`) is one single-select question, " + "its options the group's boxes, the one marked (Recommended) first. Gather " + "the ungrouped decisions into multi-select questions of up to 4 boxes " + "each. At most 4 questions per turn — ask again for the rest. A group with " + "more than 4 options cannot fit: say so and send the user to the app for " + "that group. Then call review_card ONCE with exactly what the user picked: " + "a picked box checked: true, an offered but unpicked ungrouped box " + "checked: false, and anything they typed under Other as that box's note. " + "Never tick a decision the user did not pick; only a plain instruction in " + "chat (e.g. 'tick the recommended ones') stands in for the picker. " + "review_card does not move the card, and work starts only once it answers " + "ready: true.";
+var RUN_STREAMS = "A card with streams comes back from get_review with dispatch { waves, " + "briefs }: you are its lead. Per wave, spawn one sub-agent per stream at " + "once (own worktree unless shared) with its brief verbatim; sub-agents " + "never call Lanework or commit. After the wave, merge, revert anything " + "outside each stream's owns, re-run its checks, tick its verify items, " + "checkpoint once. Then the untagged verify items. ";
+var REVIEW_SHORT = "To review a card with the user: get_review it and ask with your option " + "picker, one single-select question per pick-ONE group (recommended " + "first) and the other decisions as multi-select, at most 4 questions a " + "turn; then call review_card ONCE with exactly what they picked (unpicked " + "offered boxes false, Other text as the note). Never tick a decision they " + "did not pick. Work starts only once it answers ready: true.";
+var BOARD_INSTRUCTIONS = INTRO + FIND_BOARD + NO_BOARD + NEW_CARD + REVIEW_GATE + CHECKPOINT_FLOW + STALE + HAND_OFF + WRITE_STREAMS + RUN_STREAMS + REVIEW_SHORT;
+var BOARD_WORKER_INSTRUCTIONS = INTRO + "This connection serves only the tools for working an existing card; " + "creating, linking or reviewing cards needs the full lanework server. " + FIND_BOARD + "None, several, or no git remote: ask the user. Never pick a board by " + "its name. Do not start a card still in todo with decisions unticked. " + CHECKPOINT_FLOW + HAND_OFF + RUN_STREAMS.trimEnd();
+// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/tools/outputs.ts
+var str = { kind: "string" };
+var num = { kind: "number" };
+var bool = { kind: "boolean" };
+var any = { kind: "any" };
+var nullable = (inner) => ({ kind: "nullable", inner });
+var optional = (inner) => ({ kind: "optional", inner });
+var list = (inner) => ({ kind: "list", inner });
+var record = (inner) => ({ kind: "record", inner });
+var obj = (fields) => ({
+  kind: "object",
+  fields
+});
+var oneOf = (...values) => ({ kind: "enum", values });
+var PRIORITY2 = nullable(oneOf("low", "medium", "high"));
+var COLUMN_ROLE = nullable(oneOf("intake", "start", "active", "review", "done", "archive"));
+var BOARD_SUMMARY = obj({
+  workspaceId: str,
+  name: str,
+  role: str,
+  changeSeq: num,
+  repo: nullable(str)
+});
+var CHECKLIST_ITEM = obj({
+  key: str,
+  section: oneOf("decisions", "verify"),
+  text: str,
+  checked: bool,
+  checkedAt: nullable(str),
+  note: nullable(str),
+  group: nullable(str),
+  stream: nullable(str),
+  checkedBy: optional(any),
+  evidence: optional(any)
+});
+var STREAM = obj({
+  key: str,
+  title: str,
+  goal: str,
+  role: oneOf("research", "implement", "test"),
+  owns: list(str),
+  reads: list(str),
+  dependsOn: list(str),
+  isolation: oneOf("worktree", "shared"),
+  position: num
+});
+var DISPATCH = obj({ waves: list(list(str)), briefs: record(str) });
+var CARD_FIELDS = {
+  id: str,
+  workspaceId: str,
+  seq: num,
+  revision: num,
+  type: oneOf("epic", "issue", "task"),
+  parentId: nullable(str),
+  columnKey: str,
+  rank: str,
+  title: str,
+  body: str,
+  priority: PRIORITY2,
+  estimate: nullable(num),
+  categoryKey: nullable(str),
+  taskId: nullable(str),
+  tags: list(str),
+  checklistProgress: obj({ done: num, total: num }),
+  streams: list(STREAM),
+  metadata: nullable(any),
+  source: nullable(any),
+  createdAt: nullable(str),
+  updatedAt: nullable(str),
+  startedAt: nullable(str),
+  completedAt: nullable(str),
+  dueAt: nullable(str),
+  archivedAt: nullable(str),
+  stale: optional(nullable(any)),
+  changesRequested: optional(nullable(any))
+};
+var CARD2 = obj(CARD_FIELDS);
+var DETAIL_FIELDS = {
+  ...CARD_FIELDS,
+  checklist: list(CHECKLIST_ITEM),
+  assignees: obj({ users: list(str), agents: list(str) }),
+  links: list(any),
+  attachments: list(any),
+  subscribers: list(str),
+  subscribed: bool,
+  favorite: bool,
+  commentCount: num
+};
+var CARD_DETAIL = obj({ ...DETAIL_FIELDS, dispatch: nullable(DISPATCH) });
+var CARD_DETAIL_NO_DISPATCH = obj(DETAIL_FIELDS);
+var CHECKPOINT_FIELDS = {
+  id: str,
+  agent: str,
+  userId: str,
+  machineId: nullable(str),
+  createdAt: str,
+  request: nullable(str),
+  summary: str,
+  nextStep: nullable(str),
+  files: list(str),
+  commands: list(obj({ command: str, ok: nullable(bool) })),
+  host: nullable(str),
+  session: nullable(str),
+  git: nullable(obj({
+    branch: nullable(str),
+    head: nullable(str),
+    wipRef: nullable(str),
+    wipSha: nullable(str),
+    diffStat: nullable(str)
+  }))
+};
+var CARD_REF_FIELDS = {
+  id: str,
+  taskId: nullable(str),
+  title: str
+};
+var BOARD_TOOL_OUTPUT_SHAPES = {
+  list_boards: obj({
+    repo: optional(str),
+    boards: list(BOARD_SUMMARY),
+    next: optional(str)
+  }),
+  create_board: obj({ board_id: str, name: str, slug: str, repo: str }),
+  link_repo: obj({
+    repo: str,
+    previous: nullable(str),
+    boards: list(BOARD_SUMMARY)
+  }),
+  board_summary: obj({
+    workspaceId: str,
+    role: str,
+    head: num,
+    lanes: list(obj({ key: str, label: str, role: COLUMN_ROLE, count: num })),
+    stale: num,
+    categories: list(obj({ key: str, name: str })),
+    tags: obj({ max: num, allowed: list(str) }),
+    labels: list(obj({ tag: str, name: str, tone: str }))
+  }),
+  list_reviews: obj({
+    items: list(CARD2),
+    head: num,
+    columns: list(obj({ key: str, name: str, role: COLUMN_ROLE }))
+  }),
+  get_review: obj({
+    item: CARD_DETAIL_NO_DISPATCH,
+    checkpoint: nullable(obj({
+      ...CHECKPOINT_FIELDS,
+      nextStepFrom: nullable(obj({ id: str, agent: str, createdAt: str }))
+    })),
+    dispatch: nullable(DISPATCH)
+  }),
+  create_review: obj({ item: CARD_DETAIL }),
+  update_review: obj({ item: CARD_DETAIL }),
+  toggle_item: obj({
+    checklistItem: CHECKLIST_ITEM,
+    card: obj({
+      ...CARD_REF_FIELDS,
+      columnKey: str,
+      revision: num,
+      done: num,
+      total: num
+    }),
+    ready: bool,
+    open: optional(list(str))
+  }),
+  review_card: obj({
+    ready: bool,
+    next: optional(str),
+    open: optional(list(str)),
+    item: CARD_DETAIL
+  }),
+  set_status: obj({
+    item: CARD_DETAIL,
+    retro: optional(obj({ signals: list(any), ask: str }))
+  }),
+  delete_review: obj({ archived: str, seq: nullable(num) }),
+  checkpoint: obj({ checkpoint: obj(CHECKPOINT_FIELDS) }),
+  lifecycle_status: obj({
+    waiting: list(obj({ ...CARD_REF_FIELDS, done: num, total: num })),
+    ready: list(obj(CARD_REF_FIELDS)),
+    inFlight: list(obj({ ...CARD_REF_FIELDS, columnKey: str })),
+    review: list(obj({ ...CARD_REF_FIELDS, columnKey: str }))
+  })
+};
+// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/tools/schema.ts
 function paramSchema(param) {
   const described = (schema) => param.description ? { ...schema, description: param.description } : schema;
   switch (param.type) {
     case "string":
-      return described(param.enum ? { type: "string", enum: [...param.enum] } : { type: "string" });
+      return described({
+        type: "string",
+        ...param.enum ? { enum: [...param.enum] } : {},
+        ...param.maxLength !== undefined ? { maxLength: param.maxLength } : {},
+        ...param.pattern !== undefined ? { pattern: param.pattern } : {}
+      });
     case "boolean":
       return described({ type: "boolean" });
     case "integer":
@@ -1090,7 +1372,7 @@ async function postJson(api, path, body, signal) {
     data
   };
 }
-function str(value, max = 2048) {
+function str2(value, max = 2048) {
   return typeof value === "string" && value && value.length <= max ? value : null;
 }
 async function startLoopback(api, input, signal) {
@@ -1103,8 +1385,8 @@ async function startLoopback(api, input, signal) {
     ...input.facts
   }, signal);
   if (!ok)
-    throw refused(api, status, str(data.error, 200) ?? "");
-  const id = str(data.id, 64);
+    throw refused(api, status, str2(data.error, 200) ?? "");
+  const id = str2(data.id, 64);
   const authorizeUrl = externalUrlOn(data.authorize_url, api);
   if (!id || !authorizeUrl)
     throw new Error(`${api} returned a login it did not describe (no id, or an authorize URL off its own origin).`);
@@ -1118,9 +1400,9 @@ async function startDevice(api, input, signal) {
     ...input.facts
   }, signal);
   if (!ok)
-    throw refused(api, status, str(data.error, 200) ?? "");
-  const id = str(data.id, 64);
-  const deviceCode = str(data.device_code, 200);
+    throw refused(api, status, str2(data.error, 200) ?? "");
+  const id = str2(data.id, 64);
+  const deviceCode = str2(data.device_code, 200);
   const verificationUri = externalUrlOn(data.verification_uri, api);
   if (!id || !deviceCode || !verificationUri || !looksLikeUserCode(data.user_code))
     throw new Error(`${api} returned a device login it did not describe (missing code, or a verification URL off its own origin).`);
@@ -1141,7 +1423,7 @@ async function redeem(api, grant, verifier, signal) {
     ...grant.deviceCode ? { device_code: grant.deviceCode } : {},
     code_verifier: verifier
   }, signal);
-  const machineId = str(data.machineId, 64);
+  const machineId = str2(data.machineId, 64);
   const secret = isMachineSecret(data.secret) ? data.secret : null;
   if (ok && machineId && secret)
     return { state: "issued", machineId, secret };
@@ -1159,7 +1441,7 @@ async function redeem(api, grant, verifier, signal) {
   }
   if (status === 401)
     throw new Error(`${api} rejected this sign-in — it expired, was already used, or was never approved. Try signing in again.`);
-  throw refused(api, status, str(data.error, 200) ?? "");
+  throw refused(api, status, str2(data.error, 200) ?? "");
 }
 
 // apps/desktop/electron/main/auth/loopback.ts
@@ -1448,13 +1730,27 @@ var MIGRATIONS = [
   CREATE INDEX project_issues_parent ON project_issues(parent_id);
   `
 ];
+var ADDITIVE_COLUMNS = [
+  { table: "project_issues", column: "started_at", type: "TEXT" },
+  { table: "project_issues", column: "completed_at", type: "TEXT" }
+];
+function hasColumns(db) {
+  return ADDITIVE_COLUMNS.every(({ table, column }) => db.prepare(`PRAGMA table_info(${table})`).all().some((row) => row.name === column));
+}
+function addColumns(db) {
+  for (const { table, column, type } of ADDITIVE_COLUMNS) {
+    const has = db.prepare(`PRAGMA table_info(${table})`).all().some((row) => row.name === column);
+    if (!has)
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
+}
 var SCHEMA_VERSION = MIGRATIONS.length;
 function userVersion(db) {
   const row = db.prepare("PRAGMA user_version").get();
   return Number(row?.user_version ?? 0);
 }
 function migrate(db) {
-  if (userVersion(db) === SCHEMA_VERSION)
+  if (userVersion(db) === SCHEMA_VERSION && hasColumns(db))
     return SCHEMA_VERSION;
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -1465,6 +1761,7 @@ function migrate(db) {
       db.exec(MIGRATIONS[version]);
     }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+    addColumns(db);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -1599,6 +1896,9 @@ function intakeColumn(config) {
     invalid("the board has no columns");
   return column.key;
 }
+function columnRoleOf(config, key) {
+  return config.columns.find((column) => column.key === key)?.role ?? null;
+}
 function isClosedColumn(config, key) {
   const role = config.columns.find((column) => column.key === key)?.role;
   return role === "done" || role === "archive";
@@ -1706,7 +2006,7 @@ function streamWaves(streams) {
   }
   return waves;
 }
-function list(paths) {
+function list2(paths) {
   return paths.length > 0 ? paths.map((path) => `- \`${path}\``).join(`
 `) : "- (none)";
 }
@@ -1728,12 +2028,12 @@ function buildDispatch(card, streams, checklist) {
       "",
       "## You own",
       "Write ONLY inside these paths (a path ending in `/` is a directory):",
-      list(stream.owns),
+      list2(stream.owns),
       "",
       "If another file must change, do not change it: say so in your report.",
       "",
       "## Read first",
-      list(stream.reads),
+      list2(stream.reads),
       "",
       "## Done means",
       verify.length > 0 ? verify.join(`
@@ -1896,8 +2196,8 @@ function toCard(row) {
     source: null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    startedAt: null,
-    completedAt: null,
+    startedAt: row.started_at ?? null,
+    completedAt: row.completed_at ?? null,
     dueAt: null,
     archivedAt: row.deleted_at
   };
@@ -2398,9 +2698,18 @@ class LocalStore {
         return toCardDetail(row);
       const rank = this.#rankFor(row.project_id, status, options.placement, row.id);
       const sets = ["status = ?", "sort_key = ?"];
+      const values = [status, rank];
       if (isClosedColumn(config, status))
         sets.push("checkpoint = NULL");
-      return this.#touch(row.id, sets, [status, rank]);
+      const role = columnRoleOf(config, status);
+      if (role === "active" && !row.started_at) {
+        sets.push("started_at = ?");
+        values.push(this.#now());
+      } else if (role === "done" && !row.completed_at) {
+        sets.push("completed_at = ?");
+        values.push(this.#now());
+      }
+      return this.#touch(row.id, sets, values);
     });
   }
   toggleChecklistItem(ref, key, patch, options = {}) {
@@ -2590,7 +2899,7 @@ function cardOf(store, board, card) {
     fail("not_found", `card ${String(card)} not found on this board`);
   return detail;
 }
-var str2 = (value) => typeof value === "string" ? value : undefined;
+var str3 = (value) => typeof value === "string" ? value : undefined;
 function startColumn(board) {
   return board.config.columns.find((column) => column.role === "start")?.key;
 }
@@ -2620,44 +2929,35 @@ function asInput(checklist) {
     stream: item.stream
   }));
 }
-function decisionState(checklist) {
-  const pending = [];
+function openDecisions(checklist) {
+  const open = [];
   const groups = new Map;
   for (const item of checklist) {
     if (item.section !== "decisions")
       continue;
-    if (item.group) {
-      const members = groups.get(item.group) ?? [];
-      members.push(item);
-      groups.set(item.group, members);
-    } else if (!item.checked)
-      pending.push(item.key);
+    if (!item.group) {
+      if (!item.checked)
+        open.push(item.key);
+      continue;
+    }
+    const group = groups.get(item.group) ?? { keys: [], settled: false };
+    group.keys.push(item.key);
+    group.settled ||= item.checked;
+    groups.set(item.group, group);
   }
-  for (const [group, members] of groups)
-    if (members.filter((item) => item.checked).length !== 1)
-      pending.push(`group:${group}`);
-  return { ready: pending.length === 0, pending };
+  for (const [name, group] of groups)
+    if (!group.settled)
+      open.push(`${name} (${group.keys.join("/")})`);
+  return open;
 }
-function brief(card) {
-  return {
-    id: card.id,
-    taskId: card.taskId,
-    title: card.title,
-    column: card.columnKey,
-    priority: card.priority,
-    revision: card.revision
-  };
+function ref(card) {
+  return { id: card.id, taskId: card.taskId, title: card.title };
 }
 var RUNS = {
   list_boards(args, { store }) {
-    const remote = str2(args.repo);
-    if (remote === undefined) {
-      const boards = store.boardSummaries();
-      return {
-        boards,
-        next: boards.length === 0 ? "No boards yet. Ask the user whether to create one for this repo (create_board)." : "Ask the user which board this repo belongs to; never pick one by its name."
-      };
-    }
+    const remote = str3(args.repo);
+    if (remote === undefined)
+      return { boards: store.boardSummaries() };
     const repo = normalizeRepo(remote);
     if (!repo)
       fail("invalid", `not a git remote: ${remote}`);
@@ -2671,18 +2971,14 @@ var RUNS = {
   create_board(args, { store }) {
     const project = store.createProject({
       name: String(args.name),
-      slug: str2(args.slug),
+      slug: str3(args.slug),
       repo: String(args.repo)
     });
     return {
       board_id: project.id,
-      board: {
-        workspaceId: project.id,
-        name: project.name,
-        slug: project.slug,
-        repo: project.repo
-      },
-      next: "Use this board_id for every other tool. Read board_summary before creating a card."
+      name: project.name,
+      slug: project.slug,
+      repo: project.repo ?? normalizeRepo(String(args.repo)) ?? ""
     };
   },
   link_repo(args, { store }) {
@@ -2692,63 +2988,62 @@ var RUNS = {
       fail("invalid", `not a git remote: ${String(args.repo)}`);
     if (board.repo && board.repo !== repo && args.replace !== true)
       fail("conflict", `board is linked to ${board.repo}; pass replace: true only if the user asked to move it`);
-    const linked = store.linkRepo(board.id, String(args.repo));
+    store.linkRepo(board.id, String(args.repo));
     return {
-      board: {
-        workspaceId: linked.id,
-        name: linked.name,
-        repo: linked.repo
-      },
-      replaced: board.repo && board.repo !== repo ? board.repo : null
+      repo,
+      previous: board.repo ?? null,
+      boards: store.boardSummaries(repo)
     };
   },
   board_summary(args, { store }) {
     const board = boardOf(store, args.board_id);
-    const cards = store.listWorkItems(board.id);
     const counts = new Map;
-    const tags = new Map;
-    for (const card of cards) {
+    for (const card of store.listWorkItems(board.id))
       counts.set(card.columnKey, (counts.get(card.columnKey) ?? 0) + 1);
-      for (const tag of card.tags)
-        tags.set(tag, (tags.get(tag) ?? 0) + 1);
-    }
     const columns = [...board.config.columns].sort((a, b) => a.position - b.position);
     return {
-      board: { workspaceId: board.id, name: board.name, repo: board.repo },
-      total: cards.length,
+      workspaceId: board.id,
+      role: "owner",
+      head: store.dataVersion(),
       lanes: columns.map((column) => ({
         key: column.key,
-        name: column.name,
+        label: column.name,
         role: column.role,
         count: counts.get(column.key) ?? 0
       })),
+      stale: 0,
       categories: board.config.categories.map((category) => ({
         key: category.key,
-        name: category.name,
-        prefix: category.prefix,
-        next: (board.taskHeads[category.key] ?? 0) + 1
+        name: category.name
       })),
-      tagPolicy: board.config.tags,
-      tags: [...tags.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([tag, count]) => ({ tag, count })),
-      labels: board.config.labels
+      tags: board.config.tags,
+      labels: board.config.labels.map((label) => ({
+        tag: label.key,
+        name: label.name,
+        tone: label.tone
+      }))
     };
   },
   list_reviews(args, { store }) {
     const board = boardOf(store, args.board_id);
     const order = columnOrder(board);
-    const taskId = str2(args.task_id)?.toUpperCase();
+    const taskId = str3(args.task_id)?.toUpperCase();
     const cards = store.listWorkItems(board.id, {
-      column: str2(args.column),
-      category: str2(args.category),
-      priority: str2(args.priority),
-      tag: str2(args.tag),
+      column: str3(args.column),
+      category: str3(args.category),
+      priority: str3(args.priority),
+      tag: str3(args.tag),
       includeDeleted: args.include_archived === true
     }).filter((card) => !taskId || card.taskId === taskId).sort((a, b) => (order.get(a.columnKey)?.position ?? 999) - (order.get(b.columnKey)?.position ?? 999) || a.rank.localeCompare(b.rank) || a.id.localeCompare(b.id));
     const limit = typeof args.limit === "number" ? args.limit : 50;
     return {
-      total: cards.length,
       items: cards.slice(0, limit),
-      truncated: cards.length > limit
+      head: store.dataVersion(),
+      columns: board.config.columns.map((column) => ({
+        key: column.key,
+        name: column.name,
+        role: column.role
+      }))
     };
   },
   get_review(args, { store }) {
@@ -2757,32 +3052,30 @@ var RUNS = {
     const { latest } = store.listCheckpoints(item.id, {
       project: board.id
     });
-    return { item, checkpoint: latest, dispatch: item.dispatch };
+    const { dispatch, ...card } = item;
+    return { item: card, checkpoint: latest, dispatch };
   },
   create_review(args, { store }) {
     const board = boardOf(store, args.board_id);
     const checklist = args.checklist ?? [];
     const streams = args.streams;
     checkStreamPlan(streams, checklist);
-    let parentId = str2(args.parent_id);
+    let parentId = str3(args.parent_id);
     if (parentId)
       parentId = cardOf(store, board, parentId).id;
     const item = store.createWorkItem(board.id, {
       title: String(args.title),
-      body: str2(args.body),
-      categoryKey: str2(args.category),
+      body: str3(args.body),
+      categoryKey: str3(args.category),
       checklist,
-      columnKey: str2(args.column) ?? startColumn(board),
+      columnKey: str3(args.column) ?? startColumn(board),
       parentId,
-      priority: str2(args.priority),
+      priority: str3(args.priority),
       streams,
       tags: args.tags,
-      type: str2(args.type)
+      type: str3(args.type)
     });
-    return {
-      item,
-      next: "Offer to review the new card with the user here (review_card)."
-    };
+    return { item };
   },
   update_review(args, { store }) {
     const board = boardOf(store, args.board_id);
@@ -2802,10 +3095,10 @@ var RUNS = {
     if (streams)
       checkStreamPlan(streams, checklist ?? asInput(current.checklist));
     const item = store.updateWorkItem(current.id, {
-      title: str2(args.title),
-      body: str2(args.body),
-      categoryKey: str2(args.category),
-      priority: str2(args.priority),
+      title: str3(args.title),
+      body: str3(args.body),
+      categoryKey: str3(args.category),
+      priority: str3(args.priority),
       tags: args.tags,
       streams,
       checklist
@@ -2827,14 +3120,18 @@ var RUNS = {
     const changed = item.checklist.find((box) => box.key === String(args.key));
     if (!changed)
       fail("not_found", `checklist item ${String(args.key)} not found on this card`);
+    const open = openDecisions(item.checklist);
     return {
       checklistItem: changed,
-      card: brief(item),
-      progress: {
-        done: item.checklist.filter((box) => box.checked).length,
-        total: item.checklist.length
+      card: {
+        ...ref(item),
+        columnKey: item.columnKey,
+        revision: item.revision,
+        done: item.checklistProgress.done,
+        total: item.checklistProgress.total
       },
-      ...decisionState(item.checklist)
+      ready: open.length === 0,
+      ...open.length === 0 ? {} : { open }
     };
   },
   review_card(args, { store }) {
@@ -2867,12 +3164,11 @@ var RUNS = {
       project: board.id,
       ifRevision: typeof args.revision === "number" ? args.revision : current.revision
     });
-    const state = decisionState(item.checklist);
+    const open = openDecisions(item.checklist);
     return {
-      ...state,
-      revision: item.revision,
-      checklist: item.checklist,
-      next: state.ready ? "Every decision is settled. Move the card with set_status when work starts." : "Some decisions are still open; work does not start until ready is true."
+      ready: open.length === 0,
+      ...open.length === 0 ? { next: readyNext(board.config.columns, item.columnKey) } : { open },
+      item
     };
   },
   set_status(args, { store }) {
@@ -2880,22 +3176,22 @@ var RUNS = {
     const item = store.setStatus(String(args.card), String(args.status), {
       project: board.id
     });
-    return { item: brief(item) };
+    return { item };
   },
   delete_review(args, { store }) {
     const board = boardOf(store, args.board_id);
     const item = store.deleteWorkItem(String(args.card), {
       project: board.id
     });
-    return { archived: item.id, item: brief(item) };
+    return { archived: item.id, seq: item.seq };
   },
   checkpoint(args, { store, agent, host }) {
     const board = boardOf(store, args.board_id);
     const git = args.git;
     const request = {
       summary: String(args.summary),
-      request: str2(args.request) ?? null,
-      nextStep: str2(args.next_step) ?? null,
+      request: str3(args.request) ?? null,
+      nextStep: str3(args.next_step) ?? null,
       files: args.files,
       commands: args.commands,
       host,
@@ -2922,30 +3218,41 @@ var RUNS = {
       review: []
     };
     const { waiting, ready, inFlight, review } = out;
+    const start = startColumn(board);
     for (const card of store.listWorkItems(board.id)) {
       const role = order.get(card.columnKey)?.role ?? null;
-      if (role === "done" || role === "archive")
-        continue;
-      if (role === "review") {
-        review.push(brief(card));
+      if (role === "active") {
+        inFlight.push({ ...ref(card), columnKey: card.columnKey });
         continue;
       }
+      if (role === "review") {
+        review.push({ ...ref(card), columnKey: card.columnKey });
+        continue;
+      }
+      if (!start || card.columnKey !== start)
+        continue;
       const detail = store.getWorkItem(card.id);
-      const state = decisionState(detail.checklist);
-      if (role === "active") {
-        const verify = detail.checklist.filter((item) => item.section === "verify");
-        inFlight.push({
-          ...brief(detail),
-          verified: `${verify.filter((item) => item.checked).length}/${verify.length}`
+      const decisions = detail.checklist.filter((item) => item.section === "decisions");
+      if (openDecisions(decisions).length > 0)
+        waiting.push({
+          ...ref(card),
+          done: decisions.filter((item) => item.checked).length,
+          total: decisions.length
         });
-      } else if (state.ready)
-        ready.push(brief(detail));
       else
-        waiting.push({ ...brief(detail), pending: state.pending });
+        ready.push(ref(card));
     }
     return out;
   }
 };
+function readyNext(columns, columnKey) {
+  const role = columns.find((column) => column.key === columnKey)?.role;
+  if (role === "active")
+    return "Every decision is settled, and the card is already in progress: carry on, and move it to the review lane with set_status once it is built and verified.";
+  if (role === "review" || role === "done")
+    return "Every decision is settled. The card is past implementation already; nothing to start.";
+  return "Every decision is settled — ready to implement. Move the card with set_status when work starts.";
+}
 var TOOLS = BOARD_TOOLS.map((contract) => ({
   ...contract,
   run: RUNS[contract.name]
@@ -2961,16 +3268,7 @@ var KNOWN_PROTOCOL_VERSIONS = [
   "2025-06-18",
   "2025-11-25"
 ];
-var INSTRUCTIONS = [
-  "lanework is a Kanban board for AI-driven development. A card is a review checklist: decisions to approve, then verify steps to prove. This server is the OFFLINE board: it lives in a SQLite file on this machine, has no accounts, and the Lanework app shows what you write here.",
-  "Every tool needs a board_id and there is no default. To find it, run `git remote get-url origin` and call list_boards({ repo }) with the output as is. Exactly one board: use it. None: call list_boards without repo and ask the user which board this repo belongs to — the boards you can see, PLUS an option to create a new board for this repo (suggest `owner/name` from the remote as its name). Then link_repo the one they picked, or create_board if they chose a new one; never create a board they did not ask for. A board links to ONE repo: linking a board that already has another repo MOVES it (replace), it never adds a second. Several: ask the user. No git remote: ask the user. Never pick a board by its name.",
-  "Before creating a card, read board_summary so its category and tags match the vocabulary the board already uses; the category is also what mints the card's permanent task id. After create_review, offer to review the new card right here.",
-  "While working a card, call checkpoint after each checklist item you finish and before you stop mid-task. Asked to resume a card: get_review it and read its checkpoint. If checkpoint.git.wipRef is set AND you are not in the checkout it came from (checkpoint.host is another machine, or this is a fresh clone), check out checkpoint.git.head, then `git fetch origin <wipRef> && git cherry-pick --no-commit FETCH_HEAD && git reset` to restore the uncommitted work; in the same checkout that work is already on disk, so skip it. Re-run every check it claims passed, then continue from nextStep (or the summary).",
-  "A card with streams comes back from get_review with `dispatch: { waves, briefs }`, and you are its lead. Run it wave by wave: spawn every stream of a wave at once, one sub-agent per stream, each in its own git worktree from the current HEAD (in the shared checkout when its isolation is shared), and hand each one `dispatch.briefs[key]` verbatim. No sub-agents? Run the streams yourself, one by one, in wave order. Sub-agents never call Lanework and never commit. After each wave, merge each worktree into the main checkout, revert anything outside the stream's `owns`, re-run the stream's checks, tick its verify items, and call checkpoint once for the wave. After the last wave, run the untagged verify items. On resume, re-dispatch only the streams whose verify items are not all ticked. A card without streams (dispatch: null) works as before: one agent, end to end.",
-  "To review a card with the user in the CLI: get_review it, then ask the user with your option picker (AskUserQuestion) if you have one. Each pick-ONE group (boxes sharing a `group`) is one single-select question, its options the group's boxes, the one marked (Recommended) first. Gather the ungrouped decisions into multi-select questions of up to 4 boxes each. At most 4 questions per turn — ask again for the rest. A group with more than 4 options cannot fit: say so and send the user to the app for that group. Then call review_card ONCE with exactly what the user picked: a picked box checked: true, an offered but unpicked ungrouped box checked: false, and anything they typed under Other as that box's note. Never tick a decision the user did not pick; only a plain instruction in chat (e.g. 'tick the recommended ones') stands in for the picker. review_card does not move the card, and work starts only once it answers ready: true."
-].join(`
-
-`);
+var INSTRUCTIONS = BOARD_INSTRUCTIONS;
 var PARSE_ERROR = -32700;
 var INVALID_REQUEST = -32600;
 var METHOD_NOT_FOUND = -32601;

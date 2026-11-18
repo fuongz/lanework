@@ -48,7 +48,7 @@ Hướng dẫn cho agent (khi nào dùng, cú pháp từng lệnh):
      ▲              └──────────┘       ▼                   │   ▼                  │
      │                   ▲     ┌───────────────────────┐   │   chạy độc lập       │
      └── cùng HỢP ĐỒNG ──┘     │ App Lanework          │   │   (binary app chế độ │
-     (packages/protocol,       │ socket ~/.lanew/run/  │   │    Node, ~0,1 s)     │
+     (lanework-dev/contracts,       │ socket ~/.lanew/run/  │   │    Node, ~0,1 s)     │
       script parity trong      │        kit.sock       │   │                      │
       gate kiểm tra)           │ index fff luôn sẵn    │   │                      │
                                └───────────┬───────────┘   └──────────┬───────────┘
@@ -79,7 +79,7 @@ tới **một** trong hai bản, tuỳ chế độ:
 
 Cả hai có cùng 14 tool (`list_boards`, `create_review`, `checkpoint`,
 `lifecycle_status`…). Tên, mô tả, schema đầu vào và dạng kết quả nằm trong
-**một hợp đồng chung** ở `packages/protocol/src/tools/`. Bản local dựng
+**một hợp đồng chung** ở `lanework-dev/contracts (src/tools/)`. Bản local dựng
 `tools/list` từ hợp đồng; `scripts/mcp-parity.mjs` chạy trong `bun run gate`
 kiểm tra bản local khớp hợp đồng (từng trường của từng kết quả). Bản cloud
 dùng chung hợp đồng ở repo lanework-cloud (card riêng).
@@ -150,7 +150,7 @@ của mình hỏng. Bài học từ `rtk` (đã gỡ khỏi máy, 2026-11-17).
 
 | Phần | Đường dẫn |
 | --- | --- |
-| Hợp đồng tool | `packages/protocol/src/tools/` |
+| Hợp đồng tool | `lanework-dev/contracts (src/tools/)` |
 | Kiểm tra parity | `apps/desktop/scripts/mcp-parity.mjs` |
 | MCP board local | `apps/desktop/electron/mcp-local/` |
 | Lõi kit | `apps/desktop/electron/kit/` |

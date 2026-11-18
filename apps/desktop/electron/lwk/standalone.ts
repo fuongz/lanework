@@ -17,7 +17,7 @@
 //   warm index is still the app's, through its socket.
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { FileMatch, MatchLine } from "@lanework/protocol";
+import type { FileMatch, MatchLine } from "@lanework/contracts";
 import {
   appNatives,
   KIT_METHODS,

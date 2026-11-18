@@ -10,7 +10,7 @@
 // same `BoardCard` shape as the cloud path and the renderer tells the two
 // apart only by `Project.origin`.
 import { existsSync } from "node:fs";
-import type { Card, CardDetail, LatestCheckpoint } from "@lanework/protocol";
+import type { Card, CardDetail, LatestCheckpoint } from "@lanework/contracts";
 import {
   type BoardCard,
   type BoardCardDraft,

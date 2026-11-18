@@ -6,7 +6,7 @@
 // outside the caller's roots (`./scope.ts`). Each failure is a `KitError`
 // with a code.
 import { resolve } from "node:path";
-import { KIT_TOOL_LIMITS } from "@lanework/protocol";
+import { KIT_TOOL_LIMITS } from "@lanework/contracts";
 import type {
   FileHit,
   FileMatch,
@@ -91,7 +91,7 @@ const FOLDER_MAX = 4_096;
 /** Each tool's `limit`: its default and its maximum. */
 /**
  * Each tool's default and largest `limit`: the contract's
- * (`KIT_TOOL_LIMITS`, packages/protocol), so the MCP schema, `lwk` and the
+ * (`KIT_TOOL_LIMITS`, lanework-dev/contracts), so the MCP schema, `lwk` and the
  * socket never disagree.
  */
 export const KIT_LIMITS = KIT_TOOL_LIMITS;

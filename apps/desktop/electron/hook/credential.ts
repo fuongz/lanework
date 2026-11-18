@@ -25,7 +25,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { DEFAULT_API_ORIGIN } from "@lanework/protocol";
+import { DEFAULT_API_ORIGIN } from "@lanework/contracts";
 
 const KEYCHAIN_SERVICE = "dev.lanework.checkpoint-hook";
 /** By absolute path: a `security` earlier on PATH never sees the secret. */

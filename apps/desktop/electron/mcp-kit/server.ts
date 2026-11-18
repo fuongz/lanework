@@ -1,6 +1,6 @@
 // The lanework-kit MCP server (FE-152): MCP over stdio, newline-delimited
 // JSON-RPC 2.0, serving the kit's 5 tools (`KIT_TOOLS` in
-// `@lanework/protocol`) on the kit core (`../kit`).
+// `@lanework/contracts`) on the kit core (`../kit`).
 //
 // - Each call goes to the running app's kit socket first (its warm fff index
 //   and natives), and runs here when no app answers (`./socket.ts`).
@@ -20,7 +20,7 @@ import {
   KIT_TOOLS,
   type KitToolName,
   toolInputSchema,
-} from "@lanework/protocol";
+} from "@lanework/contracts";
 import {
   appNatives,
   isKitMethod,

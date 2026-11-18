@@ -1,12 +1,12 @@
 // The validator `tools/call` runs on a tool's arguments. The parameters it
-// checks are the tool contract's (`ToolShape` in `@lanework/protocol`), the
+// checks are the tool contract's (`ToolShape` in `@lanework/contracts`), the
 // same ones `tools/list` advertises as JSON Schema, so the two cannot
 // disagree.
 //
 // NOTE: Unknown arguments are dropped, not refused, as the cloud's zod schemas
 // do. An agent that sends a field this build does not know (say
 // `assignees.users`) must still get its card.
-import type { ToolParam, ToolShape } from "@lanework/protocol";
+import type { ToolParam, ToolShape } from "@lanework/contracts";
 
 /** A tool call whose arguments do not match the tool's {@link ToolShape}. */
 export class InvalidParams extends Error {

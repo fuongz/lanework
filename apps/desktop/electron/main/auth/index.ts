@@ -1,4 +1,4 @@
-import type { MachineCredential } from "@lanework/protocol";
+import type { MachineCredential } from "@lanework/contracts";
 import { shell } from "electron";
 import {
   type AccountOwner,

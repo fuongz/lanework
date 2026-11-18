@@ -13,7 +13,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, relative, sep } from "node:path";
-import { KIT_TOOL_LIMITS } from "@lanework/protocol";
+import { KIT_TOOL_LIMITS } from "@lanework/contracts";
 import type { ConversationAgent } from "../../../shared/conversation";
 import {
   fsSearchChannels,

@@ -16,7 +16,7 @@
 //
 // Electron-free: `tests/` and `bun test` drive it against a stub plane.
 import { createHash } from "node:crypto";
-import type { CardDetail, ChecklistItem, Stream } from "@lanework/protocol";
+import type { CardDetail, ChecklistItem, Stream } from "@lanework/contracts";
 import type { LocalProject, LocalStore } from "../../local-store";
 import type { MachineRecord } from "../auth/store";
 import {

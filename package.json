@@ -4,14 +4,13 @@
   "type": "module",
   "packageManager": "bun@1.4.4",
   "workspaces": [
-    "apps/*",
-    "packages/*"
+    "apps/*"
   ],
   "scripts": {
     "dev": "bun run --silent --cwd apps/desktop dev",
     "build": "bun run --cwd apps/desktop build",
     "build:plugin": "node scripts/build-plugin.mjs",
-    "typecheck": "bun run --cwd packages/protocol typecheck && bun run --cwd apps/desktop typecheck",
+    "typecheck": "bun run --cwd apps/desktop typecheck",
     "lint": "biome check --error-on-warnings . && node scripts/audit-layout.mjs && node scripts/audit-loading.mjs && node scripts/audit-sinks.mjs",
     "format": "biome check --write .",
     "gate": "bun run gate:public",

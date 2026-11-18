@@ -24,8 +24,12 @@ import { inLocalMode, knownProject, LOCAL_RECORD } from "../projects/session";
  */
 export async function localMcpFor(project: string): Promise<string | null> {
   try {
-    // Local mode already points every agent at the local server.
-    if (await inLocalMode()) return null;
+    // Local mode: every conversation runs on the local board. Attached here
+    // too, not left to the agents' own config: that config is the machine's,
+    // and it may point at the cloud even so. The Preview never writes it
+    // (another copy's entry stays), and a user may have changed it. Passing
+    // the same server by flags when the config already names it is harmless.
+    if (await inLocalMode()) return await ensureMcpShim();
     const { record } = await knownProject(project);
     if (record !== LOCAL_RECORD) return null;
     return await ensureMcpShim();
@@ -44,4 +48,20 @@ export async function codexHasLaneworkTable(): Promise<boolean> {
 export async function codexHasDeveloperInstructions(): Promise<boolean> {
   const text = await readText(codexConfigPath()).catch(() => null);
   return !!text && /^\s*developer_instructions\s*=/m.test(text);
+}
+
+/**
+ * The board of `project`, to tell its conversation's agent (its id is the
+ * project's own), or null when the project cannot be resolved.
+ */
+export async function boardFor(
+  project: string,
+): Promise<{ id: string; name: string } | null> {
+  try {
+    const { project: known } = await knownProject(project);
+    // A project the service sent without an id has no board yet.
+    return known.id ? { id: known.id, name: known.name } : null;
+  } catch {
+    return null;
+  }
 }

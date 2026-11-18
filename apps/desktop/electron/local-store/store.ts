@@ -12,7 +12,7 @@ import type {
   CheckpointRequest,
   Placement,
   Stream,
-} from "@lanework/protocol";
+} from "@lanework/contracts";
 import { appHomeDir } from "../main/paths";
 import {
   DEFAULT_CATEGORIES,
@@ -27,6 +27,7 @@ import {
   checkPriority,
   checkTitle,
   checkType,
+  columnRoleOf,
   intakeColumn,
   isClosedColumn,
   keepCheckpoints,
@@ -870,8 +871,19 @@ export class LocalStore {
         row.id,
       );
       const sets = ["status = ?", "sort_key = ?"];
+      const values: SqlValue[] = [status, rank];
       if (isClosedColumn(config, status)) sets.push("checkpoint = NULL");
-      return this.#touch(row.id, sets, [status, rank]);
+      // The cloud's `lifecycleStamps`: stamped the first time only, so a
+      // card sent back and moved again keeps when work really started.
+      const role = columnRoleOf(config, status);
+      if (role === "active" && !row.started_at) {
+        sets.push("started_at = ?");
+        values.push(this.#now());
+      } else if (role === "done" && !row.completed_at) {
+        sets.push("completed_at = ?");
+        values.push(this.#now());
+      }
+      return this.#touch(row.id, sets, values);
     });
   }
 

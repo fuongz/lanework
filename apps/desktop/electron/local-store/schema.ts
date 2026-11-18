@@ -7,7 +7,7 @@ import type { SqlDatabase } from "./driver";
  * already ran it will not run it again, so an edit would split the installed
  * base into two schemas that both claim the same version. Add the next one.
  *
- * NOTE: JSON columns hold `@lanework/protocol` shapes (`ChecklistItem[]`,
+ * NOTE: JSON columns hold `@lanework/contracts` shapes (`ChecklistItem[]`,
  * `Stream[]`, `Checkpoint[]`), so pushing a local card to the cloud later is
  * a copy, not a translation.
  */
@@ -89,6 +89,47 @@ const MIGRATIONS: readonly string[] = [
   `,
 ];
 
+/**
+ * Nullable columns added WITHOUT a version bump: an older build ignores a
+ * column it does not know (it reads `SELECT *` and inserts named columns),
+ * whereas a higher `user_version` makes it refuse the whole file. The
+ * checkpoint hook ships through the plugin ahead of the app, so a bump
+ * there would lock out the app the user still has.
+ *
+ * - `started_at` / `completed_at`: when a card first reached an active lane
+ *   and a done lane, as the cloud stamps them (`lifecycleStamps`). Null for
+ *   a card moved before the column existed: its time is not known.
+ */
+const ADDITIVE_COLUMNS: readonly {
+  table: string;
+  column: string;
+  type: string;
+}[] = [
+  { table: "project_issues", column: "started_at", type: "TEXT" },
+  { table: "project_issues", column: "completed_at", type: "TEXT" },
+];
+
+/** Whether a file has every {@link ADDITIVE_COLUMNS} column. */
+function hasColumns(db: SqlDatabase): boolean {
+  return ADDITIVE_COLUMNS.every(({ table, column }) =>
+    db
+      .prepare(`PRAGMA table_info(${table})`)
+      .all()
+      .some((row) => (row as { name?: unknown }).name === column),
+  );
+}
+
+/** Add each {@link ADDITIVE_COLUMNS} column a file does not have yet. */
+function addColumns(db: SqlDatabase): void {
+  for (const { table, column, type } of ADDITIVE_COLUMNS) {
+    const has = db
+      .prepare(`PRAGMA table_info(${table})`)
+      .all()
+      .some((row) => (row as { name?: unknown }).name === column);
+    if (!has) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
+}
+
 /** The version a fully migrated database reports. */
 export const SCHEMA_VERSION = MIGRATIONS.length;
 
@@ -110,7 +151,8 @@ export function userVersion(db: SqlDatabase): number {
  *   not quietly write rows an older schema cannot describe.
  */
 export function migrate(db: SqlDatabase): number {
-  if (userVersion(db) === SCHEMA_VERSION) return SCHEMA_VERSION;
+  if (userVersion(db) === SCHEMA_VERSION && hasColumns(db))
+    return SCHEMA_VERSION;
   db.exec("BEGIN IMMEDIATE");
   try {
     const from = userVersion(db);
@@ -122,6 +164,7 @@ export function migrate(db: SqlDatabase): number {
       db.exec(MIGRATIONS[version] as string);
     }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+    addColumns(db);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");

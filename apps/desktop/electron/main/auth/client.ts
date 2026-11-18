@@ -12,7 +12,7 @@ import {
   type MachineFacts,
   type MachineMeResponse,
   paths,
-} from "@lanework/protocol";
+} from "@lanework/contracts";
 import type { AccountOwner, Verdict } from "../../../shared/auth";
 import { AUTH_BODY_CAP, readCappedJson } from "../http-body";
 import { externalUrlOn, looksLikeUserCode } from "./redirect";

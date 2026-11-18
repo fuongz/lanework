@@ -10,7 +10,7 @@
 //   lanework mcp                 the offline board's MCP server, on stdio
 //
 // NOTE: Sign-in reuses the control plane's `lanework login` flow (its contract
-// is `@lanework/protocol`'s `auth.ts`) and the desktop app's own client for
+// is `@lanework/contracts`'s `auth.ts`) and the desktop app's own client for
 // it, so the two never disagree about PKCE, state or the callback. It never
 // takes a pasted registration token (INF-03/D7): it uses a browser on this
 // machine (loopback), or a short code typed on another one (device).
@@ -26,7 +26,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { type MachineCredential, paths } from "@lanework/protocol";
+import { type MachineCredential, paths } from "@lanework/contracts";
 import {
   machineFacts,
   redeem,

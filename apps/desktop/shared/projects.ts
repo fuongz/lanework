@@ -10,10 +10,10 @@ import {
   type Priority,
   STREAM_ROLES,
   type StreamRole,
-} from "@lanework/protocol";
+} from "@lanework/contracts";
 
 // The board's vocabulary and the shapes this app takes as the API states them
-// come from @lanework/protocol, the contract the server implements, so a
+// come from @lanework/contracts, the contract the server implements, so a
 // change there is a type error here rather than a silent default.
 export {
   type BoardLabel,
@@ -29,7 +29,7 @@ export {
   type Priority,
   STREAM_ROLES,
   type StreamRole,
-} from "@lanework/protocol";
+} from "@lanework/contracts";
 
 export interface Project {
   /**
@@ -421,7 +421,7 @@ export interface BoardCard {
   dispatch?: BoardDispatch | null;
 }
 
-/** One sub-agent's job on a card; `Stream` in @lanework/protocol, as parsed. */
+/** One sub-agent's job on a card; `Stream` in @lanework/contracts, as parsed. */
 export interface BoardStream {
   key: string;
   title: string;

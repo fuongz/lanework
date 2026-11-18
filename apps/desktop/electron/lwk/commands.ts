@@ -6,7 +6,7 @@
 // is not there to answer. Both print the same bytes: a change to the flags
 // or the output is made in both.
 //
-// - Flags mirror the tools' inputs (`KIT_TOOLS`, packages/protocol); the
+// - Flags mirror the tools' inputs (`KIT_TOOLS`, lanework-dev/contracts); the
 //   kit checks them, so a bad value fails with the kit's own words.
 // - `--json` prints the tool's answer as the MCP server does
 //   (`KitToolOutputs`). Otherwise one line per hit: `path:line: text` for
@@ -22,7 +22,7 @@ import type {
   FileMatch,
   KitToolName,
   SessionMatch,
-} from "@lanework/protocol";
+} from "@lanework/contracts";
 import { KitError } from "../kit";
 import { runHere } from "./standalone";
 

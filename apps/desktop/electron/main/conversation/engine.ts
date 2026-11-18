@@ -57,7 +57,14 @@ import type { ClaudeCli } from "./claude-cli";
 import { claudeJsonFor, isClaudeTrusted } from "./claude-trust";
 import { CodexEngine } from "./codex-engine";
 import type { ConversationEngine } from "./conversation-engine";
-import { claudeMcpArgs, controlMcpFor } from "./mcp-args";
+import {
+  boardHint,
+  CONTROL_ROLE_ENV,
+  claudeMcpArgs,
+  controlMcpFor,
+  isConductorTurn,
+  joinHints,
+} from "./mcp-args";
 import { OpenCodeEngine, type OpenCodeEngineDeps } from "./opencode-engine";
 import { Held, type Outgoing, sameSettings } from "./queue";
 import { buildTurns, inputText, type Line } from "./transcript";
@@ -100,6 +107,8 @@ interface EngineDeps {
    * Asked at every process start; absent, the configured server is used.
    */
   localMcp?: (project: string) => Promise<string | null>;
+  /** The project's board, to tell the agent at start; null when unknown. */
+  board?: (project: string) => Promise<{ id: string; name: string } | null>;
   /** Whether Codex's config has its own `lanework` table (FE-121/D9). */
   codexLanework?: () => Promise<boolean>;
   /** Whether Codex's config has `developer_instructions` of its own (BE-01). */
@@ -428,7 +437,7 @@ class Engine implements ConversationEngine {
   }
 
   /** Start the CLI with `settings`, and wire its output and exit. */
-  async start(settings: ComposerSettings): Promise<void> {
+  async start(settings: ComposerSettings, conductor = false): Promise<void> {
     const cli = await this.deps.cli();
     const spawn = this.deps.spawn ?? spawnChild;
     // NOTE: Asked again at every start, never cached: trust given in a
@@ -440,6 +449,8 @@ class Engine implements ConversationEngine {
     this.untrusted = !trusted;
     this.stale = false;
     const localMcp = (await this.deps.localMcp?.(this.project)) ?? null;
+    const board =
+      (await this.deps.board?.(this.project).catch(() => null)) ?? null;
     // FE-87: a lead's control endpoint, a worker's scratch; never the
     // control variables for anyone else.
     const target: EngineTarget = {
@@ -448,6 +459,9 @@ class Engine implements ConversationEngine {
       folder: this.folder,
     };
     const env = agentEnv(cli.env, target);
+    // FE-155: the conductor tools only on a conductor's process.
+    if (conductor && env[SESSIONS_ENV.token])
+      env[CONTROL_ROLE_ENV] = "conductor";
     const guarded = leadGuarded(target);
     const child = spawn(
       cli.file,
@@ -457,7 +471,10 @@ class Engine implements ConversationEngine {
         this.fresh,
         trusted,
         localMcp,
-        env[SESSIONS_ENV.token] ? CREATE_CONDUCTOR_HINT : null,
+        joinHints(
+          env[SESSIONS_ENV.token] ? CREATE_CONDUCTOR_HINT : null,
+          board && env[SESSIONS_ENV.token] ? boardHint(board) : null,
+        ),
         guarded,
         controlMcpFor(env),
       ),
@@ -1000,7 +1017,8 @@ class Engine implements ConversationEngine {
           await this.halt();
         }
       } else if (this.child) await this.halt();
-      if (!this.child) await this.start(out.settings);
+      if (!this.child)
+        await this.start(out.settings, isConductorTurn(out.text));
       // A restart's exit cleared these.
       this.busy = true;
       this.error = null;
@@ -1191,6 +1209,7 @@ export function createEngines(input: EngineDeps) {
     remember: deps.remember,
     spawn: deps.spawn,
     localMcp: deps.localMcp,
+    board: deps.board,
     codexLanework: deps.codexLanework,
     codexInstructions: deps.codexInstructions,
   });

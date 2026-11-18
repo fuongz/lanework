@@ -92,7 +92,7 @@ apps/desktop/
 ├── tests/                   # Playwright specs that boot the app
 ├── build/                   # Icons and macOS entitlements
 └── electron-builder.yml     # Packaging, fuses and asar unpacking
-packages/protocol/           # @lanework/protocol: types shared with the control plane
+(shared contract: github.com/lanework-dev/contracts, npm @lanework/contracts)
 plugins/lanework/            # Claude Code plugin; bin/ holds the committed hook bundle
 scripts/                     # Gate audits and the plugin build
 docs/standards/              # Layout, loading-state and process-boundary standards

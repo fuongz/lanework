@@ -10,7 +10,7 @@
 //
 // A `review` lane (BE-23) is waiting on a person, not on an agent: no rule
 // here reads it as under way, so a card in review is never stale.
-import type { CardLink, ColumnRole } from "@lanework/protocol";
+import type { CardLink, ColumnRole } from "@lanework/contracts";
 import type { BoardCard, BoardColumn } from "#/../shared/projects";
 import { relativeTime } from "#/lib/relative-time";
 

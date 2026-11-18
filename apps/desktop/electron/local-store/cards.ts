@@ -21,10 +21,10 @@ import {
   type StreamInput,
   WORK_ITEM_TYPES,
   type WorkItemType,
-} from "@lanework/protocol";
+} from "@lanework/contracts";
 import { type LocalBoardConfig, LocalStoreError } from "./types";
 
-// Pure shaping: input validation, and rows → `@lanework/protocol` shapes.
+// Pure shaping: input validation, and rows → `@lanework/contracts` shapes.
 // Nothing here touches SQL, so every rule can be read (and tested) alone.
 // Every `check*` and `normalize*` throws a `LocalStoreError` with code
 // `invalid` on input it refuses.
@@ -86,6 +86,14 @@ export function intakeColumn(config: LocalBoardConfig): string {
     [...config.columns].sort((a, b) => a.position - b.position)[0];
   if (!column) invalid("the board has no columns");
   return column.key;
+}
+
+/** A lane's role, or null for a lane that has none. */
+export function columnRoleOf(
+  config: LocalBoardConfig,
+  key: string,
+): LocalBoardConfig["columns"][number]["role"] | null {
+  return config.columns.find((column) => column.key === key)?.role ?? null;
 }
 
 /** True for a lane whose cards are finished: checkpoints do not survive it. */
@@ -486,6 +494,10 @@ export interface WorkItemRow {
   updated_at: string;
   deleted_at: string | null;
   cloud_id: string | null;
+  /** Schema 3: first time in an active lane; null before that. */
+  started_at?: string | null;
+  /** Schema 3: first time in a done lane; null before that. */
+  completed_at?: string | null;
 }
 
 export function toCard(row: WorkItemRow): Card {
@@ -515,8 +527,8 @@ export function toCard(row: WorkItemRow): Card {
     source: null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    startedAt: null,
-    completedAt: null,
+    startedAt: row.started_at ?? null,
+    completedAt: row.completed_at ?? null,
     dueAt: null,
     archivedAt: row.deleted_at,
   };

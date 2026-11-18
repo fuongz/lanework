@@ -9,7 +9,7 @@ import type {
   StreamInput,
   TagPolicy,
   WorkItemType,
-} from "@lanework/protocol";
+} from "@lanework/contracts";
 
 /**
  * What a local board is configured with.

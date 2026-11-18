@@ -83,7 +83,7 @@ import {
   writeLocal,
 } from "./local-backend";
 import { folderExists, readLocalFolder } from "./local-folder";
-import { remoteFor, scanOrigins } from "./origin-scan";
+import { readOrigin, remoteFor, scanOrigins } from "./origin-scan";
 import {
   commentBody,
   parseAttachmentDraft,
@@ -672,8 +672,22 @@ export function registerProjects(devUrl?: string): void {
         if (destination?.kind === "repo")
           throw new Error("Sign in to link a repo. Or choose Local for now.");
         if (!name) throw new Error("A project name is required");
+        // The primary folder's origin, so the board answers list_boards({
+        // repo }) from the start and no agent has to ask which board this
+        // repo belongs to. Only when no other local board has that repo: a
+        // repo is never taken from a board without asking.
+        const origin = paths[0]
+          ? await readOrigin("primary", paths[0]).catch(() => null)
+          : null;
         const created = writeLocal((store) =>
-          store.createProject({ name, slug: slugify(name) }),
+          store.createProject({
+            name,
+            slug: slugify(name),
+            ...(origin?.remote &&
+            store.findProjectsByRepo(origin.remote).length === 0
+              ? { repo: origin.remote }
+              : {}),
+          }),
         );
         if (paths.length) await writeFolders(LOCAL_RECORD, created.slug, paths);
         return load(created.id);

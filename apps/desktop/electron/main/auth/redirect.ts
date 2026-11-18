@@ -4,7 +4,7 @@
 // Electron. A validator that is awkward to test is one nobody re-tests after
 // editing it.
 
-import { LOOPBACK_CALLBACK_PATH } from "@lanework/protocol";
+import { LOOPBACK_CALLBACK_PATH } from "@lanework/contracts";
 
 /** The one path our loopback listener answers. */
 export const CALLBACK_PATH = LOOPBACK_CALLBACK_PATH;

@@ -36,7 +36,7 @@ tools are just as good.
 | `search_sessions` | `lwk sessions <query>` | `query`, `folder?`, `limit?` |
 
 The contract (names, inputs, limits, result shapes) lives in
-`packages/protocol/src/tools/kit.ts`. `lwk … --json` prints the same shapes as
+`lanework-dev/contracts (src/tools/)kit.ts`. `lwk … --json` prints the same shapes as
 the MCP tools. Exit codes: 0 found, 1 nothing found, 2 error.
 
 `search_sessions` moved here from the `lanework` board server in FE-152: the

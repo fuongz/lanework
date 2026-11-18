@@ -93,6 +93,7 @@ import { type ImageScope, openableImage, previewImage } from "./image-preview";
 import { createLinkPreviews } from "./link-preview";
 import { claudePidsOn } from "./live-claude";
 import {
+  boardFor,
   codexHasDeveloperInstructions,
   codexHasLaneworkTable,
   localMcpFor,
@@ -727,6 +728,7 @@ export function registerConversation(
       isClaudeTrusted(folder, claudeJsonFor(env, agentHome())),
     // FE-121/D9: a local project's chat reaches its local board, signed in.
     localMcp: localMcpFor,
+    board: boardFor,
     codexLanework: codexHasLaneworkTable,
     codexInstructions: codexHasDeveloperInstructions,
   });

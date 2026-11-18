@@ -70,7 +70,7 @@ import {
   paths,
   stripUserinfo,
   TOKEN_PREFIXES,
-} from "@lanework/protocol";
+} from "@lanework/contracts";
 import { READ_FLAGS } from "../main/git/runner";
 import { readsAllowed } from "../main/git/trust-gate";
 import {

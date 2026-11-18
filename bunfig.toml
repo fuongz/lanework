@@ -9,5 +9,6 @@ linker = "isolated"
 # would otherwise resolve to them on the next `bun install` / `bun update`.
 minimumReleaseAge = 259200 # seconds
 
-# Our own workspace package is never fetched from the registry.
-minimumReleaseAgeExcludes = ["@lanework/protocol"]
+# Our own package, published only by lanework-dev/contracts' tag workflow
+# through npm Trusted Publishing, so the 3-day quarantine is not needed for it.
+minimumReleaseAgeExcludes = ["@lanework/contracts"]

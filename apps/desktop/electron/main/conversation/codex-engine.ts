@@ -51,10 +51,14 @@ import {
 import type { ClaudeCli } from "./claude-cli";
 import type { ConversationEngine } from "./conversation-engine";
 import {
+  boardHint,
+  CONTROL_ROLE_ENV,
   codexControlArgs,
   codexHintArgs,
   codexMcpArgs,
   controlMcpFor,
+  isConductorTurn,
+  joinHints,
 } from "./mcp-args";
 import type { ContentBlock } from "./outgoing";
 import { Held, type Outgoing, sameSettings } from "./queue";
@@ -68,6 +72,8 @@ interface CodexEngineDeps {
   spawn?: typeof spawnChild;
   /** See `EngineDeps.localMcp` (FE-121/D9). */
   localMcp?: (project: string) => Promise<string | null>;
+  /** See `EngineDeps.board`. */
+  board?: (project: string) => Promise<{ id: string; name: string } | null>;
   /** Whether Codex's config has its own `lanework` table to switch off. */
   codexLanework?: () => Promise<boolean>;
   /** Whether Codex's config has `developer_instructions` of its own (BE-01). */
@@ -432,7 +438,7 @@ export class CodexEngine implements ConversationEngine {
   }
 
   /** Start `codex app-server`, introduce ourselves, open the thread. */
-  async start(settings: ComposerSettings): Promise<void> {
+  async start(settings: ComposerSettings, conductor = false): Promise<void> {
     const cli = await this.deps.cli();
     const spawn = this.deps.spawn ?? spawnChild;
     // FE-121/D9: a local project's board, while Codex's config is the cloud.
@@ -448,16 +454,26 @@ export class CodexEngine implements ConversationEngine {
       folder: this.folder,
       named: () => this.conversation,
     });
+    // FE-155: the conductor tools only on a conductor's process.
+    if (conductor && env[SESSIONS_ENV.token])
+      env[CONTROL_ROLE_ENV] = "conductor";
     // FE-155: the control tools, for a process holding a control token.
     const control = controlMcpFor(env);
     if (control) overrides.push(...codexControlArgs(control));
-    // BE-01: how to save a conductor, unless the user's config already
-    // gives Codex developer instructions (an override would replace them).
+    // BE-01: how to save a conductor, and which board this project is,
+    // unless the user's config already gives Codex developer instructions
+    // (an override would replace them).
+    const board =
+      (await this.deps.board?.(this.project).catch(() => null)) ?? null;
+    const hint = joinHints(
+      env[SESSIONS_ENV.token] ? CREATE_CONDUCTOR_HINT : null,
+      board && env[SESSIONS_ENV.token] ? boardHint(board) : null,
+    );
     if (
-      env[SESSIONS_ENV.token] &&
+      hint &&
       !((await this.deps.codexInstructions?.().catch(() => true)) ?? true)
     )
-      overrides.push(...codexHintArgs(CREATE_CONDUCTOR_HINT));
+      overrides.push(...codexHintArgs(hint));
     const child = spawn(cli.file, [...overrides, "app-server"], {
       cwd: this.folder,
       env,
@@ -1045,7 +1061,7 @@ export class CodexEngine implements ConversationEngine {
     this.emitState();
     try {
       if (!this.child) this.ready = null;
-      this.ready ??= this.start(settings);
+      this.ready ??= this.start(settings, isConductorTurn(out.text));
       await this.ready;
       const { input, dir } = await inputOf(out.content);
       if (dir) this.dirs.push(dir);

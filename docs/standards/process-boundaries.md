@@ -58,7 +58,7 @@ both main and the renderer import: channel names (`<domain>Channels`),
 payload types, validators, parsers.
 
 - No I/O, no platform API, no module-level mutable state.
-- Runtime dependencies: `@lanework/protocol` and `smol-toml` (used by
+- Runtime dependencies: `@lanework/contracts` and `smol-toml` (used by
   `agent-config-text.ts`). Nothing else.
 - **Named exception: the Codex model registry** in `shared/conversation.ts`
   (`setCodexModels` and its listeners). Main and the renderer each hold their

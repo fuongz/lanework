@@ -191,7 +191,14 @@ describe("offline MCP session", () => {
     assert.equal(refused.isError, true);
     assert.equal(refused.body.error, "conflict");
     const summary = mcp.call("board_summary", { board_id: boardId });
-    assert.equal(summary.body.total, 0);
+    assert.equal(summary.body.workspaceId, boardId);
+    assert.equal(
+      summary.body.lanes.reduce(
+        (sum: number, lane: { count: number }) => sum + lane.count,
+        0,
+      ),
+      0,
+    );
     assert.ok(
       summary.body.categories.some(
         (category: { key: string }) => category.key === "frontend",
@@ -228,24 +235,29 @@ describe("offline MCP session", () => {
       note: "yes",
     });
     assert.equal(toggled.isError, false);
-    const d3 = toggled.body.item.checklist.find(
-      (item: { key: string }) => item.key === "D3",
-    );
+    const d3 = toggled.body.checklistItem;
+    assert.equal(d3.key, "D3");
     assert.equal(d3.checked, true);
     assert.equal(d3.note, "yes");
-    assert.deepEqual(toggled.body.pending, ["group:pick"]);
+    assert.equal(toggled.body.card.taskId, "FE-01");
+    assert.equal(toggled.body.card.done, 1);
+    assert.equal(toggled.body.card.total, 4);
+    assert.equal(toggled.body.ready, false);
+    assert.deepEqual(toggled.body.open, ["pick (D1/D2)"]);
 
     const moved = mcp.call("set_status", {
       board_id: boardId,
       card: "FE-01",
       status: "processing",
     });
-    assert.equal(moved.body.item.column, "processing");
+    assert.equal(moved.body.item.columnKey, "processing");
+    assert.equal(moved.body.retro, undefined);
 
     const got = mcp.call("get_review", { board_id: boardId, card: "fe-01" });
     assert.equal(got.isError, false);
     assert.equal(got.body.item.taskId, "FE-01");
     assert.equal(got.body.item.columnKey, "processing");
+    assert.equal("dispatch" in got.body.item, false);
     assert.equal(got.body.checkpoint, null);
     assert.equal(got.body.dispatch, null);
   });
@@ -263,13 +275,17 @@ describe("offline MCP session", () => {
       picks: [{ key: "D2", checked: true, note: "B instead" }],
     });
     const byKey = Object.fromEntries(
-      second.body.checklist.map((item: { key: string }) => [item.key, item]),
+      second.body.item.checklist.map((item: { key: string }) => [
+        item.key,
+        item,
+      ]),
     );
     assert.equal(byKey.D1.checked, false);
     assert.equal(byKey.D2.checked, true);
     assert.equal(byKey.D2.note, "B instead");
     assert.equal(byKey.D3.checked, true, "boxes not named are left alone");
     assert.equal(second.body.ready, true);
+    assert.equal(second.body.open, undefined);
     const stale = mcp.call("review_card", {
       board_id: boardId,
       card: "FE-01",
@@ -350,13 +366,15 @@ describe("offline MCP session", () => {
       card: "BE-01",
     });
     assert.equal(archived.isError, false);
+    assert.equal(archived.body.archived, waiting.body.item.id);
+    assert.equal(typeof archived.body.seq, "number");
     assert.equal(
       mcp.call("get_review", { board_id: boardId, card: "BE-01" }).isError,
       true,
     );
     assert.equal(
       mcp.call("list_reviews", { board_id: boardId, include_archived: true })
-        .body.total,
+        .body.items.length,
       3,
     );
   });

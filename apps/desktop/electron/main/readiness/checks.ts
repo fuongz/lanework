@@ -1,7 +1,12 @@
 // The readiness rules, with no Electron and no filesystem: what the gathered
 // facts about a folder mean, and what each fix would write. Pure, so
 // `tests/readiness.spec.ts` calls them directly.
-import { AGENT_NOTES, MCP_HOST, MCP_URL } from "../../../shared/agent-notes";
+import {
+  AGENT_NOTES,
+  AGENT_NOTES_PREVIOUS,
+  MCP_HOST,
+  MCP_URL,
+} from "../../../shared/agent-notes";
 import type {
   ReadinessCheck,
   ReadinessFix,
@@ -40,6 +45,17 @@ export function hasLaneworkNotes(text: string | null): boolean {
     text.includes("list_boards") ||
     /^#{1,6}[ \t]+lanework\b/im.test(text)
   );
+}
+
+/**
+ * The board section the app wrote in an earlier version, verbatim, when a
+ * notes file still holds one: the rules now ship with the MCP server, and
+ * the current {@link AGENT_NOTES} is a short pointer. Null when there is
+ * none, or when a person reworded it (theirs, never replaced).
+ */
+export function outdatedNotes(text: string | null): string | null {
+  if (!text) return null;
+  return AGENT_NOTES_PREVIOUS.find((old) => text.includes(old)) ?? null;
 }
 
 /** Whether `@AGENTS.md`, Claude Code's import, is on a line of its own. */
@@ -249,18 +265,21 @@ export function buildReport(facts: ReadinessFacts): ReadinessReport {
           ),
         );
     }
+    const outdated = outdatedNotes(folder.agentsMd);
     checks.push(
       check(
         {
           id: "agents-md",
-          level: "warning",
-          ok: hasLaneworkNotes(folder.agentsMd),
+          level: outdated ? "info" : "warning",
+          ok: hasLaneworkNotes(folder.agentsMd) && !outdated,
           title: "AGENTS.md",
           fix: "agents-md",
         },
         folder.agentsMd === null
           ? "This folder has no AGENTS.md. It is how an agent learns where this repo's cards go."
-          : "AGENTS.md says nothing about the Lanework board. Add the board notes so an agent knows where cards go.",
+          : outdated
+            ? "AGENTS.md carries the old, long board notes. The rules now come with the lanework MCP server; replace them with the short pointer."
+            : "AGENTS.md says nothing about the Lanework board. Add the board notes so an agent knows where cards go.",
       ),
     );
     // Information, not a warning. The docs say Claude Code reads only
@@ -381,17 +400,24 @@ export const FIX_FILES: Record<ReadinessFix, string> = {
 /**
  * What a fix turns `before` into.
  *
- * NOTE: Every fix appends text or adds one key. None rewrites what somebody
+ * NOTE: Every fix appends text or adds one key, except that the app's own
+ * earlier board notes, verbatim, are swapped for the current ones. None
+ * rewrites what somebody
  * wrote.
  *
  * @throws When `.mcp.json` is not a JSON object: it is refused, not replaced.
  */
 export function applyFix(fix: ReadinessFix, before: string | null): string {
   switch (fix) {
-    case "agents-md":
-      return before === null || !before.trim()
-        ? `# Instructions for AI agents\n\n${AGENT_NOTES}\n`
-        : `${before.trimEnd()}\n\n${AGENT_NOTES}\n`;
+    case "agents-md": {
+      if (before === null || !before.trim())
+        return `# Instructions for AI agents\n\n${AGENT_NOTES}\n`;
+      // The app's own earlier text, verbatim: swapped in place, nothing else
+      // in the file touched.
+      const old = outdatedNotes(before);
+      if (old) return before.replace(old, AGENT_NOTES);
+      return `${before.trimEnd()}\n\n${AGENT_NOTES}\n`;
+    }
     case "claude-md":
       return before === null || !before.trim()
         ? "@AGENTS.md\n"

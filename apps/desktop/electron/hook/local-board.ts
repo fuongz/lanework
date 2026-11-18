@@ -13,7 +13,7 @@
 //   it and falls back to the cloud path. Under the app it is always there
 //   (Node 24).
 import { existsSync } from "node:fs";
-import type { CheckpointRequest } from "@lanework/protocol";
+import type { CheckpointRequest } from "@lanework/contracts";
 import {
   type LocalStore,
   localStorePath,

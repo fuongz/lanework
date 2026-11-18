@@ -1,4 +1,4 @@
-import type { MachineOwner } from "@lanework/protocol";
+import type { MachineOwner } from "@lanework/contracts";
 
 /**
  * Who the account belongs to, as much of it as a machine credential may read.

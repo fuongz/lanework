@@ -22,7 +22,25 @@ export const CONTROL_FORWARD = [
   CONTROL_ENV.token,
   CONTROL_ENV.endpoint,
   SESSIONS_ENV.cli,
+  "LANEWORK_CONTROL_AS",
 ] as const;
+
+/**
+ * Set to `conductor` on a conductor's (or a lead's) process, so the control
+ * server lists the conductor tools there only. Every conversation the app
+ * starts holds a sessions token (it may save a conductor), so the token
+ * alone does not say whose conversation it is.
+ */
+export const CONTROL_ROLE_ENV = "LANEWORK_CONTROL_AS";
+
+/**
+ * Whether `text`, the turn a process is started for, is a conductor's: the
+ * app wraps every conductor message, and every report and run update it
+ * sends one, in one of these hidden blocks. A plain session's never is.
+ */
+export function isConductorTurn(text: string): boolean {
+  return /^\s*<lanework_(conductor|sessions|orchestration)\b/.test(text);
+}
 
 /** The control MCP shim, which the app installs under its home. */
 export function controlShimPath(): string {
@@ -103,4 +121,19 @@ export function codexMcpArgs(shim: string, configured: boolean): string[] {
  */
 export function codexHintArgs(hint: string): string[] {
   return ["-c", `developer_instructions=${JSON.stringify(hint)}`];
+}
+
+/**
+ * Which Lanework board this conversation's project is, told to the agent at
+ * start: the app knows it, so the agent need not find it from `git remote`
+ * (which a repo with no origin cannot answer) or ask.
+ */
+export function boardHint(board: { id: string; name: string }): string {
+  return `Lanework: this conversation runs in the project ${JSON.stringify(board.name)}; its Lanework board is board_id ${JSON.stringify(board.id)}. Use that board for every Lanework board tool; do not look it up from git remote or ask which board.`;
+}
+
+/** The hints a process starts with, joined; null when there are none. */
+export function joinHints(...hints: (string | null)[]): string | null {
+  const kept = hints.filter((hint): hint is string => !!hint);
+  return kept.length ? kept.join("\n\n") : null;
 }

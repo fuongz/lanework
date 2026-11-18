@@ -6,7 +6,7 @@
 
 // The result shapes are the tool contract's (FE-152): the app, `lwk` and the
 // lanework-kit MCP answer with the same types.
-import type { FileHit, FileMatch, SessionMatch } from "@lanework/protocol";
+import type { FileHit, FileMatch, SessionMatch } from "@lanework/contracts";
 import type { ConversationAgent } from "./conversation";
 
 export type {
@@ -14,7 +14,7 @@ export type {
   FileMatch,
   MatchLine,
   SessionMatch,
-} from "@lanework/protocol";
+} from "@lanework/contracts";
 
 export const fsSearchChannels = {
   /** Search a project folder's files. */

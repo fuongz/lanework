@@ -1,7 +1,7 @@
 // The offline MCP server's tools: the cloud server's 14 board tools, with the
 // same names, descriptions and parameters, run against the local SQLite board
 // instead of the API. Names, descriptions and parameters live in the tool
-// contract (`BOARD_TOOLS` in `@lanework/protocol`); this file holds only what
+// contract (`BOARD_TOOLS` in `@lanework/contracts`); this file holds only what
 // each tool does, keyed by name, and must answer `BoardToolOutputs`.
 //
 // `board_id` is the local project id. There are no accounts, machines,
@@ -19,6 +19,15 @@
 // pick-ONE groups for `review_card`, the lifecycle roll-up, the stream-plan
 // checks a card is refused on, and the answer shapes.
 //
+// NOTE: The answers are the cloud's (`@lanework/contracts` 0.3.0,
+// `BoardToolOutputs`; `apps/mcp/src/mcp/tools/` in the cloud repo is the
+// reference). Where the cloud reads a value the local store does not keep,
+// the closest honest one stands in, each marked `OFFLINE:` below:
+// - `head` (board_summary, list_reviews) and `seq` (delete_review) are the
+//   store's change counter, `dataVersion()` / the card's `change_seq`;
+// - `stale` (board_summary) is 0: there is no presence offline;
+// - `retro` (set_status) is never sent: there is no move history offline.
+//
 // NOTE: Every write goes through the store, which bumps `dataVersion()` in the
 // same transaction. The app polls that, so a write around the store never
 // shows up in the app.
@@ -27,18 +36,16 @@ import {
   type BoardColumn,
   type BoardToolName,
   type BoardToolOutputs,
-  type Card,
-  type CardBrief,
   type CardDetail,
+  type CardRef,
   type ChecklistItem,
   type ChecklistItemInput,
   type ChecklistItemPatchRequest,
   type CheckpointRequest,
-  type DecisionState,
   type Priority,
   type StreamInput,
   type ToolContract,
-} from "@lanework/protocol";
+} from "@lanework/contracts";
 import { normalizeStreams, streamWaves } from "../local-store/cards";
 import {
   type LocalProject,
@@ -152,36 +159,35 @@ function asInput(checklist: ChecklistItem[]): ChecklistItemInput[] {
 }
 
 /**
- * Are the card's decisions settled? Every ungrouped decision ticked, and
- * exactly one option of every pick-ONE group. `pending` names what is not:
- * a box key, or `group:<name>`.
+ * The decisions a card still waits on, as the cloud's `openDecisions` names
+ * them: an unticked ungrouped decision by its key, a pick-ONE group with no
+ * option ticked as `group (D1/D2)`. Empty means work may start.
  */
-function decisionState(checklist: ChecklistItem[]): DecisionState {
-  const pending: string[] = [];
-  const groups = new Map<string, ChecklistItem[]>();
+function openDecisions(checklist: ChecklistItem[]): string[] {
+  const open: string[] = [];
+  const groups = new Map<string, { keys: string[]; settled: boolean }>();
   for (const item of checklist) {
     if (item.section !== "decisions") continue;
-    if (item.group) {
-      const members = groups.get(item.group) ?? [];
-      members.push(item);
-      groups.set(item.group, members);
-    } else if (!item.checked) pending.push(item.key);
+    if (!item.group) {
+      if (!item.checked) open.push(item.key);
+      continue;
+    }
+    const group = groups.get(item.group) ?? { keys: [], settled: false };
+    group.keys.push(item.key);
+    group.settled ||= item.checked;
+    groups.set(item.group, group);
   }
-  for (const [group, members] of groups)
-    if (members.filter((item) => item.checked).length !== 1)
-      pending.push(`group:${group}`);
-  return { ready: pending.length === 0, pending };
+  for (const [name, group] of groups)
+    if (!group.settled) open.push(`${name} (${group.keys.join("/")})`);
+  return open;
 }
 
-function brief(card: Card): CardBrief {
-  return {
-    id: card.id,
-    taskId: card.taskId,
-    title: card.title,
-    column: card.columnKey,
-    priority: card.priority,
-    revision: card.revision,
-  };
+function ref(card: {
+  id: string;
+  taskId: string | null;
+  title: string;
+}): CardRef {
+  return { id: card.id, taskId: card.taskId, title: card.title };
 }
 
 // ── The tools ───────────────────────────────────────────────────────────────
@@ -189,16 +195,8 @@ function brief(card: Card): CardBrief {
 const RUNS: { [Name in BoardToolName]: Run<Name> } = {
   list_boards(args, { store }) {
     const remote = str(args.repo);
-    if (remote === undefined) {
-      const boards = store.boardSummaries();
-      return {
-        boards,
-        next:
-          boards.length === 0
-            ? "No boards yet. Ask the user whether to create one for this repo (create_board)."
-            : "Ask the user which board this repo belongs to; never pick one by its name.",
-      };
-    }
+    // As on the cloud: `next` only when `repo` was passed.
+    if (remote === undefined) return { boards: store.boardSummaries() };
     const repo = normalizeRepo(remote);
     if (!repo) fail("invalid", `not a git remote: ${remote}`);
     const boards = store.boardSummaries(remote);
@@ -221,15 +219,10 @@ const RUNS: { [Name in BoardToolName]: Run<Name> } = {
     });
     return {
       board_id: project.id,
-      // NOTE: `workspaceId`, as the cloud MCP's output names a board's id:
-      // an agent reads either server the same way.
-      board: {
-        workspaceId: project.id,
-        name: project.name,
-        slug: project.slug,
-        repo: project.repo,
-      },
-      next: "Use this board_id for every other tool. Read board_summary before creating a card.",
+      name: project.name,
+      slug: project.slug,
+      // Never null here: `createProject` refuses a remote it cannot read.
+      repo: project.repo ?? normalizeRepo(String(args.repo)) ?? "",
     };
   },
   link_repo(args, { store }) {
@@ -241,48 +234,47 @@ const RUNS: { [Name in BoardToolName]: Run<Name> } = {
         "conflict",
         `board is linked to ${board.repo}; pass replace: true only if the user asked to move it`,
       );
-    const linked = store.linkRepo(board.id, String(args.repo));
+    store.linkRepo(board.id, String(args.repo));
+    // Every board now linked to `repo`, as the cloud lists them.
     return {
-      board: {
-        workspaceId: linked.id,
-        name: linked.name,
-        repo: linked.repo,
-      },
-      replaced: board.repo && board.repo !== repo ? board.repo : null,
+      repo,
+      previous: board.repo ?? null,
+      boards: store.boardSummaries(repo),
     };
   },
   board_summary(args, { store }) {
     const board = boardOf(store, args.board_id);
-    const cards = store.listWorkItems(board.id);
     const counts = new Map<string, number>();
-    const tags = new Map<string, number>();
-    for (const card of cards) {
+    for (const card of store.listWorkItems(board.id))
       counts.set(card.columnKey, (counts.get(card.columnKey) ?? 0) + 1);
-      for (const tag of card.tags) tags.set(tag, (tags.get(tag) ?? 0) + 1);
-    }
     const columns = [...board.config.columns].sort(
       (a, b) => a.position - b.position,
     );
     return {
-      board: { workspaceId: board.id, name: board.name, repo: board.repo },
-      total: cards.length,
+      workspaceId: board.id,
+      role: "owner",
+      // OFFLINE: the store's change counter stands in for the board's
+      // change sequence.
+      head: store.dataVersion(),
       lanes: columns.map((column) => ({
         key: column.key,
-        name: column.name,
+        label: column.name,
         role: column.role,
         count: counts.get(column.key) ?? 0,
       })),
+      // OFFLINE: stale means no agent heard from (presence) for 2 hours;
+      // there is no presence offline, so no card is stale.
+      stale: 0,
       categories: board.config.categories.map((category) => ({
         key: category.key,
         name: category.name,
-        prefix: category.prefix,
-        next: (board.taskHeads[category.key] ?? 0) + 1,
       })),
-      tagPolicy: board.config.tags,
-      tags: [...tags.entries()]
-        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-        .map(([tag, count]) => ({ tag, count })),
-      labels: board.config.labels,
+      tags: board.config.tags,
+      labels: board.config.labels.map((label) => ({
+        tag: label.key,
+        name: label.name,
+        tone: label.tone,
+      })),
     };
   },
   list_reviews(args, { store }) {
@@ -307,9 +299,14 @@ const RUNS: { [Name in BoardToolName]: Run<Name> } = {
       );
     const limit = typeof args.limit === "number" ? args.limit : 50;
     return {
-      total: cards.length,
       items: cards.slice(0, limit),
-      truncated: cards.length > limit,
+      // OFFLINE: the store's change counter, as `board_summary`.
+      head: store.dataVersion(),
+      columns: board.config.columns.map((column) => ({
+        key: column.key,
+        name: column.name,
+        role: column.role,
+      })),
     };
   },
   get_review(args, { store }) {
@@ -318,7 +315,9 @@ const RUNS: { [Name in BoardToolName]: Run<Name> } = {
     const { latest } = store.listCheckpoints(item.id, {
       project: board.id,
     });
-    return { item, checkpoint: latest, dispatch: item.dispatch };
+    // The run plan once, beside the card, not inside it as well.
+    const { dispatch, ...card } = item;
+    return { item: card, checkpoint: latest, dispatch };
   },
   create_review(args, { store }) {
     const board = boardOf(store, args.board_id);
@@ -339,10 +338,7 @@ const RUNS: { [Name in BoardToolName]: Run<Name> } = {
       tags: args.tags as string[] | undefined,
       type: str(args.type) as CardDetail["type"] | undefined,
     });
-    return {
-      item,
-      next: "Offer to review the new card with the user here (review_card).",
-    };
+    return { item };
   },
   update_review(args, { store }) {
     const board = boardOf(store, args.board_id);
@@ -409,14 +405,18 @@ const RUNS: { [Name in BoardToolName]: Run<Name> } = {
         "not_found",
         `checklist item ${String(args.key)} not found on this card`,
       );
+    const open = openDecisions(item.checklist);
     return {
       checklistItem: changed,
-      card: brief(item),
-      progress: {
-        done: item.checklist.filter((box) => box.checked).length,
-        total: item.checklist.length,
+      card: {
+        ...ref(item),
+        columnKey: item.columnKey,
+        revision: item.revision,
+        done: item.checklistProgress.done,
+        total: item.checklistProgress.total,
       },
-      ...decisionState(item.checklist),
+      ready: open.length === 0,
+      ...(open.length === 0 ? {} : { open }),
     };
   },
   review_card(args, { store }) {
@@ -462,14 +462,13 @@ const RUNS: { [Name in BoardToolName]: Run<Name> } = {
           typeof args.revision === "number" ? args.revision : current.revision,
       },
     );
-    const state = decisionState(item.checklist);
+    const open = openDecisions(item.checklist);
     return {
-      ...state,
-      revision: item.revision,
-      checklist: item.checklist,
-      next: state.ready
-        ? "Every decision is settled. Move the card with set_status when work starts."
-        : "Some decisions are still open; work does not start until ready is true.",
+      ready: open.length === 0,
+      ...(open.length === 0
+        ? { next: readyNext(board.config.columns, item.columnKey) }
+        : { open }),
+      item,
     };
   },
   set_status(args, { store }) {
@@ -477,14 +476,20 @@ const RUNS: { [Name in BoardToolName]: Run<Name> } = {
     const item = store.setStatus(String(args.card), String(args.status), {
       project: board.id,
     });
-    return { item: brief(item) };
+    // OFFLINE: no `retro`. The cloud reads send-backs, a person's notes and
+    // verify items that failed before passing from the card's history; the
+    // store keeps none, and an empty retro is never sent.
+    return { item };
   },
   delete_review(args, { store }) {
     const board = boardOf(store, args.board_id);
     const item = store.deleteWorkItem(String(args.card), {
       project: board.id,
     });
-    return { archived: item.id, item: brief(item) };
+    // OFFLINE: `seq` is the change counter the tombstone was stamped with.
+    // An already archived card is refused (not_found), as before, so it is
+    // never the cloud's `null`.
+    return { archived: item.id, seq: item.seq };
   },
   checkpoint(args, { store, agent, host }) {
     const board = boardOf(store, args.board_id);
@@ -523,31 +528,54 @@ const RUNS: { [Name in BoardToolName]: Run<Name> } = {
       review: [],
     };
     const { waiting, ready, inFlight, review } = out;
+    // As on the cloud: only the start lane is waiting or ready, and only its
+    // decision boxes count; intake, done and archive lanes are not listed.
+    const start = startColumn(board);
     for (const card of store.listWorkItems(board.id)) {
       const role = order.get(card.columnKey)?.role ?? null;
-      if (role === "done" || role === "archive") continue;
-      if (role === "review") {
-        review.push(brief(card));
+      if (role === "active") {
+        inFlight.push({ ...ref(card), columnKey: card.columnKey });
         continue;
       }
+      if (role === "review") {
+        review.push({ ...ref(card), columnKey: card.columnKey });
+        continue;
+      }
+      if (!start || card.columnKey !== start) continue;
       const detail = store.getWorkItem(card.id) as CardDetail;
-      const state = decisionState(detail.checklist);
-      if (role === "active") {
-        const verify = detail.checklist.filter(
-          (item) => item.section === "verify",
-        );
-        inFlight.push({
-          ...brief(detail),
-          verified: `${verify.filter((item) => item.checked).length}/${verify.length}`,
+      const decisions = detail.checklist.filter(
+        (item) => item.section === "decisions",
+      );
+      if (openDecisions(decisions).length > 0)
+        waiting.push({
+          ...ref(card),
+          done: decisions.filter((item) => item.checked).length,
+          total: decisions.length,
         });
-      } else if (state.ready) ready.push(brief(detail));
-      else waiting.push({ ...brief(detail), pending: state.pending });
+      else ready.push(ref(card));
     }
     return out;
   },
 };
 
 /** The board tools, in the contract's order, each with what it does. */
+
+/**
+ * What to do once every decision is settled, said for the lane the card is
+ * in: a card already being built is not told to start.
+ */
+function readyNext(
+  columns: readonly { key: string; role: string | null }[],
+  columnKey: string,
+): string {
+  const role = columns.find((column) => column.key === columnKey)?.role;
+  if (role === "active")
+    return "Every decision is settled, and the card is already in progress: carry on, and move it to the review lane with set_status once it is built and verified.";
+  if (role === "review" || role === "done")
+    return "Every decision is settled. The card is past implementation already; nothing to start.";
+  return "Every decision is settled — ready to implement. Move the card with set_status when work starts.";
+}
+
 export const TOOLS: ToolSpec[] = BOARD_TOOLS.map((contract) => ({
   ...contract,
   run: RUNS[contract.name],

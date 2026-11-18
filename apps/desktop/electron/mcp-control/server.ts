@@ -1,6 +1,6 @@
 // The lanework-control MCP server (FE-155): MCP over stdio, newline-delimited
 // JSON-RPC 2.0, serving one tool per `lanework-control` action
-// (`CONTROL_TOOLS` in `@lanework/protocol`), so an agent the app started can
+// (`CONTROL_TOOLS` in `@lanework/contracts`), so an agent the app started can
 // drive its sessions, memory and orchestration run without a shell.
 //
 // - Who may call what comes from this process's env, set by the app on the
@@ -23,7 +23,7 @@ import {
   controlTool,
   controlToolsFor,
   toolInputSchema,
-} from "@lanework/protocol";
+} from "@lanework/contracts";
 import { isSessionAction, SESSIONS_ENV } from "../../shared/conductor-sessions";
 import { CONTROL_ENV } from "../../shared/orchestration";
 import { type ControlCall, requestControl } from "../control/client";
@@ -47,6 +47,8 @@ const INSTRUCTIONS_LEAD =
   "lanework-control reaches the Lanework app that runs this orchestration: run_list, then run_delegate workers, then end your turn. Lanework sends you a turn when a task needs you; unblock it with run_respond or run_answer, steer or message it, run_review it, and run_finish once every task is reviewed or cancelled. Never loop on run_wait.";
 const INSTRUCTIONS_BOTH =
   "lanework-control reaches the Lanework app that started this conversation: sessions_* start and follow separate sessions of your own, memory_* keep what you know of this project across conversations, conductors_create saves a conductor. As this run's lead: run_list, then run_delegate workers, then end your turn. Lanework sends you a turn when a task or session needs you; do not poll, and never loop on run_wait.";
+const INSTRUCTIONS_ANY =
+  "lanework-control reaches the Lanework app that started this conversation: conductors_create saves a conductor, models_list lists the models a task may name.";
 const INSTRUCTIONS_NONE =
   "lanework-control is unavailable here: only a conversation the Lanework app started has its credentials, so this server offers no tools.";
 
@@ -55,6 +57,12 @@ export interface ControlEnv {
   endpoint: string | null;
   sessionsToken: string | null;
   controlToken: string | null;
+  /**
+   * The app says this is a conductor's process (`LANEWORK_CONTROL_AS`). Every
+   * conversation it starts holds a sessions token, so the token alone does
+   * not.
+   */
+  conductor: boolean;
 }
 
 /** {@link ControlEnv} from `env`; an empty value counts as unset. */
@@ -63,6 +71,24 @@ export function controlEnvOf(env: NodeJS.ProcessEnv): ControlEnv {
     endpoint: env[CONTROL_ENV.endpoint] || null,
     sessionsToken: env[SESSIONS_ENV.token] || null,
     controlToken: env[CONTROL_ENV.token] || null,
+    conductor: env.LANEWORK_CONTROL_AS === "conductor",
+  };
+}
+
+/**
+ * Which tools this process gets: none without a sessions or control token;
+ * the conductor's only on a conductor's process or a lead's (a lead is a
+ * conductor leading a run); the `any` ones (conductors_create, models_list)
+ * on every conversation the app started.
+ */
+export function controlRolesOf(
+  env: ControlEnv,
+): { conductor: boolean; lead: boolean } | null {
+  if (env.sessionsToken === null && env.controlToken === null) return null;
+  const lead = env.controlToken !== null;
+  return {
+    conductor: env.sessionsToken !== null && (env.conductor || lead),
+    lead,
   };
 }
 
@@ -121,19 +147,18 @@ export class ControlMcpSession {
 
   constructor(options: ControlSessionOptions = {}) {
     this.#env = controlEnvOf(options.env ?? process.env);
-    const conductor = this.#env.sessionsToken !== null;
-    const lead = this.#env.controlToken !== null;
-    this.#tools = conductor || lead ? controlToolsFor({ conductor, lead }) : [];
+    const roles = controlRolesOf(this.#env);
+    this.#tools = roles ? controlToolsFor(roles) : [];
     this.#request = options.request ?? requestControl;
   }
 
   #instructions(): string {
-    const conductor = this.#env.sessionsToken !== null;
-    const lead = this.#env.controlToken !== null;
-    if (conductor && lead) return INSTRUCTIONS_BOTH;
-    if (lead) return INSTRUCTIONS_LEAD;
-    if (conductor) return INSTRUCTIONS_CONDUCTOR;
-    return INSTRUCTIONS_NONE;
+    const roles = controlRolesOf(this.#env);
+    if (!roles) return INSTRUCTIONS_NONE;
+    if (roles.conductor && roles.lead) return INSTRUCTIONS_BOTH;
+    if (roles.lead) return INSTRUCTIONS_LEAD;
+    if (roles.conductor) return INSTRUCTIONS_CONDUCTOR;
+    return INSTRUCTIONS_ANY;
   }
 
   /** The answer to one message, or null for a notification. */
