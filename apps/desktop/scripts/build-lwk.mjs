@@ -9,9 +9,11 @@
 //   alone, and Electron's Node takes tens of milliseconds to start. The JS
 //   half (`electron/lwk/cli.ts`, `dist/electron/lwk/standalone.cjs`) is an
 //   esbuild entry of `electron-bundle.mjs`, built with main.
-// - macOS: arm64 always (the release's), x64 too when its target is
-//   installed (`rustup target add x86_64-apple-darwin`); a failed x64 build
-//   is a warning, as the other CPU's natives are. Elsewhere: this machine's.
+// - macOS: arm64 always (the release's), x64 only when rustup lists its
+//   target as installed (`rustup target add x86_64-apple-darwin`), so a
+//   machine without it builds quietly instead of printing cargo's E0463. A
+//   failed x64 build is a warning, as the other CPU's natives are.
+//   Elsewhere: this machine's.
 // - Cargo's own output stays in `apps/desktop/lwk/target/` (git-ignored);
 //   only the binaries are copied into dist.
 // - No cargo: a clear error and a failed build, never a build without lwk.
@@ -34,6 +36,15 @@ const MAC_TRIPLES = {
 function fail(message) {
   console.error(`[lwk] ${message}`);
   process.exit(1);
+}
+
+/** Whether rustup lists `triple` as installed (false without rustup). */
+function targetInstalled(triple) {
+  const result = spawnSync("rustup", ["target", "list", "--installed"], {
+    encoding: "utf8",
+  });
+  if (result.status !== 0) return false;
+  return result.stdout.split("\n").some((line) => line.trim() === triple);
 }
 
 /** Run cargo with `args` in the crate. @returns Whether it succeeded. */
@@ -70,6 +81,11 @@ export async function buildLwk(outdir = join(root, "dist/electron")) {
   for (const [arch, triple, required] of builds) {
     const outfile = join(bin, `lwk-${arch}${exe}`);
     const target = triple ? ["--target", triple] : [];
+    if (!required && !targetInstalled(triple)) {
+      // An old binary left here would ship as if it were this build's.
+      await rm(outfile, { force: true });
+      continue;
+    }
     if (!cargo(["build", "--release", "--locked", "-q", ...target], env)) {
       if (required) fail(`cargo build failed for lwk-${arch}`);
       console.warn(
