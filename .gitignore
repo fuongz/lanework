@@ -30,3 +30,6 @@ mise.local.toml
 # Cloudflare API credentials for wrangler, and its local dev state (D1, KV, caches).
 .env
 .wrangler/
+
+# FE-152: cargo build output of the native lwk (apps/desktop/lwk).
+apps/desktop/lwk/target/

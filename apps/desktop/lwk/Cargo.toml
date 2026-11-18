@@ -1,0 +1,27 @@
+# `lwk` (FE-152): Lanework's search kit on the command line, as a small
+# native client. Built by `scripts/build-lwk.mjs` into
+# `dist/electron/bin/lwk-<arch>`; `src/main.rs` has the overview.
+[package]
+name = "lwk"
+# The version printed is the app's, stamped by build-lwk.mjs (LWK_VERSION);
+# this one is never shown.
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# preserve_order: `lwk rewrite` hands Claude Code its tool input back with
+# the keys where they were. raw_value: `--json` prints the app's answer as
+# it came. float_roundtrip: numbers read exactly, as JSON.parse reads them.
+serde_json = { version = "1", features = ["preserve_order", "raw_value", "float_roundtrip"] }
+
+# Small and quick to start: a passthrough (`lwk git status`) and `lwk
+# rewrite` (every Bash call, with the hook on) pay for the start-up alone.
+# "z" measured as fast as 3 for both (and for parsing a 21k-path answer),
+# and 100 KB smaller.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

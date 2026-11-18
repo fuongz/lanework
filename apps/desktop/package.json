@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:renderer": "vite dev",
-    "build": "node scripts/build.mjs && node scripts/fetch-ripgrep.mjs",
+    "build": "node scripts/build.mjs && node scripts/fetch-ripgrep.mjs && node scripts/build-lwk.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "package": "bun run build && node scripts/electron-builder.mjs --dev --dir --config electron-builder.package.yml",
     "dist": "bun run build && node scripts/electron-builder.mjs --notarize",

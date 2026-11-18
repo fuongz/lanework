@@ -54,6 +54,7 @@ import {
   useMcpAuthWatch,
 } from "#/stores/mcp-auth";
 import { useCloudFeatures, useIsLocalMode } from "#/stores/session";
+import type { KitMcpStatus } from "../../../../shared/agent-setup";
 import type {
   LaneworkMcpAgent,
   LaneworkMcpStatus,
@@ -96,6 +97,13 @@ const CLIS = [
   { harness: "codex", agent: "codex" },
   { harness: "opencode", agent: "opencode" },
 ] as const satisfies readonly { harness: HarnessAgent; agent: HookAgent }[];
+
+/** Each agent's key in {@link KitMcpStatus} (FE-152). */
+const KIT_KEYS = {
+  "claude-code": "claude",
+  codex: "codex",
+  opencode: "opencode",
+} as const satisfies Record<LaneworkMcpAgent, keyof KitMcpStatus>;
 
 const NO_HOOK: AgentHookStatus = {
   installed: false,
@@ -263,6 +271,36 @@ export function HarnessSection({ cli }: { cli?: HarnessAgent } = {}) {
       setError(null);
     } catch (failure) {
       setError(ipcMessage(failure, fallback));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // The `lanework-kit` entry beside the board's (FE-152): no session needed,
+  // so it is read on its own.
+  const [kitStatus, setKitStatus] = useState<KitMcpStatus | null>(null);
+  useEffect(() => {
+    void window.desktop?.agentSetup
+      ?.kitMcp()
+      .then(setKitStatus)
+      .catch((failure: unknown) =>
+        setError(
+          ipcMessage(failure, "Could not read the lanework-kit entries."),
+        ),
+      );
+  }, []);
+
+  async function runKit(agent: LaneworkMcpAgent, on: boolean) {
+    const kit = window.desktop?.agentSetup;
+    if (!kit) return;
+    setBusy(true);
+    try {
+      setKitStatus(await kit.setKitMcp(agent, on));
+      setError(null);
+    } catch (failure) {
+      setError(
+        ipcMessage(failure, on ? "Could not add it." : "Could not remove it."),
+      );
     } finally {
       setBusy(false);
     }
@@ -487,6 +525,44 @@ export function HarnessSection({ cli }: { cli?: HarnessAgent } = {}) {
       : rows;
   };
 
+  // The kit's search tools, a stdio entry of their own (FE-152).
+  const kitRow = (agent: LaneworkMcpAgent): SettingsRowSpec => {
+    const entry = kitStatus?.[KIT_KEYS[agent]];
+    const refusal = kitStatus?.refusal ?? null;
+    const on = !!entry?.installed && entry.ours;
+    return {
+      label: "lanework-kit",
+      description: !kitStatus
+        ? "Checking…"
+        : entry?.unreadable
+          ? `${entry.configPath} can't be read. Fix it and try again.`
+          : entry?.installed && !entry.ours
+            ? `${entry.configPath} already has another lanework-kit server.`
+            : refusal && !on
+              ? refusal
+              : `Lets ${NAMES[agent]} search files, code and past sessions in the folder it runs in.`,
+      keywords:
+        "lanework-kit kit mcp search files text code structural ast-grep ripgrep sessions find stdio claude codex opencode",
+      control: (
+        <Switch
+          aria-label={`lanework-kit — ${NAMES[agent]}`}
+          checked={on}
+          title={preview ? PREVIEW_AGENT_SETUP_REFUSAL : undefined}
+          disabled={
+            preview ||
+            !window.desktop?.agentSetup ||
+            busy ||
+            !entry ||
+            entry.unreadable ||
+            (entry.installed && !entry.ours) ||
+            (!on && !!refusal)
+          }
+          onCheckedChange={(checked) => void runKit(agent, checked)}
+        />
+      ),
+    };
+  };
+
   // Which of the cloud server's tools the entry asks for (FE-119/D1).
   const toolsetRow = (agent: LaneworkMcpAgent): SettingsRowSpec => {
     const entry = mcpEntry(mcpStatus, agent);
@@ -653,7 +729,9 @@ export function HarnessSection({ cli }: { cli?: HarnessAgent } = {}) {
   const cardSections: SettingsSectionSpec[] = CLIS.map(
     ({ harness: kind, agent }) => {
       const info = harness.find((entry) => entry.agent === kind);
-      const rows = handoff ? [...mcpRows(agent), ...HOOK_ROWS[agent]] : [];
+      const rows = handoff
+        ? [...mcpRows(agent), kitRow(agent), ...HOOK_ROWS[agent]]
+        : [];
       return {
         title: HARNESS_NAMES[kind],
         hideTitle: true,
@@ -882,6 +960,7 @@ export function HarnessSection({ cli }: { cli?: HarnessAgent } = {}) {
       handoff && at >= 0
         ? [
             ...mcpRows(CLIS[at].agent),
+            kitRow(CLIS[at].agent),
             ...HOOK_ROWS[CLIS[at].agent],
             ...pushRows,
           ]

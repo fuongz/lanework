@@ -10,6 +10,7 @@
 //
 // NOTE: The renderer names a project by slug and a skill or command by the
 // `id` main handed out with it, never by path (FE-40/D4).
+import type { LaneworkMcpAgent } from "./auth";
 
 /**
  * The CLIs whose setup is read; OpenCode since FE-104.
@@ -159,7 +160,36 @@ export const agentSetupChannels = {
   open: "agent-setup:open",
   reveal: "agent-setup:reveal",
   editMcp: "agent-setup:edit-mcp",
+  kitMcp: "agent-setup:kit-mcp",
+  setKitMcp: "agent-setup:set-kit-mcp",
 } as const;
+
+/**
+ * One agent's `lanework-kit` MCP entry (FE-152): the kit's search tools over
+ * stdio, beside the board's `lanework` entry and whatever mode that is in.
+ */
+export interface KitMcpEntry {
+  /** A `lanework-kit` entry is in the config. */
+  installed: boolean;
+  /** It runs this app's shim (or a stale one of ours), so the switch owns it. */
+  ours: boolean;
+  /** The user's choice in Settings; null when they never made one. */
+  on: boolean | null;
+  /** The config file, as main read it. */
+  configPath: string;
+  /** The file is there but cannot be rewritten safely. */
+  unreadable: boolean;
+}
+
+export interface KitMcpStatus {
+  /** `~/.lanew/bin/lanework-kit-mcp`. */
+  shimPath: string;
+  /** Why this copy of the app cannot write the shim; null when it can. */
+  refusal: string | null;
+  claude: KitMcpEntry;
+  codex: KitMcpEntry;
+  opencode: KitMcpEntry;
+}
 
 /** What can be done to an MCP server from Settings → MCP (FE-147). */
 export type McpServerAction = "remove" | "disable" | "enable";
@@ -181,7 +211,7 @@ export function mcpActionRefusal(
 ): string | null {
   if (server.plugin)
     return `It comes with the plugin ${server.plugin}: change the plugin instead.`;
-  if (server.name === "lanework")
+  if (server.name === "lanework" || server.name === "lanework-kit")
     return "Lanework's own server: turn it on or off on the Harness page.";
   if (server.agent === "codex" && !SAFE_MCP_NAME.test(server.name))
     return "Its name cannot be edited safely in config.toml.";
@@ -235,4 +265,13 @@ export interface DesktopAgentSetupApi {
     id: string,
     action: McpServerAction,
   ) => Promise<AgentSetup>;
+  /** Each agent's `lanework-kit` MCP entry (FE-152). */
+  kitMcp: () => Promise<KitMcpStatus>;
+  /**
+   * Add (`on`) or remove one agent's `lanework-kit` entry, and remember the
+   * choice. Only on the user's click.
+   *
+   * @returns Every entry read again.
+   */
+  setKitMcp: (agent: LaneworkMcpAgent, on: boolean) => Promise<KitMcpStatus>;
 }

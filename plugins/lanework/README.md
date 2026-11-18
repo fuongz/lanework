@@ -44,6 +44,9 @@ enter on any other device.
 - If the Lanework **desktop app** already installed its hook
   (Settings → Agents), this plugin's hook stays quiet, so each turn is
   checkpointed once.
+- **`lanework-kit` and `lwk`** (fast file, code-shape and past-chat search)
+  come with the desktop app only, not this plugin:
+  [docs/agents/lanework-kit.md](../../docs/agents/lanework-kit.md).
 - `bin/lanework-checkpoint.cjs` is built from
   `apps/desktop/electron/hook/` by `bun run build:plugin` and committed —
   a plugin installs by clone. `bun run gate` fails if it falls behind.

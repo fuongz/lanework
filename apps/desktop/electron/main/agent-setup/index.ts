@@ -7,10 +7,10 @@
 // read of that folder's setup. So no renderer can point a read, or Finder, at
 // a file of its choosing. There is no channel that writes a project's files.
 //
-// Two writes: the `lanework` MCP entry in the agents' user config
-// (`mcp-entry.ts`), and only that entry (FE-52/D8); and each CLI's trust
-// record for the project's own folder, on the user's confirmed click
-// (FE-101).
+// Three writes: the `lanework` MCP entry in the agents' user config
+// (`mcp-entry.ts`), and only that entry (FE-52/D8); the `lanework-kit` entry
+// beside it (FE-152); and each CLI's trust record for the project's own
+// folder, on the user's confirmed click (FE-101).
 //
 // NOTE: The Preview makes neither (`channel.ts`): the release app owns the
 // agents' config. Its writes answer with `PREVIEW_AGENT_SETUP_REFUSAL`, and
@@ -24,6 +24,7 @@ import {
   agentSetupChannels,
   isMcpServerAction,
   isSetupId,
+  type KitMcpStatus,
   type McpServerAction,
   type ProjectTrust,
   type SetupAgent,
@@ -55,11 +56,14 @@ import {
 } from "./mcp-auth";
 import {
   installLaneworkMcp,
+  kitMcpStatus,
   laneworkMcpStatus,
   modeFor,
   removeLaneworkMcp,
+  setKitMcp,
   setLaneworkMcpToolset,
   setMcpHome,
+  syncKitMcp,
   syncLaneworkMcp,
 } from "./mcp-entry";
 import { editMcpServer } from "./mcp-servers";
@@ -277,6 +281,16 @@ async function mcpSetToolset(
   return mcpStatus();
 }
 
+/** Turn one agent's `lanework-kit` entry on or off (FE-152). */
+async function kitMcpSet(
+  agent: LaneworkMcpAgent,
+  on: boolean,
+): Promise<KitMcpStatus> {
+  refuseInPreview();
+  await setKitMcp(agent, on);
+  return kitMcpStatus();
+}
+
 /**
  * Remove, disable or enable one MCP server (FE-147), found again by its id
  * in a fresh read, so the renderer names a server, never a path.
@@ -351,6 +365,29 @@ export function registerAgentSetup(devUrl?: string): void {
   })().catch((error: unknown) =>
     console.warn("could not bring the Lanework MCP entry up to date", error),
   );
+  // The kit's entries follow no session: only this build's shim and the
+  // user's switches (FE-152).
+  void syncKitMcp().catch((error: unknown) =>
+    console.warn(
+      "could not bring the lanework-kit MCP entry up to date",
+      error,
+    ),
+  );
+  handle(agentSetupChannels.kitMcp, devUrl, (args) => {
+    if (args.length) throw new Error("kitMcp takes no arguments");
+    return kitMcpStatus();
+  });
+  handle(agentSetupChannels.setKitMcp, devUrl, (args) => {
+    if (
+      args.length !== 2 ||
+      !isMcpAgent(args[0]) ||
+      typeof args[1] !== "boolean"
+    )
+      throw new Error(
+        'setKitMcp takes "claude-code", "codex" or "opencode", and true or false',
+      );
+    return kitMcpSet(args[0], args[1]);
+  });
   handle(agentSetupChannels.read, devUrl, (args) => {
     if (args.length !== 1) throw new Error("read takes one project");
     return read(slugArg(args[0]));

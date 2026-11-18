@@ -13,6 +13,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, relative, sep } from "node:path";
+import { KIT_TOOL_LIMITS } from "@lanework/protocol";
 import type { ConversationAgent } from "../../../shared/conversation";
 import {
   fsSearchChannels,
@@ -46,9 +47,9 @@ import {
 } from "./jsonl";
 
 /** Sessions returned when the caller names no limit. */
-export const SESSION_LIMIT = 20;
+export const SESSION_LIMIT = KIT_TOOL_LIMITS.search_sessions.default;
 /** The most sessions one search returns, whatever the caller asks. */
-export const SESSION_LIMIT_MAX = 50;
+export const SESSION_LIMIT_MAX = KIT_TOOL_LIMITS.search_sessions.max;
 /** Matching lines kept per session. */
 const LINES_PER_SESSION = 3;
 /**

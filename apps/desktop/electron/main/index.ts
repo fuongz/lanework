@@ -34,8 +34,10 @@ import {
   parseTeamLead,
 } from "../../shared/orchestration";
 import { installControlCli } from "../control/install";
+import { isWithin, realRoots } from "../kit";
 import { registerAgentConfig } from "./agent-config";
 import { registerAgentSetup } from "./agent-setup";
+import { installLwk } from "./agent-setup/lwk-install";
 import { registerAuth } from "./auth";
 import {
   APP_CHANNEL,
@@ -63,6 +65,7 @@ import { registerHarness } from "./harness";
 import { registerInstructions } from "./instructions";
 import { broadcast, handle } from "./ipc";
 import { jevMain } from "./jev";
+import { type KitSocket, startKitSocket } from "./kit-socket";
 import { registerMemory } from "./memory";
 import { installMenu } from "./menu";
 import { installMenuBar } from "./menu-bar";
@@ -80,6 +83,12 @@ import {
   registerProjects,
 } from "./projects";
 import { migrateProjectsLayout } from "./projects/layout-migration";
+import {
+  authorizedRecord,
+  inLocalMode,
+  LOCAL_RECORD,
+} from "./projects/session";
+import { readFolders } from "./projects/store";
 import { registerAppProtocol } from "./protocol";
 import { registerReadiness } from "./readiness";
 import { registerRepoSearch } from "./repo-search";
@@ -312,6 +321,29 @@ function registerConductors(devUrl: string | undefined): void {
 }
 
 let controlServer: ControlServer | null = null;
+let kitSocket: KitSocket | null = null;
+
+/**
+ * FE-152: the linked folders of the project `cwd` is in (the local boards'
+ * and, signed in, the account's), for the kit socket's scope. None when
+ * `cwd` is in no linked folder.
+ */
+async function linkedRootsFor(cwd: string): Promise<string[]> {
+  const [real] = await realRoots([cwd]);
+  if (!real) return [];
+  const records = [LOCAL_RECORD];
+  if (!(await inLocalMode())) {
+    const record = await authorizedRecord().catch(() => null);
+    if (record) records.push(record);
+  }
+  for (const record of records) {
+    const linked = await readFolders(record).catch(() => ({}));
+    for (const folders of Object.values(linked))
+      for (const root of await realRoots(folders))
+        if (isWithin(root, real)) return folders;
+  }
+  return [];
+}
 
 // The release, or "Lanework (Preview)" with its own userData and app home:
 // first, before anything reads either (`channel.ts`).
@@ -546,6 +578,15 @@ app
     // FE-151: fuzzy file finding (fff) and structural search (ast-grep).
     registerFileFinder(devUrl);
     registerStructuralSearch(devUrl);
+    // FE-152: the kit's tools for `lwk` and the lanework-kit MCP server, on
+    // a 0600 unix socket in the app home, with the warm fff index above.
+    startKitSocket({ rootsFor: linkedRootsFor })
+      .then((socket) => {
+        kitSocket = socket;
+      })
+      .catch((error: unknown) => {
+        console.warn("Unable to start the kit socket", error);
+      });
     // A board synced to the cloud takes its conversations and conductors
     // along (FE-142); boards synced before this get theirs now.
     onProjectMoved(async (from, to) => {
@@ -557,6 +598,11 @@ app
     // this app's Node and bundle.
     void installControlCli().catch((error: unknown) =>
       console.warn("Unable to install lanework-control", error),
+    );
+    // `~/.lanew/bin/lwk` (FE-152): a link to this build's binary, refreshed
+    // on every launch so it follows the app when it moves or updates.
+    void installLwk().catch((error: unknown) =>
+      console.warn("Unable to install lwk", error),
     );
     // The lead's CLI reaches runs through this; it listens on loopback only.
     startControlServer(
@@ -616,6 +662,8 @@ app
 app.on("will-quit", () => {
   void controlServer?.close();
   controlServer = null;
+  void kitSocket?.close();
+  kitSocket = null;
 });
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

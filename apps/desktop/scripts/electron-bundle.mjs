@@ -56,9 +56,18 @@ export const electronBuildOptions = {
     // The offline MCP server, on the same Node as the hook. Agent configs run
     // `ELECTRON_RUN_AS_NODE=1 <app> dist/electron/mcp-local/server.cjs`.
     "mcp-local/server": "electron/mcp-local/main.ts",
+    // FE-152: the lanework-kit MCP server, on the same Node, from
+    // ~/.lanew/bin/lanework-kit-mcp. Its natives resolve from here to
+    // `dist/electron/node_modules`, as main's do.
+    "mcp-kit/server": "electron/mcp-kit/main.ts",
     // FE-87: the lead's `lanework-control`, on the same Node, from
     // ~/.lanew/bin/lanework-control.
     "control/lanework-control": "electron/control/main.ts",
+    // FE-152: `lwk`'s JS kit, on the same Node. The native lwk
+    // (`apps/desktop/lwk/`, `dist/electron/bin/lwk-<arch>`) execs it when the
+    // app is not up, and for `lwk hook`. Its natives and ripgrep resolve from
+    // here, as mcp-kit's do.
+    "lwk/standalone": "electron/lwk/cli.ts",
   },
   bundle: true,
   platform: "node",

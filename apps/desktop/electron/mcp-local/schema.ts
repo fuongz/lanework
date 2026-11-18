@@ -1,100 +1,14 @@
-// A tool's parameters, spelled once. The JSON Schema that `tools/list`
-// advertises and the validator that `tools/call` runs both derive from it, so
-// the two cannot disagree. It is small on purpose: the board tools need
-// strings, booleans, integers, enums, string lists, string maps and lists of
-// flat objects.
+// The validator `tools/call` runs on a tool's arguments. The parameters it
+// checks are the tool contract's (`ToolShape` in `@lanework/protocol`), the
+// same ones `tools/list` advertises as JSON Schema, so the two cannot
+// disagree.
 //
 // NOTE: Unknown arguments are dropped, not refused, as the cloud's zod schemas
 // do. An agent that sends a field this build does not know (say
 // `assignees.users`) must still get its card.
+import type { ToolParam, ToolShape } from "@lanework/protocol";
 
-/** One tool parameter: its type and the limits the validator enforces. */
-export type Param =
-  | { type: "string"; description?: string; enum?: readonly string[] }
-  | { type: "boolean"; description?: string }
-  | {
-      type: "integer";
-      description?: string;
-      minimum?: number;
-      maximum?: number;
-    }
-  | { type: "string[]"; description?: string }
-  | { type: "nullable-string"; description?: string }
-  | { type: "string-map"; description?: string }
-  | {
-      type: "object";
-      description?: string;
-      properties: Record<string, Param>;
-      required?: readonly string[];
-    }
-  | {
-      type: "object[]";
-      description?: string;
-      properties: Record<string, Param>;
-      required?: readonly string[];
-      minItems?: number;
-    };
-
-/** A tool's parameters: each one by name, and which are required. */
-export interface Shape {
-  properties: Record<string, Param>;
-  required?: readonly string[];
-}
-
-type JsonSchema = Record<string, unknown>;
-
-function paramSchema(param: Param): JsonSchema {
-  const described = (schema: JsonSchema): JsonSchema =>
-    param.description ? { ...schema, description: param.description } : schema;
-  switch (param.type) {
-    case "string":
-      return described(
-        param.enum
-          ? { type: "string", enum: [...param.enum] }
-          : { type: "string" },
-      );
-    case "boolean":
-      return described({ type: "boolean" });
-    case "integer":
-      return described({
-        type: "integer",
-        ...(param.minimum !== undefined ? { minimum: param.minimum } : {}),
-        ...(param.maximum !== undefined ? { maximum: param.maximum } : {}),
-      });
-    case "string[]":
-      return described({ type: "array", items: { type: "string" } });
-    case "nullable-string":
-      return described({ type: ["string", "null"] });
-    case "string-map":
-      return described({
-        type: "object",
-        additionalProperties: { type: ["string", "null"] },
-      });
-    case "object":
-      return described(shapeSchema(param));
-    case "object[]":
-      return described({
-        type: "array",
-        items: shapeSchema(param),
-        ...(param.minItems ? { minItems: param.minItems } : {}),
-      });
-  }
-}
-
-/** Build the JSON Schema that `tools/list` advertises for a {@link Shape}. */
-export function shapeSchema(shape: Shape): JsonSchema {
-  const properties: Record<string, JsonSchema> = {};
-  for (const [name, param] of Object.entries(shape.properties))
-    properties[name] = paramSchema(param);
-  return {
-    type: "object",
-    properties,
-    ...(shape.required?.length ? { required: [...shape.required] } : {}),
-    additionalProperties: false,
-  };
-}
-
-/** A tool call whose arguments do not match the tool's {@link Shape}. */
+/** A tool call whose arguments do not match the tool's {@link ToolShape}. */
 export class InvalidParams extends Error {
   constructor(message: string) {
     super(message);
@@ -105,7 +19,7 @@ export class InvalidParams extends Error {
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-function checkParam(path: string, param: Param, value: unknown): unknown {
+function checkParam(path: string, param: ToolParam, value: unknown): unknown {
   const fail = (expected: string): never => {
     throw new InvalidParams(`${path} must be ${expected}`);
   };
@@ -165,7 +79,7 @@ function checkParam(path: string, param: Param, value: unknown): unknown {
  *   type.
  */
 export function checkShape(
-  shape: Shape,
+  shape: ToolShape,
   args: unknown,
   prefix = "",
 ): Record<string, unknown> {

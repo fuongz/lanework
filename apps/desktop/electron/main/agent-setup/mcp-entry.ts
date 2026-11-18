@@ -1,8 +1,10 @@
 // The `lanework` MCP server entry in Claude Code's, Codex's and OpenCode's
 // user config (FE-52/D8, FE-104): the offline server over stdio while the app
-// runs on the local board, the cloud one over HTTP once signed in.
+// runs on the local board, the cloud one over HTTP once signed in. And the
+// `lanework-kit` entry beside it (FE-152): the kit's search tools, always
+// over stdio, whatever mode the board entry is in.
 //
-// NOTE: Only OUR entry, ever. `~/.claude.json` holds every project Claude Code
+// NOTE: Only OUR entries, ever. `~/.claude.json` holds every project Claude Code
 // has seen and every other MCP server the user added; `~/.codex/config.toml`
 // is Codex's whole configuration; `opencode.json[c]` is OpenCode's, comments
 // included (`opencode.ts` edits it in place).
@@ -21,7 +23,14 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
+// NOTE: The ESM build, by path, as in `opencode.ts`.
+import {
+  applyEdits,
+  type FormattingOptions,
+  modify,
+} from "jsonc-parser/lib/esm/main.js";
 import { MCP_HOST, MCP_URL, MCP_WORKER_URL } from "../../../shared/agent-notes";
+import type { KitMcpEntry, KitMcpStatus } from "../../../shared/agent-setup";
 import type {
   LaneworkMcpAgent,
   LaneworkMcpEntry,
@@ -43,7 +52,14 @@ import {
   withOpencodeMcp,
   withoutOpencodeMcp,
 } from "./opencode";
-import { setToolsetPref, toolsetFor, toolsets, WORKER_AGENTS } from "./prefs";
+import {
+  kitMcpPref,
+  setKitMcpPref,
+  setToolsetPref,
+  toolsetFor,
+  toolsets,
+  WORKER_AGENTS,
+} from "./prefs";
 
 /** The name of our entry in both agents' MCP server config. */
 export const MCP_NAME = "lanework";
@@ -401,7 +417,10 @@ const OUR_TABLE =
  * A line inside a multi-line string stays with the table it started in, so a
  * `[` at its start is never read as a header.
  */
-function splitCodex(text: string): { kept: string[]; ours: string[] } {
+function splitCodex(
+  text: string,
+  table: RegExp = OUR_TABLE,
+): { kept: string[]; ours: string[] } {
   const kept: string[] = [];
   const ours: string[] = [];
   let inOurs = false;
@@ -413,7 +432,7 @@ function splitCodex(text: string): { kept: string[]; ours: string[] } {
       continue;
     }
     const line = raw.replace(/\s+#.*$/, "").trim();
-    if (line.startsWith("[")) inOurs = OUR_TABLE.test(line);
+    if (line.startsWith("[")) inOurs = table.test(line);
     (inOurs ? ours : kept).push(raw);
     for (const quote of ['"""', "'''"])
       if (raw.split(quote).length % 2 === 0) {
@@ -755,4 +774,421 @@ export async function setLaneworkMcpToolset(
   const status = await entryStatus(agent);
   if (status.mode === "cloud" && needsRewrite(status, "cloud", toolset))
     await installLaneworkMcp(agent, "cloud");
+}
+
+// ── lanework-kit (FE-152) ────────────────────────────────────────────────────
+//
+// A second stdio entry, `lanework-kit`, that runs the kit's MCP server
+// (`dist/electron/mcp-kit/server.cjs`) through its own shim. It needs no
+// session and no board: the same entry whether the board's is local, cloud
+// or absent. Each agent's switch is a pref (`prefs.ts`):
+// - On: the entry is added, and on every launch put back if it went missing
+//   and repointed at this build's shim.
+// - Off: the entry is removed, and never added again.
+// - Never chosen: an entry of ours only gets its shim rewritten.
+
+/** The name of the kit's entry in every agent's MCP config. */
+export const KIT_MCP_NAME = "lanework-kit";
+
+const KIT_AGENTS = ["claude-code", "codex", "opencode"] as const;
+
+/** `~/.lanew/bin/lanework-kit-mcp` — what the kit's entry runs. */
+export function kitShimPath(): string {
+  return join(appHomeDir(), "bin", "lanework-kit-mcp");
+}
+
+/**
+ * The kit's MCP server bundle, `dist/electron/mcp-kit/server.cjs`, outside
+ * the asar archive like {@link mcpServerPath}'s.
+ */
+export function kitServerPath(mainDir: string = __dirname): string {
+  return join(mainDir, "..", "mcp-kit", "server.cjs").replace(
+    `app.asar${sep}`,
+    `app.asar.unpacked${sep}`,
+  );
+}
+
+/**
+ * The kit's shim, rewritten on every launch like {@link buildMcpShim}'s.
+ *
+ * NOTE: No `cd`: the server's scope is the folder the agent starts it in.
+ * `LANEWORK_HOME` is pinned so it finds this app's socket
+ * (`<app home>/run/kit.sock`).
+ */
+export function buildKitShim(options: {
+  execPath: string;
+  serverPath: string;
+  home: string;
+}): string {
+  return [
+    "#!/bin/sh",
+    "# Lanework's lanework-kit MCP server (FE-152). The Lanework app rewrites",
+    "# this file on every launch; edits here are lost.",
+    "export ELECTRON_RUN_AS_NODE=1",
+    `export LANEWORK_HOME=${shellQuote(options.home)}`,
+    `exec ${shellQuote(options.execPath)} ${shellQuote(options.serverPath)} "$@"`,
+    "",
+  ].join("\n");
+}
+
+/**
+ * Write the kit's shim and return its path.
+ *
+ * @throws When this copy of the app may not write it ({@link shimRefusal}).
+ */
+async function writeKitShim(
+  execPath: string = process.execPath,
+): Promise<string> {
+  const refusal = currentShimRefusal();
+  if (refusal) throw new Error(shimRefusalMessage(refusal));
+  const path = kitShimPath();
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  await writeFile(
+    path,
+    buildKitShim({
+      execPath,
+      serverPath: kitServerPath(),
+      home: appHomeDir(),
+    }),
+    { mode: 0o700 },
+  );
+  await chmod(path, 0o700);
+  return path;
+}
+
+/**
+ * Whether `command` is a kit shim of this app's from another app home that
+ * is a temp folder or gone, as {@link isStaleShim} judges the board's.
+ */
+function isStaleKitShim(command: unknown, shim: string): boolean {
+  if (typeof command !== "string" || command === shim) return false;
+  if (!/[/\\]bin[/\\]lanework-kit-mcp$/.test(command)) return false;
+  const temp = [tmpdir(), "/tmp", "/private/tmp", "/var/folders"];
+  return (
+    temp.some((dir) => command.startsWith(`${dir}${sep}`)) ||
+    !existsSync(command)
+  );
+}
+
+/** What an entry's command says about it. */
+function kitState(installed: boolean, command: unknown, shim: string) {
+  return {
+    installed,
+    ours: installed && (command === shim || isStaleKitShim(command, shim)),
+    command: installed ? command : null,
+  };
+}
+
+/** {@link KitMcpEntry}, with the command the entry runs (main only). */
+type KitEntryRead = KitMcpEntry & { command: unknown };
+
+// Claude Code: `mcpServers["lanework-kit"]`.
+
+/** `json` with the kit's entry; every other key as it was. */
+export function withClaudeKit(json: Json, shim = kitShimPath()): Json {
+  const servers = isObject(json.mcpServers) ? json.mcpServers : {};
+  return {
+    ...json,
+    mcpServers: {
+      ...servers,
+      [KIT_MCP_NAME]: { type: "stdio", command: shim, args: [] as string[] },
+    },
+  };
+}
+
+/** `json` without the kit's entry; the same object when it had none. */
+function withoutClaudeKit(json: Json): Json {
+  if (!isObject(json.mcpServers) || !(KIT_MCP_NAME in json.mcpServers))
+    return json;
+  const { [KIT_MCP_NAME]: _, ...rest } = json.mcpServers;
+  return { ...json, mcpServers: rest };
+}
+
+// Codex: `[mcp_servers.lanework-kit]`.
+
+/** The kit's table header, sub-tables included. */
+const KIT_TABLE =
+  /^\[\s*mcp_servers\s*\.\s*(?:"lanework-kit"|lanework-kit)\s*(?:\..*)?\]$/;
+
+/** `text` without the kit's table; the same text when it had none. */
+export function withoutCodexKit(text: string): string {
+  const { kept, ours } = splitCodex(text, KIT_TABLE);
+  if (!ours.length) return text;
+  return `${kept.join("\n").replace(/\n+$/, "")}\n`;
+}
+
+/** `text` with the kit's table at the end; the rest as it was. */
+export function withCodexKit(text: string, shim = kitShimPath()): string {
+  const rest = withoutCodexKit(text).replace(/\n+$/, "");
+  const table = [
+    `[mcp_servers.${KIT_MCP_NAME}]`,
+    `command = ${tomlQuote(shim)}`,
+  ].join("\n");
+  return `${rest ? `${rest}\n\n` : ""}${table}\n`;
+}
+
+// OpenCode: `mcp.servers["lanework-kit"]`, edited in place as `opencode.ts`
+// edits the board's entry, so comments and formatting survive.
+
+/** The indentation the file already uses, as `opencode.ts` reads it. */
+function jsoncFormatting(text: string): FormattingOptions {
+  const indent = /^([ \t]+)\S/m.exec(text)?.[1] ?? "  ";
+  return {
+    insertSpaces: !indent.startsWith("\t"),
+    tabSize: indent.startsWith("\t") ? 1 : indent.length,
+    eol: text.includes("\r\n") ? "\r\n" : "\n",
+    insertFinalNewline: true,
+  };
+}
+
+/**
+ * `text` with the kit's entry; every other byte as it was.
+ *
+ * @throws When `text` is not a JSONC object, or uses OpenCode 1's layout.
+ */
+export function withOpencodeKit(
+  text: string | null,
+  path: string,
+  shim = kitShimPath(),
+): string {
+  const config = parseJsonc(text);
+  if (!config) throw notJsonc(path);
+  if (usesV1Layout(config)) throw v1Refusal(path);
+  const base = text?.trim() ? (text as string) : "{}\n";
+  const edits = modify(
+    base,
+    ["mcp", "servers", KIT_MCP_NAME],
+    { type: "local", command: [shim] },
+    { formattingOptions: jsoncFormatting(base) },
+  );
+  const next = applyEdits(base, edits);
+  return next.endsWith("\n") ? next : `${next}\n`;
+}
+
+/**
+ * `text` without the kit's entry; null when it had none.
+ *
+ * Drops an emptied `servers`, then an emptied `mcp`, as
+ * `withoutOpencodeMcp` does.
+ *
+ * @throws When `text` is not a JSONC object.
+ */
+export function withoutOpencodeKit(text: string, path: string): string | null {
+  const config = parseJsonc(text);
+  if (!config) throw notJsonc(path);
+  const mcp = isObject(config.mcp) ? config.mcp : {};
+  const servers = isObject(mcp.servers) ? mcp.servers : {};
+  if (!(KIT_MCP_NAME in servers)) return null;
+  const lastServer = Object.keys(servers).length === 1;
+  const lastInMcp = lastServer && Object.keys(mcp).length === 1;
+  const target = lastInMcp
+    ? ["mcp"]
+    : lastServer
+      ? ["mcp", "servers"]
+      : ["mcp", "servers", KIT_MCP_NAME];
+  const edits = modify(text, target, undefined, {
+    formattingOptions: jsoncFormatting(text),
+  });
+  return applyEdits(text, edits);
+}
+
+/** `agent`'s kit entry as its config file holds it now. */
+async function kitEntryStatus(agent: LaneworkMcpAgent): Promise<KitEntryRead> {
+  const configPath = configPathOf(agent);
+  const shim = kitShimPath();
+  const on = await kitMcpPref(agent);
+  const text = await readOptional(configPath).catch(() => null);
+  if (agent === "codex") {
+    const { ours } = splitCodex(text ?? "", KIT_TABLE);
+    return {
+      ...kitState(ours.length > 0, codexValue(ours, "command"), shim),
+      on,
+      configPath,
+      unreadable: false,
+    };
+  }
+  if (agent === "opencode") {
+    const config = parseJsonc(text);
+    if (!config || usesV1Layout(config))
+      return {
+        installed: false,
+        ours: false,
+        command: null,
+        on,
+        configPath,
+        unreadable: true,
+      };
+    const mcp = isObject(config.mcp) ? config.mcp : {};
+    const servers = isObject(mcp.servers) ? mcp.servers : {};
+    const entry = servers[KIT_MCP_NAME];
+    const command =
+      isObject(entry) && Array.isArray(entry.command)
+        ? entry.command[0]
+        : undefined;
+    return {
+      ...kitState(isObject(entry), command, shim),
+      on,
+      configPath,
+      unreadable: false,
+    };
+  }
+  const json = parseObject(text);
+  if (!json)
+    return {
+      installed: false,
+      ours: false,
+      command: null,
+      on,
+      configPath,
+      unreadable: true,
+    };
+  const servers = isObject(json.mcpServers) ? json.mcpServers : {};
+  const entry = servers[KIT_MCP_NAME];
+  return {
+    ...kitState(isObject(entry), isObject(entry) ? entry.command : null, shim),
+    on,
+    configPath,
+    unreadable: false,
+  };
+}
+
+/** What Settings → Harness shows for the `lanework-kit` entries. */
+export async function kitMcpStatus(): Promise<KitMcpStatus> {
+  // The command stays in main: Settings shows only whether it is ours.
+  const [claude, codex, opencode] = await Promise.all(
+    KIT_AGENTS.map(async (agent) => {
+      const { command: _, ...entry } = await kitEntryStatus(agent);
+      return entry;
+    }),
+  );
+  const refusal = currentShimRefusal();
+  return {
+    shimPath: kitShimPath(),
+    refusal: agentConfigLock ?? (refusal ? shimRefusalMessage(refusal) : null),
+    claude,
+    codex,
+    opencode,
+  };
+}
+
+/**
+ * Write the kit's entry for `agent`, and its shim.
+ *
+ * @throws When this copy may not write the shim; when `~/.claude.json` or
+ *   OpenCode's config is not valid JSON, or OpenCode's uses its 1.x layout;
+ *   when a `lanework-kit` entry there is not ours.
+ */
+async function installKitMcp(agent: LaneworkMcpAgent): Promise<void> {
+  assertUnlocked();
+  const path = configPathOf(agent);
+  const status = await kitEntryStatus(agent);
+  if (status.unreadable)
+    throw agent === "opencode"
+      ? notJsonc(path)
+      : agent === "claude-code"
+        ? notJson(path)
+        : new Error(`${path} cannot be read.`);
+  if (status.installed && !status.ours)
+    throw new Error(
+      `${path} already has another lanework-kit server. Remove it first, then try again.`,
+    );
+  const shim = await writeKitShim();
+  if (agent === "opencode") {
+    await updateConfigFile(
+      path,
+      (text) => withOpencodeKit(text, path, shim),
+      NEW_CONFIG_MODE,
+    );
+    return;
+  }
+  if (agent === "codex") {
+    await updateConfigFile(
+      path,
+      (text) => withCodexKit(text ?? "", shim),
+      NEW_CONFIG_MODE,
+    );
+    return;
+  }
+  await updateConfigFile(
+    path,
+    (text) => {
+      const json = parseObject(text);
+      if (!json) throw notJson(path);
+      return `${JSON.stringify(withClaudeKit(json, shim), null, 2)}\n`;
+    },
+    NEW_CONFIG_MODE,
+  );
+}
+
+/**
+ * Remove the kit's entry for `agent`, when it is ours; others stay.
+ *
+ * @throws When the config file is not valid JSON; it is never overwritten.
+ */
+async function removeKitMcp(agent: LaneworkMcpAgent): Promise<void> {
+  assertUnlocked();
+  const path = configPathOf(agent);
+  const status = await kitEntryStatus(agent);
+  if (!status.installed || !status.ours) return;
+  if (agent === "opencode") {
+    await updateConfigFile(path, (text) =>
+      text === null ? null : withoutOpencodeKit(text, path),
+    );
+    return;
+  }
+  if (agent === "codex") {
+    await updateConfigFile(path, (text) =>
+      text === null ? null : withoutCodexKit(text),
+    );
+    return;
+  }
+  await updateConfigFile(path, (text) => {
+    if (text === null) return null;
+    const json = parseObject(text);
+    if (!json) throw notJson(path);
+    const next = withoutClaudeKit(json);
+    return next === json ? null : `${JSON.stringify(next, null, 2)}\n`;
+  });
+}
+
+/**
+ * Turn `agent`'s kit entry on or off from Settings, and remember it.
+ *
+ * The choice is stored only once the config agrees, so a refused write
+ * leaves the switch where it was.
+ */
+export async function setKitMcp(
+  agent: LaneworkMcpAgent,
+  on: boolean,
+): Promise<void> {
+  assertUnlocked();
+  if (on) await installKitMcp(agent);
+  else await removeKitMcp(agent);
+  await setKitMcpPref(agent, on);
+}
+
+/**
+ * Bring the kit's entries in line on launch: the shim rewritten for this
+ * build when an entry of ours runs it, an entry of ours that runs a stale
+ * shim repointed, and one the user turned on put back when it is missing.
+ *
+ * NOTE: Nothing in the Preview, a dev build, or a copy that may not write
+ * shims: the installed app does it on its next launch. Never touches a
+ * `lanework-kit` entry that is not ours, nor one the user turned off.
+ */
+export async function syncKitMcp(): Promise<void> {
+  if (agentConfigLock || currentShimRefusal()) return;
+  const statuses = await Promise.all(
+    KIT_AGENTS.map((agent) => kitEntryStatus(agent).catch(() => null)),
+  );
+  if (statuses.some((status) => status?.installed && status.ours))
+    await writeKitShim();
+  const shim = kitShimPath();
+  for (const [index, agent] of KIT_AGENTS.entries()) {
+    const status = statuses[index];
+    if (!status || status.unreadable || status.on === false) continue;
+    const repoint = status.ours && status.command !== shim;
+    const putBack = !status.installed && status.on === true;
+    if (repoint || putBack) await installKitMcp(agent).catch(() => undefined);
+  }
 }

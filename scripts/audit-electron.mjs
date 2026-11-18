@@ -31,6 +31,8 @@ const NODE_OUTPUTS = [
   "dist/electron/hook/lanework-checkpoint.cjs",
   "dist/electron/statusline/claude-usage.cjs",
   "dist/electron/mcp-local/server.cjs",
+  "dist/electron/mcp-kit/server.cjs",
+  "dist/electron/lwk/standalone.cjs",
   "dist/electron/control/lanework-control.cjs",
   "dist/electron/main/session-pull.cjs",
 ];
@@ -38,6 +40,9 @@ const NODE_OUTPUTS = [
 const ELECTRON_FREE = [
   "electron/hook/",
   "electron/mcp-local/",
+  "electron/kit/",
+  "electron/mcp-kit/",
+  "electron/lwk/",
   "electron/local-store/",
   "electron/statusline/",
   "electron/control/",

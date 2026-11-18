@@ -1,5 +1,6 @@
 // What the user chose in Settings → Agents for the `lanework` MCP entries
-// (FE-119/D1): `<app home>/agent-setup.json`.
+// (FE-119/D1) and the `lanework-kit` ones (FE-152):
+// `<app home>/agent-setup.json`.
 //
 // NOTE: Only explicit choices are stored. An agent with none follows
 // `TOOLSET_DEFAULTS`, so changing a default reaches every install that never
@@ -45,6 +46,8 @@ export const WORKER_AGENTS: readonly LaneworkMcpAgent[] = [
 
 type Prefs = {
   mcpToolset?: Partial<Record<LaneworkMcpAgent, LaneworkMcpToolset>>;
+  /** Whether each agent gets the `lanework-kit` entry (FE-152). */
+  kitMcp?: Partial<Record<LaneworkMcpAgent, boolean>>;
 };
 
 const prefsPath = () => join(appHomeDir(), "agent-setup.json");
@@ -64,7 +67,22 @@ async function readPrefs(): Promise<Prefs> {
     for (const [agent, value] of Object.entries(stored))
       if (agent in TOOLSET_DEFAULTS && isToolset(value))
         mcpToolset[agent as LaneworkMcpAgent] = value;
-  return { mcpToolset };
+  const storedKit = (raw as { kitMcp?: unknown }).kitMcp;
+  const kitMcp: Prefs["kitMcp"] = {};
+  if (storedKit && typeof storedKit === "object")
+    for (const [agent, value] of Object.entries(storedKit))
+      if (agent in TOOLSET_DEFAULTS && typeof value === "boolean")
+        kitMcp[agent as LaneworkMcpAgent] = value;
+  return { mcpToolset, kitMcp };
+}
+
+/** Write `prefs` to the file, owner-only. */
+async function writePrefs(prefs: Prefs): Promise<void> {
+  const path = prefsPath();
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  await writeFile(path, `${JSON.stringify(prefs, null, 2)}\n`, {
+    mode: 0o600,
+  });
 }
 
 /** The toolset `agent`'s cloud entry is written with. */
@@ -101,11 +119,28 @@ export async function setToolsetPref(
       "OpenCode cannot sign in to the worker toolset yet. It keeps every tool.",
     );
   const prefs = await readPrefs();
-  const next: Prefs = {
+  await writePrefs({
     ...prefs,
     mcpToolset: { ...prefs.mcpToolset, [agent]: toolset },
-  };
-  const path = prefsPath();
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await writeFile(path, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+  });
+}
+
+/**
+ * Whether the user turned `agent`'s `lanework-kit` entry on (true) or off
+ * (false), or null when they never chose: then the app neither adds nor
+ * removes it.
+ */
+export async function kitMcpPref(
+  agent: LaneworkMcpAgent,
+): Promise<boolean | null> {
+  return (await readPrefs()).kitMcp?.[agent] ?? null;
+}
+
+/** Remember `on` for `agent`'s `lanework-kit` entry. */
+export async function setKitMcpPref(
+  agent: LaneworkMcpAgent,
+  on: boolean,
+): Promise<void> {
+  const prefs = await readPrefs();
+  await writePrefs({ ...prefs, kitMcp: { ...prefs.kitMcp, [agent]: on } });
 }

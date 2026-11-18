@@ -3,7 +3,18 @@
 // `electron/main/fs-kit/`; the page gets matches, never a path it can open
 // on its own. FE-151 adds fuzzy file finding (fff) and structural search
 // (ast-grep), both run in main.
+
+// The result shapes are the tool contract's (FE-152): the app, `lwk` and the
+// lanework-kit MCP answer with the same types.
+import type { FileHit, FileMatch, SessionMatch } from "@lanework/protocol";
 import type { ConversationAgent } from "./conversation";
+
+export type {
+  FileHit,
+  FileMatch,
+  MatchLine,
+  SessionMatch,
+} from "@lanework/protocol";
 
 export const fsSearchChannels = {
   /** Search a project folder's files. */
@@ -15,16 +26,6 @@ export const fsSearchChannels = {
   /** FE-151: structural (ast-grep) search in a project folder. */
   structural: "fsSearch:structural",
 } as const;
-
-/** A file whose path matches a fuzzy query (FE-151). */
-export interface FileHit {
-  /** Relative to the searched folder, `/`-separated. */
-  path: string;
-  /** Higher is a better match. Only comparable within one answer. */
-  score: number;
-  /** The matched characters as `[start, end)` UTF-16 offsets into `path`. */
-  ranges?: [number, number][];
-}
 
 /** Languages a structural pattern can be written in (FE-151). */
 export type StructuralLang =
@@ -42,41 +43,6 @@ export type StructuralLang =
 export interface SearchStructuralOptions {
   /** The pattern's language; inferred from each file's extension when unset. */
   lang?: StructuralLang;
-}
-
-/** One matching line. */
-export interface MatchLine {
-  /** 1-based line number. */
-  line: number;
-  /** The line, without its newline. A very long line is cut to a window around its first match. */
-  text: string;
-  /** Each match as `[start, end)` UTF-16 offsets into `text`. */
-  ranges: [number, number][];
-}
-
-/** A file with matches. */
-export interface FileMatch {
-  /** Relative to the searched folder, `/`-separated. */
-  path: string;
-  lines: MatchLine[];
-  /**
-   * The search stopped in or right after this file (a match or file limit, or
-   * the timeout), so there may be more matches here or after it.
-   */
-  truncated: boolean;
-}
-
-/** A session transcript with matches. */
-export interface SessionMatch {
-  harness: ConversationAgent;
-  sessionId: string;
-  /** The session's title, or its first prompt. */
-  title: string;
-  /** When the session was last written, ISO 8601. */
-  at: string;
-  /** The transcript, relative to the harness's own folder. */
-  file: string;
-  lines: MatchLine[];
 }
 
 export interface SearchTextOptions {

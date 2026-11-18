@@ -1,5 +1,3 @@
-var __create = Object.create;
-var __getProtoOf = Object.getPrototypeOf;
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -7,30 +5,6 @@ var __hasOwnProp = Object.prototype.hasOwnProperty;
 function __accessProp(key) {
   return this[key];
 }
-var __toESMCache_node;
-var __toESMCache_esm;
-var __toESM = (mod, isNodeMode, target) => {
-  var canCache = mod != null && typeof mod === "object";
-  if (canCache) {
-    var cache = isNodeMode ? __toESMCache_node ??= new WeakMap : __toESMCache_esm ??= new WeakMap;
-    var cached = cache.get(mod);
-    if (cached)
-      return cached;
-  }
-  target = mod != null ? __create(__getProtoOf(mod)) : {};
-  const to = isNodeMode || !mod || !mod.__esModule || !__hasOwnProp.call(mod, "default") ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
-  if (mod && typeof mod === "object" || typeof mod === "function") {
-    for (let key of __getOwnPropNames(mod))
-      if (!__hasOwnProp.call(to, key))
-        __defProp(to, key, {
-          get: __accessProp.bind(mod, key),
-          enumerable: true
-        });
-  }
-  if (canCache)
-    cache.set(mod, to);
-  return to;
-};
 var __toCommonJS = (from) => {
   var entry = (__moduleCache ??= new WeakMap).get(from), desc;
   if (entry)
@@ -48,7 +22,6 @@ var __toCommonJS = (from) => {
   return entry;
 };
 var __moduleCache;
-var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
 var __returnValue = (v) => v;
 function __exportSetter(name, newValue) {
   this[name] = __returnValue.bind(null, newValue);
@@ -62,37 +35,47 @@ var __export = (target, all) => {
       set: __exportSetter.bind(all, name)
     });
 };
-var __esm = (fn, res, err) => () => {
-  if (fn)
-    try {
-      res = fn(fn = 0);
-    } catch (e) {
-      err = [e];
-    }
-  if (err)
-    throw err[0];
-  return res;
-};
+
+// apps/desktop/electron/hook/lanework-checkpoint.ts
+var exports_lanework_checkpoint = {};
+__export(exports_lanework_checkpoint, {
+  buildBody: () => buildBody,
+  checkedApi: () => checkedApi,
+  digest: () => digest,
+  digestCodex: () => digestCodex,
+  digestOpencode: () => digestOpencode,
+  isSecretFile: () => isSecretFile,
+  readOpencodeSession: () => readOpencodeSession,
+  redact: () => redact,
+  snapshot: () => snapshot
+});
+module.exports = __toCommonJS(exports_lanework_checkpoint);
+var import_node_child_process4 = require("node:child_process");
+var import_node_crypto5 = require("node:crypto");
+var import_node_fs6 = require("node:fs");
+var import_node_os6 = require("node:os");
+var import_node_path9 = require("node:path");
 // packages/protocol/src/auth.ts
 var LOOPBACK_CALLBACK_PATH = "/oauth/callback";
-
 // packages/protocol/src/boards.ts
-var WORK_ITEM_TYPES, PRIORITIES, CHECKLIST_SECTIONS, STREAM_ROLES, STREAM_ISOLATIONS;
-var init_boards = __esm(() => {
-  WORK_ITEM_TYPES = ["epic", "issue", "task"];
-  PRIORITIES = ["low", "medium", "high"];
-  CHECKLIST_SECTIONS = ["decisions", "verify"];
-  STREAM_ROLES = ["research", "implement", "test"];
-  STREAM_ISOLATIONS = ["worktree", "shared"];
-});
-
+var WORK_ITEM_TYPES = ["epic", "issue", "task"];
+var PRIORITIES = ["low", "medium", "high"];
+var CHECKLIST_SECTIONS = ["decisions", "verify"];
+var STREAM_ROLES = ["research", "implement", "test"];
+var STREAM_ISOLATIONS = ["worktree", "shared"];
 // packages/protocol/src/checkpoints.ts
-var CHECKPOINTS_KEPT = 5, CHECKPOINT_MAX_BYTES;
-var init_checkpoints = __esm(() => {
-  CHECKPOINT_MAX_BYTES = 16 * 1024;
-});
-
+var CHECKPOINTS_KEPT = 5;
+var CHECKPOINT_MAX_BYTES = 16 * 1024;
 // packages/protocol/src/common.ts
+var DEFAULT_API_ORIGIN = "https://api.lanework.dev";
+var AGENT_HEADER = "x-lanework-agent";
+var TOKEN_PREFIXES = {
+  registration: "lw_reg_",
+  machine: "lw_mch_",
+  device: "lw_dev_",
+  code: "lw_code_"
+};
+var MACHINE_SECRET_PATTERN = new RegExp(`^${TOKEN_PREFIXES.machine}[A-Za-z0-9_-]{16,190}$`);
 function isMachineSecret(value) {
   return typeof value === "string" && MACHINE_SECRET_PATTERN.test(value);
 }
@@ -111,176 +94,860 @@ function stripUserinfo(remote) {
     return value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/]*@/i, "$1");
   }
 }
-var DEFAULT_API_ORIGIN = "https://api.lanework.dev", AGENT_HEADER = "x-lanework-agent", TOKEN_PREFIXES, MACHINE_SECRET_PATTERN;
-var init_common = __esm(() => {
-  TOKEN_PREFIXES = {
-    registration: "lw_reg_",
-    machine: "lw_mch_",
-    device: "lw_dev_",
-    code: "lw_code_"
-  };
-  MACHINE_SECRET_PATTERN = new RegExp(`^${TOKEN_PREFIXES.machine}[A-Za-z0-9_-]{16,190}$`);
-});
-
 // packages/protocol/src/endpoints.ts
 function seg(value) {
   if (value === "" || value === "." || value === "..")
     throw new Error(`Refusing the path segment ${JSON.stringify(value)}.`);
   return encodeURIComponent(value);
 }
+var paths = {
+  health: () => "/v1/health",
+  cliAuth: () => "/v1/cli/auth",
+  cliToken: () => "/v1/cli/token",
+  machinesRegister: () => "/v1/machines/register",
+  machinesMe: () => "/v1/machines/me",
+  machinesHeartbeat: () => "/v1/machines/heartbeat",
+  syncState: () => "/v1/sync/state",
+  syncWorkspace: () => "/v1/sync/state/workspace",
+  syncWorkspaceById: (id) => `/v1/sync/state/workspace/${seg(id)}`,
+  syncWorkspaceOrder: () => "/v1/sync/state/workspace-order",
+  boardsForRepo: (remote) => `/v1/boards?repo=${seg(stripUserinfo(remote))}`,
+  boardRepo: (workspaceId) => `/v1/boards/${seg(workspaceId)}/repo`,
+  boardConfig: (workspaceId) => `/v1/boards/${seg(workspaceId)}/config`,
+  boardIcon: (workspaceId) => `/v1/boards/${seg(workspaceId)}/icon`,
+  boardPresence: (workspaceId) => `/v1/boards/${seg(workspaceId)}/presence`,
+  boardStats: (workspaceId, query) => withQuery(`/v1/boards/${seg(workspaceId)}/stats`, query),
+  boardChanges: (workspaceId, since, limit) => `/v1/boards/${seg(workspaceId)}/changes?since=${since}${limit === undefined ? "" : `&limit=${limit}`}`,
+  boardLookup: (workspaceId, by) => `/v1/boards/${seg(workspaceId)}/lookup?${"taskId" in by ? `taskId=${seg(by.taskId)}` : `source=${seg(by.source)}`}`,
+  boardImport: (workspaceId) => `/v1/boards/${seg(workspaceId)}/import`,
+  boardMigrated: (workspaceId) => `/v1/boards/${seg(workspaceId)}/migrated`,
+  boardPurge: (workspaceId) => `/v1/boards/${seg(workspaceId)}/purge`,
+  items: (workspaceId, query) => withQuery(`/v1/boards/${seg(workspaceId)}/items`, query),
+  item: (workspaceId, itemId) => `/v1/boards/${seg(workspaceId)}/items/${seg(itemId)}`,
+  itemMove: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/move`,
+  itemRestore: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/restore`,
+  itemChecklist: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/checklist`,
+  itemChecklistItem: (workspaceId, itemId, key) => `${paths.item(workspaceId, itemId)}/checklist/${seg(key)}`,
+  itemLinks: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/links`,
+  itemLink: (workspaceId, itemId, linkId) => `${paths.item(workspaceId, itemId)}/links/${seg(linkId)}`,
+  itemComments: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/comments`,
+  itemComment: (workspaceId, itemId, commentId) => `${paths.item(workspaceId, itemId)}/comments/${seg(commentId)}`,
+  itemSubscription: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/subscription`,
+  itemFavorite: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/favorite`,
+  itemAttachments: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/attachments`,
+  itemAttachment: (workspaceId, itemId, attachmentId) => `${paths.item(workspaceId, itemId)}/attachments/${seg(attachmentId)}`,
+  itemAudit: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/audit`,
+  itemActivity: (workspaceId, itemId, query) => withQuery(`${paths.item(workspaceId, itemId)}/activity`, query),
+  itemCheckpoints: (workspaceId, ref) => `/v1/boards/${seg(workspaceId)}/items/${seg(ref)}/checkpoints`
+};
 function withQuery(path, query) {
   const text = query === undefined ? "" : String(query);
   return text ? `${path}?${text}` : path;
 }
-var paths;
-var init_endpoints = __esm(() => {
-  init_common();
-  paths = {
-    health: () => "/v1/health",
-    cliAuth: () => "/v1/cli/auth",
-    cliToken: () => "/v1/cli/token",
-    machinesRegister: () => "/v1/machines/register",
-    machinesMe: () => "/v1/machines/me",
-    machinesHeartbeat: () => "/v1/machines/heartbeat",
-    syncState: () => "/v1/sync/state",
-    syncWorkspace: () => "/v1/sync/state/workspace",
-    syncWorkspaceById: (id) => `/v1/sync/state/workspace/${seg(id)}`,
-    syncWorkspaceOrder: () => "/v1/sync/state/workspace-order",
-    boardsForRepo: (remote) => `/v1/boards?repo=${seg(stripUserinfo(remote))}`,
-    boardRepo: (workspaceId) => `/v1/boards/${seg(workspaceId)}/repo`,
-    boardConfig: (workspaceId) => `/v1/boards/${seg(workspaceId)}/config`,
-    boardIcon: (workspaceId) => `/v1/boards/${seg(workspaceId)}/icon`,
-    boardPresence: (workspaceId) => `/v1/boards/${seg(workspaceId)}/presence`,
-    boardStats: (workspaceId, query) => withQuery(`/v1/boards/${seg(workspaceId)}/stats`, query),
-    boardChanges: (workspaceId, since, limit) => `/v1/boards/${seg(workspaceId)}/changes?since=${since}${limit === undefined ? "" : `&limit=${limit}`}`,
-    boardLookup: (workspaceId, by) => `/v1/boards/${seg(workspaceId)}/lookup?${"taskId" in by ? `taskId=${seg(by.taskId)}` : `source=${seg(by.source)}`}`,
-    boardImport: (workspaceId) => `/v1/boards/${seg(workspaceId)}/import`,
-    boardMigrated: (workspaceId) => `/v1/boards/${seg(workspaceId)}/migrated`,
-    boardPurge: (workspaceId) => `/v1/boards/${seg(workspaceId)}/purge`,
-    items: (workspaceId, query) => withQuery(`/v1/boards/${seg(workspaceId)}/items`, query),
-    item: (workspaceId, itemId) => `/v1/boards/${seg(workspaceId)}/items/${seg(itemId)}`,
-    itemMove: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/move`,
-    itemRestore: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/restore`,
-    itemChecklist: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/checklist`,
-    itemChecklistItem: (workspaceId, itemId, key) => `${paths.item(workspaceId, itemId)}/checklist/${seg(key)}`,
-    itemLinks: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/links`,
-    itemLink: (workspaceId, itemId, linkId) => `${paths.item(workspaceId, itemId)}/links/${seg(linkId)}`,
-    itemComments: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/comments`,
-    itemComment: (workspaceId, itemId, commentId) => `${paths.item(workspaceId, itemId)}/comments/${seg(commentId)}`,
-    itemSubscription: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/subscription`,
-    itemFavorite: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/favorite`,
-    itemAttachments: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/attachments`,
-    itemAttachment: (workspaceId, itemId, attachmentId) => `${paths.item(workspaceId, itemId)}/attachments/${seg(attachmentId)}`,
-    itemAudit: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/audit`,
-    itemActivity: (workspaceId, itemId, query) => withQuery(`${paths.item(workspaceId, itemId)}/activity`, query),
-    itemCheckpoints: (workspaceId, ref) => `/v1/boards/${seg(workspaceId)}/items/${seg(ref)}/checkpoints`
-  };
-});
-// packages/protocol/src/index.ts
-var init_src = __esm(() => {
-  init_boards();
-  init_checkpoints();
-  init_common();
-  init_endpoints();
-});
+// packages/protocol/src/tools/board.ts
+var BOARD_ID = {
+  type: "string",
+  description: "The board's id (the local project id) from list_boards. There is no default."
+};
+var CARD = {
+  type: "string",
+  description: "Card id or task id (e.g. BE-07)"
+};
+var REPO = {
+  type: "string",
+  description: "Output of `git remote get-url origin`, unmodified (ssh or https)"
+};
+var PRIORITY = {
+  type: "string",
+  enum: ["low", "medium", "high"]
+};
+var ASSIGNEES = {
+  type: "object",
+  description: "Agents assigned to the card. `users` is accepted and ignored: a local board has no accounts.",
+  properties: {
+    agents: { type: "string[]" },
+    users: { type: "string[]" }
+  }
+};
+var STREAMS = {
+  type: "object[]",
+  description: "Sub-agent streams (BE-19). Only for 2+ independent write areas. `owns`: exact paths or directories ending in `/`, no globs; two streams never own the same path. Shared files go in a W0 stream the others depend on. At most 4 streams per wave. Every stream needs at least one verify item tagged with its key.",
+  properties: {
+    key: { type: "string", description: "W0…W999; minted when absent" },
+    title: { type: "string" },
+    goal: { type: "string" },
+    role: { type: "string", enum: ["research", "implement", "test"] },
+    owns: { type: "string[]" },
+    reads: { type: "string[]" },
+    depends_on: { type: "string[]", description: "Stream keys" },
+    isolation: {
+      type: "string",
+      enum: ["worktree", "shared"],
+      description: "Default worktree"
+    }
+  },
+  required: ["title", "goal", "role"]
+};
+var CHECKLIST = {
+  type: "object[]",
+  description: "Decisions (what the user approves) and verify items (how the work is proved). Boxes sharing a `group` are pick-ONE options.",
+  properties: {
+    section: { type: "string", enum: ["decisions", "verify"] },
+    text: { type: "string" },
+    checked: { type: "boolean" },
+    group: { type: "string" },
+    key: { type: "string", description: "D1, V3…; minted if omitted" },
+    note: { type: "string" },
+    stream: {
+      type: "string",
+      description: "Verify items only: the stream key this item proves"
+    }
+  },
+  required: ["section", "text"]
+};
+var BOARD_TOOLS = [
+  {
+    name: "list_boards",
+    description: "Every board on this machine, with its board id and linked repo. Call this FIRST: every other tool needs a `board_id` and there is no default. Pass `repo` (your `git remote get-url origin`, as is) to get only the board(s) linked to the repo you are working in.",
+    readOnly: true,
+    properties: { repo: REPO }
+  },
+  {
+    name: "create_board",
+    description: "Create a new board and link it to the git repo in one step. ONLY after the user chose to create a new board, never on your own initiative. Suggest `owner/name` from the remote as the name. Returns board_id for every other tool.",
+    readOnly: false,
+    properties: {
+      name: {
+        type: "string",
+        description: "Board name the user agreed to, e.g. `acme/widgets`"
+      },
+      repo: REPO,
+      slug: {
+        type: "string",
+        description: "Lower-case hyphenated key; omitted = derived from the name."
+      }
+    },
+    required: ["name", "repo"]
+  },
+  {
+    name: "link_repo",
+    description: "Link a board to a git repo so list_boards({ repo }) finds it. Only after the USER confirmed which board the repo belongs to. A board links to ONE repo; refuses to replace a different linked repo unless `replace` is true. A repo another board held moves to this one.",
+    readOnly: false,
+    properties: {
+      board_id: BOARD_ID,
+      repo: REPO,
+      replace: {
+        type: "boolean",
+        description: "Move the link from the repo it has now. Only when the user asked."
+      }
+    },
+    required: ["board_id", "repo"]
+  },
+  {
+    name: "board_summary",
+    description: "Lane-by-lane counts of live cards, plus the board's categories and tag policy. Read this before creating a card so its category and tags match what the board already uses.",
+    readOnly: true,
+    properties: { board_id: BOARD_ID },
+    required: ["board_id"]
+  },
+  {
+    name: "list_reviews",
+    description: "Cards on a board, in the order the board draws them. Filter by lane, category, tag or priority. Archived cards are excluded unless asked for.",
+    readOnly: true,
+    properties: {
+      board_id: BOARD_ID,
+      category: { type: "string", description: "Category key, e.g. backend" },
+      column: {
+        type: "string",
+        description: "Lane key, e.g. todo | processing | done"
+      },
+      include_archived: { type: "boolean" },
+      limit: { type: "integer", minimum: 1, maximum: 200 },
+      priority: PRIORITY,
+      tag: { type: "string" },
+      task_id: {
+        type: "string",
+        description: "Exact task id such as BE-07, matched on the field, not the title"
+      }
+    },
+    required: ["board_id"]
+  },
+  {
+    name: "get_review",
+    description: "One card with its checklist, tags and `streams`, plus the latest `checkpoint` another agent left on it (or null) and `dispatch`: the card's run plan, `{ waves, briefs }`, or null when it has no streams. `card` takes either the card's id or its task id (e.g. BE-07).",
+    readOnly: true,
+    properties: { board_id: BOARD_ID, card: CARD },
+    required: ["board_id", "card"]
+  },
+  {
+    name: "create_review",
+    description: "Open a new card on a board. Setting `category` also mints the card's permanent task id. Split into `streams` only for 2+ independent write areas. Shared files go in a W0 stream the others depend on. At most 4 streams per wave, no two streams in one wave own the same path, every stream needs at least one verify item tagged with its key. Isolation defaults to worktree.",
+    readOnly: false,
+    properties: {
+      board_id: BOARD_ID,
+      title: { type: "string" },
+      body: { type: "string", description: "Markdown" },
+      category: {
+        type: "string",
+        description: "Category key; mints the task id"
+      },
+      checklist: CHECKLIST,
+      column: {
+        type: "string",
+        description: "Lane key; defaults to the board's start lane"
+      },
+      parent_id: { type: "string" },
+      priority: PRIORITY,
+      streams: STREAMS,
+      tags: { type: "string[]" },
+      type: { type: "string", enum: ["epic", "issue", "task"] },
+      assignees: ASSIGNEES
+    },
+    required: ["board_id", "title"]
+  },
+  {
+    name: "update_review",
+    description: "Patch a card's title, body, priority, tags, assignees, category or streams. Omitted fields are left alone; `tags`, `assignees` and `streams` replace what is there (`streams: []` clears the plan). Streams are checked against the checklist: each needs a verify item tagged with its key (tag them in the same call with `checklist_streams`). Use set_status to move between lanes.",
+    readOnly: false,
+    properties: {
+      board_id: BOARD_ID,
+      card: CARD,
+      title: { type: "string" },
+      body: { type: "string" },
+      category: {
+        type: "string",
+        description: "Setting this on a card with no task id yet mints one"
+      },
+      priority: PRIORITY,
+      tags: { type: "string[]", description: "Replaces the card's tags" },
+      assignees: ASSIGNEES,
+      streams: STREAMS,
+      checklist_streams: {
+        type: "string-map",
+        description: 'Verify item key → stream key (null removes the tag), e.g. { "V3": "W1", "V4": null }'
+      },
+      expected_revision: {
+        type: "integer",
+        description: "Refuse unless the card is still at this revision"
+      }
+    },
+    required: ["board_id", "card"]
+  },
+  {
+    name: "toggle_item",
+    description: "Tick or untick one checklist box on a card, and optionally leave a note under it, or tag a verify item with the stream it proves. `key` is the item's stable id, e.g. D1 or V3.",
+    readOnly: false,
+    properties: {
+      board_id: BOARD_ID,
+      card: CARD,
+      key: { type: "string", description: "Checklist item key, e.g. D1 or V3" },
+      checked: {
+        type: "boolean",
+        description: "Omit to leave the tick alone"
+      },
+      note: { type: "string", description: "Empty string clears it" },
+      stream: {
+        type: "nullable-string",
+        description: "Verify items only; null removes the tag"
+      },
+      text: {
+        type: "string",
+        description: "Reword the item, keeping its key and tick"
+      }
+    },
+    required: ["board_id", "card", "key"]
+  },
+  {
+    name: "review_card",
+    description: "Write the user's review of a card's checklist in one call. ONLY with picks the user just made. Ticking one option of a pick-ONE group unticks the others; boxes not named are left as they are. Free text goes in `note`. Returns `ready: true` once every decision is settled; it does not move the card.",
+    readOnly: false,
+    properties: {
+      board_id: BOARD_ID,
+      card: CARD,
+      picks: {
+        type: "object[]",
+        minItems: 1,
+        properties: {
+          key: { type: "string" },
+          checked: { type: "boolean" },
+          note: { type: "string" }
+        },
+        required: ["key", "checked"]
+      },
+      revision: {
+        type: "integer",
+        description: "Refused if the card's revision changed since"
+      }
+    },
+    required: ["board_id", "card", "picks"]
+  },
+  {
+    name: "set_status",
+    description: "Move a card to another lane, the board's status columns. Finished, verified work goes to the review lane, not done. Moving it to a done or archive lane clears its checkpoints.",
+    readOnly: false,
+    properties: {
+      board_id: BOARD_ID,
+      card: CARD,
+      status: {
+        type: "string",
+        description: "Lane key, e.g. todo | processing | review | done"
+      },
+      reason: {
+        type: "string",
+        description: "What to change when sending a card back from review. Accepted and not stored on a local board, which keeps no history."
+      }
+    },
+    required: ["board_id", "card", "status"]
+  },
+  {
+    name: "delete_review",
+    description: "Take a card off the board. This ARCHIVES it: the card and its history stay in the database and can be restored. Nothing here deletes rows.",
+    readOnly: false,
+    properties: { board_id: BOARD_ID, card: CARD },
+    required: ["board_id", "card"]
+  },
+  {
+    name: "checkpoint",
+    description: "Record where you stopped on a card so another agent can resume it. Call after each checklist item you finish, and before you stop mid-task. `get_review` returns the latest checkpoint. Summarise; never paste transcripts, secrets, tokens or .env values. Refused on a finished or archived card.",
+    readOnly: false,
+    properties: {
+      board_id: BOARD_ID,
+      card: CARD,
+      summary: { type: "string" },
+      request: { type: "string" },
+      next_step: { type: "string" },
+      files: { type: "string[]" },
+      commands: {
+        type: "object[]",
+        properties: {
+          command: { type: "string" },
+          ok: { type: "boolean" }
+        },
+        required: ["command"]
+      },
+      git: {
+        type: "object",
+        properties: {
+          branch: { type: "string" },
+          head: { type: "string" },
+          wip_ref: { type: "string" },
+          wip_sha: { type: "string" }
+        }
+      }
+    },
+    required: ["board_id", "card", "summary"]
+  },
+  {
+    name: "lifecycle_status",
+    description: "What the board is waiting on: cards whose decisions are not all ticked (waiting), cards cleared to start (ready), cards being worked (in flight), and cards waiting for a human to review (review).",
+    readOnly: true,
+    properties: { board_id: BOARD_ID },
+    required: ["board_id"]
+  }
+];
 
-// apps/desktop/shared/conversation.ts
-function mentionsAsNames(text) {
-  return text.replace(MENTION, (whole, quoted, bare) => {
-    const path = quoted !== undefined ? quoted.replace(/\\(.)/g, "$1") : bare;
-    if (!path || !/[./]/.test(path))
-      return whole;
-    return path.replace(/\/+$/, "").split("/").pop() || path;
+// packages/protocol/src/tools/kit.ts
+var KIT_TOOL_LIMITS = {
+  find_files: { default: 50, max: 200 },
+  search_text: { default: 50, max: 200 },
+  search_structural: { default: 50, max: 200 },
+  list_files: { default: 1000, max: 50000 },
+  search_sessions: { default: 20, max: 50 }
+};
+var STRUCTURAL_LANGS = [
+  "ts",
+  "tsx",
+  "js",
+  "jsx",
+  "json",
+  "css",
+  "html",
+  "python",
+  "rust",
+  "go"
+];
+var FOLDER = {
+  type: "string",
+  description: "The folder to search, an absolute path (e.g. the repo's root); the working directory when omitted"
+};
+function limit(tool, what) {
+  const { default: fallback, max } = KIT_TOOL_LIMITS[tool];
+  return {
+    type: "integer",
+    minimum: 1,
+    maximum: max,
+    description: `${what} returned; default ${fallback}`
+  };
+}
+var KIT_TOOLS = [
+  {
+    name: "find_files",
+    description: "Fuzzy-find files by path in a folder, best match first. Respects .gitignore. Returns each file's path, score and the matched character ranges.",
+    readOnly: true,
+    properties: {
+      query: {
+        type: "string",
+        description: "Part of a file name or path, e.g. `mcp tools`"
+      },
+      folder: FOLDER,
+      limit: limit("find_files", "Files")
+    },
+    required: ["query"]
+  },
+  {
+    name: "search_text",
+    description: "Search the contents of a folder's files with ripgrep. Respects .gitignore; skips hidden and binary files. Returns each matching file with its matching lines (1-based) and match ranges; `truncated` marks where the search stopped.",
+    readOnly: true,
+    properties: {
+      query: {
+        type: "string",
+        description: "A literal string, or a regex when `regex` is true"
+      },
+      folder: FOLDER,
+      regex: {
+        type: "boolean",
+        description: "Read `query` as a regex (ripgrep's syntax)"
+      },
+      case_sensitive: {
+        type: "boolean",
+        description: "Match case; ignored when omitted"
+      },
+      globs: {
+        type: "string[]",
+        description: "ripgrep globs limiting the files; a leading `!` excludes"
+      },
+      limit: limit("search_text", "Files")
+    },
+    required: ["query"]
+  },
+  {
+    name: "search_structural",
+    description: "Search a folder's code by syntax with an ast-grep pattern, e.g. `console.log($A)`. Respects .gitignore. Returns each matching file with its matching lines and match ranges, as search_text does.",
+    readOnly: true,
+    properties: {
+      pattern: {
+        type: "string",
+        description: "An ast-grep pattern; `$A` matches one node"
+      },
+      folder: FOLDER,
+      lang: {
+        type: "string",
+        enum: STRUCTURAL_LANGS,
+        description: "The pattern's language; each file's own, from its extension, when omitted"
+      },
+      limit: limit("search_structural", "Files")
+    },
+    required: ["pattern"]
+  },
+  {
+    name: "list_files",
+    description: "Every file in a folder that ripgrep would search: .gitignore respected, hidden files skipped. Paths in no particular order; `truncated` when cut at the limit.",
+    readOnly: true,
+    properties: {
+      folder: FOLDER,
+      limit: limit("list_files", "Paths")
+    }
+  },
+  {
+    name: "search_sessions",
+    description: "Search this machine's Claude Code, Codex and OpenCode conversations for a phrase in what was said (prompts, answers, tool calls and output), newest first. Returns each session's harness, id, title, last write and up to 3 matching snippets.",
+    readOnly: true,
+    properties: {
+      query: { type: "string", description: "A literal phrase, not a regex" },
+      limit: limit("search_sessions", "Sessions"),
+      folder: {
+        type: "string",
+        description: "Only sessions run in this folder (an absolute path, e.g. the repo's root); every folder's when omitted"
+      }
+    },
+    required: ["query"]
+  }
+];
+// packages/protocol/src/tools/schema.ts
+function paramSchema(param) {
+  const described = (schema) => param.description ? { ...schema, description: param.description } : schema;
+  switch (param.type) {
+    case "string":
+      return described(param.enum ? { type: "string", enum: [...param.enum] } : { type: "string" });
+    case "boolean":
+      return described({ type: "boolean" });
+    case "integer":
+      return described({
+        type: "integer",
+        ...param.minimum !== undefined ? { minimum: param.minimum } : {},
+        ...param.maximum !== undefined ? { maximum: param.maximum } : {}
+      });
+    case "string[]":
+      return described({ type: "array", items: { type: "string" } });
+    case "nullable-string":
+      return described({ type: ["string", "null"] });
+    case "string-map":
+      return described({
+        type: "object",
+        additionalProperties: { type: ["string", "null"] }
+      });
+    case "object":
+      return described(toolInputSchema(param));
+    case "object[]":
+      return described({
+        type: "array",
+        items: toolInputSchema(param),
+        ...param.minItems ? { minItems: param.minItems } : {}
+      });
+  }
+}
+function toolInputSchema(shape) {
+  const properties = {};
+  for (const [name, param] of Object.entries(shape.properties))
+    properties[name] = paramSchema(param);
+  return {
+    type: "object",
+    properties,
+    ...shape.required?.length ? { required: [...shape.required] } : {},
+    additionalProperties: false
+  };
+}
+// apps/desktop/electron/main/git/runner.ts
+var import_node_child_process = require("node:child_process");
+var MAX_OUTPUT = 32 * 1024 * 1024;
+var DEFAULT_TIMEOUT = 15000;
+var BASE_FLAGS = [
+  "-c",
+  "core.quotepath=false",
+  "-c",
+  "color.ui=never",
+  "-c",
+  "core.fsmonitor=false",
+  "-c",
+  "log.showSignature=false",
+  "--no-pager",
+  "--literal-pathspecs"
+];
+var READ_FLAGS = [
+  ...BASE_FLAGS,
+  "--no-optional-locks",
+  "-c",
+  "core.hooksPath=/dev/null"
+];
+class GitMissingError extends Error {
+}
+function exec(flags, cwd, args, options) {
+  const ok = options.ok ?? [0];
+  return new Promise((resolve, reject) => {
+    import_node_child_process.execFile("git", [...flags, ...args], {
+      cwd,
+      timeout: options.timeout ?? DEFAULT_TIMEOUT,
+      maxBuffer: options.maxBuffer ?? MAX_OUTPUT,
+      windowsHide: true,
+      encoding: options.encoding ?? "utf8",
+      env: options.env ?? process.env
+    }, (error, stdout, stderr) => {
+      if (!error)
+        return resolve({ stdout, code: 0 });
+      const code = typeof error.code === "number" ? error.code : null;
+      if (error.code === "ENOENT")
+        return reject(new GitMissingError("git is not installed."));
+      if (code !== null && ok.includes(code))
+        return resolve({ stdout, code });
+      const message = options.encoding === "base64" ? Buffer.from(stderr, "base64").toString("utf8") : stderr || stdout;
+      const said = (message || error.message).trim();
+      reject(new Error(said.split(`
+`).slice(-6).join(`
+`).slice(0, 800)));
+    });
   });
 }
-var CLAUDE_MODELS, CODEX_MODELS, OPENCODE_MODELS, claudeList, codexList, opencodeList, everyModel, listeners, TOOL_TEXT_MAX, CONVERSATION_READ_MAX, PASTE_MAX, ACRONYMS, PREVIEW_HOSTS, MENTION;
-var init_conversation = __esm(() => {
-  CLAUDE_MODELS = [
-    { id: "claude-opus-5-5", label: "Opus 5.5", agent: "claude" },
-    { id: "claude-fable-5-2", label: "Fable 5.2", agent: "claude" },
-    { id: "claude-sonnet-5-5", label: "Sonnet 5.5", agent: "claude" },
-    { id: "claude-haiku-5-5", label: "Haiku 5.5", agent: "claude" },
-    { id: "claude-fable-5-1", label: "Fable 5.1", agent: "claude", legacy: true },
-    { id: "claude-haiku-4-5", label: "Haiku 4.5", agent: "claude", legacy: true },
-    { id: "claude-sonnet-5", label: "Sonnet 5", agent: "claude", legacy: true },
-    { id: "claude-opus-5", label: "Opus 5", agent: "claude", legacy: true },
-    { id: "claude-fable-5", label: "Fable 5", agent: "claude", legacy: true },
-    { id: "claude-opus-4-8", label: "Opus 4.8", agent: "claude", legacy: true },
-    { id: "claude-opus-4-7", label: "Opus 4.7", agent: "claude", legacy: true },
-    { id: "claude-opus-4-6", label: "Opus 4.6", agent: "claude", legacy: true },
-    {
-      id: "claude-sonnet-4-6",
-      label: "Sonnet 4.6",
-      agent: "claude",
-      legacy: true
-    }
-  ];
-  CODEX_MODELS = [
-    { id: "gpt-6.1-sol", label: "GPT-6.1-Sol", agent: "codex" },
-    { id: "gpt-6-astra", label: "GPT-6-Astra", agent: "codex" },
-    { id: "gpt-6-sol", label: "GPT-6-Sol", agent: "codex" },
-    { id: "gpt-6-luna", label: "GPT-6-Luna", agent: "codex" },
-    { id: "gpt-5.6-sol", label: "GPT-5.6-Sol", agent: "codex", legacy: true },
-    { id: "gpt-5.6-terra", label: "GPT-5.6-Terra", agent: "codex", legacy: true },
-    { id: "gpt-5.6-luna", label: "GPT-5.6-Luna", agent: "codex", legacy: true }
-  ];
-  OPENCODE_MODELS = [];
-  claudeList = CLAUDE_MODELS;
-  codexList = CODEX_MODELS;
-  opencodeList = OPENCODE_MODELS;
-  everyModel = [
-    ...claudeList,
-    ...codexList,
-    ...opencodeList
-  ];
-  listeners = new Set;
-  TOOL_TEXT_MAX = 16 * 1024;
-  CONVERSATION_READ_MAX = 32 * 1024 * 1024;
-  PASTE_MAX = 5 * 1024 * 1024;
-  ACRONYMS = new Set([
-    "ai",
-    "api",
-    "ci",
-    "cli",
-    "css",
-    "html",
-    "json",
-    "mcp",
-    "pr",
-    "sdk",
-    "ui",
-    "url",
-    "ux"
-  ]);
-  PREVIEW_HOSTS = new Set([
-    "github.com",
-    "www.github.com",
-    "gist.github.com"
-  ]);
-  MENTION = /(?<=^|\s)@(?:"((?:[^"\\]|\\.)*)"|(\S+))/g;
-});
+function gitRead(cwd, args, options = {}) {
+  return exec(READ_FLAGS, cwd, args, options);
+}
+async function gitReadOut(cwd, args, options = {}) {
+  return (await gitRead(cwd, args, options)).stdout;
+}
 
-// apps/desktop/shared/orchestration.ts
-var CONTROL_INPUT_MAX, LOOPBACK_HOSTS;
-var init_orchestration = __esm(() => {
-  init_conversation();
-  CONTROL_INPUT_MAX = 256 * 1024;
-  LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
-});
+// apps/desktop/electron/main/git/trust-gate.ts
+var import_promises2 = require("node:fs/promises");
+var import_node_path3 = require("node:path");
 
 // apps/desktop/electron/main/paths.ts
+var import_node_os = require("node:os");
+var import_node_path = require("node:path");
+
+// apps/desktop/shared/conversation.ts
+var CLAUDE_MODELS = [
+  { id: "claude-opus-5-5", label: "Opus 5.5", agent: "claude" },
+  { id: "claude-fable-5-2", label: "Fable 5.2", agent: "claude" },
+  { id: "claude-sonnet-5-5", label: "Sonnet 5.5", agent: "claude" },
+  { id: "claude-haiku-5-5", label: "Haiku 5.5", agent: "claude" },
+  { id: "claude-fable-5-1", label: "Fable 5.1", agent: "claude", legacy: true },
+  { id: "claude-haiku-4-5", label: "Haiku 4.5", agent: "claude", legacy: true },
+  { id: "claude-sonnet-5", label: "Sonnet 5", agent: "claude", legacy: true },
+  { id: "claude-opus-5", label: "Opus 5", agent: "claude", legacy: true },
+  { id: "claude-fable-5", label: "Fable 5", agent: "claude", legacy: true },
+  { id: "claude-opus-4-8", label: "Opus 4.8", agent: "claude", legacy: true },
+  { id: "claude-opus-4-7", label: "Opus 4.7", agent: "claude", legacy: true },
+  { id: "claude-opus-4-6", label: "Opus 4.6", agent: "claude", legacy: true },
+  {
+    id: "claude-sonnet-4-6",
+    label: "Sonnet 4.6",
+    agent: "claude",
+    legacy: true
+  }
+];
+var CODEX_MODELS = [
+  { id: "gpt-6.1-sol", label: "GPT-6.1-Sol", agent: "codex" },
+  { id: "gpt-6-astra", label: "GPT-6-Astra", agent: "codex" },
+  { id: "gpt-6-sol", label: "GPT-6-Sol", agent: "codex" },
+  { id: "gpt-6-luna", label: "GPT-6-Luna", agent: "codex" },
+  { id: "gpt-5.6-sol", label: "GPT-5.6-Sol", agent: "codex", legacy: true },
+  { id: "gpt-5.6-terra", label: "GPT-5.6-Terra", agent: "codex", legacy: true },
+  { id: "gpt-5.6-luna", label: "GPT-5.6-Luna", agent: "codex", legacy: true }
+];
+var OPENCODE_MODELS = [];
+var claudeList = CLAUDE_MODELS;
+var codexList = CODEX_MODELS;
+var opencodeList = OPENCODE_MODELS;
+var everyModel = [
+  ...claudeList,
+  ...codexList,
+  ...opencodeList
+];
+var listeners = new Set;
+var TOOL_TEXT_MAX = 16 * 1024;
+var CONVERSATION_READ_MAX = 32 * 1024 * 1024;
+var PASTE_MAX = 5 * 1024 * 1024;
+var ACRONYMS = new Set([
+  "ai",
+  "api",
+  "ci",
+  "cli",
+  "css",
+  "html",
+  "json",
+  "mcp",
+  "pr",
+  "sdk",
+  "ui",
+  "url",
+  "ux"
+]);
+var PREVIEW_HOSTS = new Set([
+  "github.com",
+  "www.github.com",
+  "gist.github.com"
+]);
+
+// apps/desktop/shared/orchestration.ts
+var CONTROL_INPUT_MAX = 256 * 1024;
+var LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+// apps/desktop/electron/main/paths.ts
+var APP_HOME_NAME = ".lanew";
+var homeName = APP_HOME_NAME;
 function appHomeDir() {
   return process.env.LANEWORK_HOME || import_node_path.join(import_node_os.homedir(), homeName);
 }
-var import_node_os, import_node_path, APP_HOME_NAME = ".lanew", homeName;
-var init_paths = __esm(() => {
-  init_orchestration();
-  import_node_os = require("node:os");
-  import_node_path = require("node:path");
-  homeName = APP_HOME_NAME;
-});
+
+// apps/desktop/electron/main/git/repo-trust.ts
+var import_promises = require("node:fs/promises");
+var import_node_path2 = require("node:path");
+var OFF = new Set(["false", "no", "off", "0", ""]);
+function risky(key, value) {
+  const lower = key.toLowerCase();
+  if (lower.startsWith("filter."))
+    return true;
+  if (lower === "core.fsmonitor")
+    return !OFF.has(value.trim().toLowerCase());
+  if (lower === "core.hookspath")
+    return true;
+  if (lower === "core.sshcommand")
+    return true;
+  if (lower.startsWith("gpg."))
+    return true;
+  if (lower === "diff.external")
+    return true;
+  if (lower.startsWith("diff.") && (lower.endsWith(".command") || lower.endsWith(".textconv")))
+    return true;
+  return false;
+}
+async function commonDir(folder) {
+  try {
+    const raw = await gitReadOut(folder, ["rev-parse", "--git-common-dir"], {
+      timeout: 5000
+    });
+    const dir = raw.trim();
+    return dir ? import_node_path2.resolve(folder, dir) : null;
+  } catch {
+    return null;
+  }
+}
+async function configFindings(folder) {
+  const raw = await gitReadOut(folder, ["config", "--list", "--show-scope", "-z"], {
+    timeout: 5000
+  });
+  const found = [];
+  const parts = raw.split("\x00");
+  for (let i = 0;i + 1 < parts.length; i += 2) {
+    const scope = parts[i];
+    if (scope !== "local" && scope !== "worktree")
+      continue;
+    const entry = parts[i + 1];
+    const cut = entry.indexOf(`
+`);
+    const key = cut < 0 ? entry : entry.slice(0, cut);
+    const value = cut < 0 ? "true" : entry.slice(cut + 1);
+    if (risky(key, value))
+      found.push({ kind: "config", key, value });
+  }
+  return found;
+}
+async function hookFindings(dir) {
+  const hooks = import_node_path2.join(dir, "hooks");
+  const names = await import_promises.readdir(hooks).catch(() => []);
+  const found = [];
+  for (const name of names.sort()) {
+    if (name.endsWith(".sample"))
+      continue;
+    const info = await import_promises.stat(import_node_path2.join(hooks, name)).catch(() => null);
+    if (!info?.isFile())
+      continue;
+    if (process.platform !== "win32" && (info.mode & 73) === 0)
+      continue;
+    found.push({ kind: "hook", name });
+  }
+  return found;
+}
+async function scanRepoTrust(folder) {
+  const dir = await commonDir(folder);
+  if (!dir)
+    return { risky: false, findings: [], gitDir: null };
+  const [config, hooks] = await Promise.all([
+    configFindings(folder).catch(() => []),
+    hookFindings(dir)
+  ]);
+  const findings = [...config, ...hooks];
+  return { risky: findings.length > 0, findings, gitDir: dir };
+}
+function trustFingerprint(findings) {
+  return findings.map((f) => f.kind === "hook" ? `hook:${f.name}` : `config:${f.key}=${f.value}`).sort().join(`
+`);
+}
+
+class TrustStore {
+  onChange;
+  answers = new Map;
+  constructor(initial = {}, onChange) {
+    this.onChange = onChange;
+    for (const [folder, value] of Object.entries(initial))
+      this.answers.set(import_node_path2.resolve(folder), value);
+  }
+  get(folder) {
+    return this.answers.get(import_node_path2.resolve(folder));
+  }
+  set(folder, answer, scan) {
+    this.answers.set(import_node_path2.resolve(folder), {
+      answer,
+      fingerprint: trustFingerprint(scan.findings)
+    });
+    this.onChange?.(this.toJSON());
+  }
+  forget(folder) {
+    if (this.answers.delete(import_node_path2.resolve(folder)))
+      this.onChange?.(this.toJSON());
+  }
+  async decide(folder) {
+    const scan = await scanRepoTrust(folder);
+    if (!scan.risky)
+      return { kind: "run" };
+    const known = this.get(folder);
+    if (known && known.fingerprint === trustFingerprint(scan.findings))
+      return known.answer === "trusted" ? { kind: "run" } : { kind: "restricted" };
+    return { kind: "ask", scan };
+  }
+  toJSON() {
+    return Object.fromEntries(this.answers);
+  }
+}
+
+// apps/desktop/electron/main/git/trust-gate.ts
+var FRESH_MS = 60000;
+var asker = null;
+var store = null;
+var fresh = new Map;
+var pending = new Map;
+function storeFile() {
+  return import_node_path3.join(appHomeDir(), "repo-trust.json");
+}
+async function save(all) {
+  const file = storeFile();
+  await import_promises2.mkdir(import_node_path3.dirname(file), { recursive: true, mode: 448 });
+  const temp = `${file}.${process.pid}.tmp`;
+  await import_promises2.writeFile(temp, `${JSON.stringify(all, null, 2)}
+`, { mode: 384 });
+  await import_promises2.rename(temp, file);
+}
+function load() {
+  store ??= import_promises2.readFile(storeFile(), "utf8").then((text) => JSON.parse(text)).catch(() => ({})).then((initial) => new TrustStore(initial, (all) => {
+    save(all).catch(() => {});
+  }));
+  return store;
+}
+async function readsAllowed(folder) {
+  return await readsVerdict(folder) === "run";
+}
+function readsVerdict(folder) {
+  const key = import_node_path3.resolve(folder);
+  const until = fresh.get(key);
+  if (until !== undefined && until > Date.now())
+    return Promise.resolve("run");
+  const running = pending.get(key);
+  if (running)
+    return running;
+  const decided = decide(key).catch(() => "unchecked").finally(() => pending.delete(key));
+  pending.set(key, decided);
+  return decided;
+}
+async function decide(folder) {
+  const trust = await load();
+  const verdict = await trust.decide(folder);
+  if (verdict.kind === "run") {
+    fresh.set(folder, Date.now() + FRESH_MS);
+    return "run";
+  }
+  if (verdict.kind === "restricted")
+    return "refused";
+  if (!asker)
+    return "unchecked";
+  const answer = await asker(folder, verdict.scan);
+  trust.set(folder, answer, verdict.scan);
+  if (answer !== "trusted")
+    return "refused";
+  fresh.set(folder, Date.now() + FRESH_MS);
+  return "run";
+}
+
+// apps/desktop/electron/hook/cli.ts
+var import_node_child_process3 = require("node:child_process");
+var import_node_fs3 = require("node:fs");
+var import_node_os5 = require("node:os");
+var import_node_path7 = require("node:path");
+
+// apps/desktop/electron/main/auth/client.ts
+var import_node_os2 = require("node:os");
 
 // apps/desktop/electron/main/http-body.ts
+var JSON_BODY_CAP = 8 * 1024 * 1024;
+var ICON_BODY_CAP = 1024 * 1024;
+var AUTH_BODY_CAP = 64 * 1024;
+var PROBE_BODY_CAP = 64 * 1024;
+
+class BodyTooLargeError extends Error {
+  maxBytes;
+  constructor(maxBytes) {
+    super(`The response was larger than ${maxBytes} bytes.`);
+    this.maxBytes = maxBytes;
+    this.name = "BodyTooLargeError";
+  }
+}
 async function readCappedBytes(response, maxBytes) {
   const declared = Number(response.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) {
@@ -317,23 +984,9 @@ async function readCapped(response, maxBytes) {
 async function readCappedJson(response, maxBytes = JSON_BODY_CAP) {
   return JSON.parse(await readCapped(response, maxBytes));
 }
-var JSON_BODY_CAP, ICON_BODY_CAP, AUTH_BODY_CAP, PROBE_BODY_CAP, BodyTooLargeError;
-var init_http_body = __esm(() => {
-  JSON_BODY_CAP = 8 * 1024 * 1024;
-  ICON_BODY_CAP = 1024 * 1024;
-  AUTH_BODY_CAP = 64 * 1024;
-  PROBE_BODY_CAP = 64 * 1024;
-  BodyTooLargeError = class BodyTooLargeError extends Error {
-    maxBytes;
-    constructor(maxBytes) {
-      super(`The response was larger than ${maxBytes} bytes.`);
-      this.maxBytes = maxBytes;
-      this.name = "BodyTooLargeError";
-    }
-  };
-});
 
 // apps/desktop/electron/main/auth/redirect.ts
+var CALLBACK_PATH = LOOPBACK_CALLBACK_PATH;
 function externalUrlOn(raw, origin) {
   if (typeof raw !== "string" || raw.length > 2048)
     return null;
@@ -353,6 +1006,7 @@ function externalUrlOn(raw, origin) {
     return null;
   return url.toString();
 }
+var USER_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 function looksLikeUserCode(value) {
   if (typeof value !== "string" || value.length !== 9)
     return false;
@@ -360,13 +1014,10 @@ function looksLikeUserCode(value) {
     return false;
   return [...value.replace("-", "")].every((c) => USER_CODE_ALPHABET.includes(c));
 }
-var CALLBACK_PATH, USER_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-var init_redirect = __esm(() => {
-  init_src();
-  CALLBACK_PATH = LOOPBACK_CALLBACK_PATH;
-});
 
 // apps/desktop/electron/main/auth/client.ts
+var LOOPBACK_HOSTS2 = new Set(["127.0.0.1", "[::1]", "localhost"]);
+var refusedApis = new Set;
 function machineFacts(name) {
   const host = import_node_os2.hostname();
   return {
@@ -375,6 +1026,13 @@ function machineFacts(name) {
     os: process.platform,
     arch: process.arch
   };
+}
+
+class UnreachableError extends Error {
+  constructor(api, cause) {
+    super(`Could not reach the control plane at ${api} — check the network, or LANEWORK_API_URL. (${cause instanceof Error ? cause.message : String(cause)})`);
+    this.name = "UnreachableError";
+  }
 }
 function refused(api, status, detail) {
   if (status === 404)
@@ -477,23 +1135,12 @@ async function redeem(api, grant, verifier, signal) {
     throw new Error(`${api} rejected this sign-in — it expired, was already used, or was never approved. Try signing in again.`);
   throw refused(api, status, str(data.error, 200) ?? "");
 }
-var import_node_os2, LOOPBACK_HOSTS2, refusedApis, UnreachableError;
-var init_client = __esm(() => {
-  init_src();
-  init_http_body();
-  init_redirect();
-  import_node_os2 = require("node:os");
-  LOOPBACK_HOSTS2 = new Set(["127.0.0.1", "[::1]", "localhost"]);
-  refusedApis = new Set;
-  UnreachableError = class UnreachableError extends Error {
-    constructor(api, cause) {
-      super(`Could not reach the control plane at ${api} — check the network, or LANEWORK_API_URL. (${cause instanceof Error ? cause.message : String(cause)})`);
-      this.name = "UnreachableError";
-    }
-  };
-});
 
 // apps/desktop/electron/main/auth/loopback.ts
+var import_node_http = require("node:http");
+var PORT_FROM = 8976;
+var PORT_TO = 8986;
+var WAIT_MS = 10 * 60 * 1000;
 function page(heading, body) {
   return `<!doctype html><meta charset="utf-8">
 <title>${heading}</title>
@@ -582,14 +1229,9 @@ async function listenForCallback(input) {
     server.close();
   }
 }
-var import_node_http, PORT_FROM = 8976, PORT_TO = 8986, WAIT_MS;
-var init_loopback = __esm(() => {
-  init_redirect();
-  import_node_http = require("node:http");
-  WAIT_MS = 10 * 60 * 1000;
-});
 
 // apps/desktop/electron/main/auth/pkce.ts
+var import_node_crypto = require("node:crypto");
 function pkcePair() {
   const verifier = import_node_crypto.randomBytes(32).toString("base64url");
   const challenge = import_node_crypto.createHash("sha256").update(verifier).digest().toString("base64url");
@@ -598,12 +1240,13 @@ function pkcePair() {
 function newState() {
   return import_node_crypto.randomBytes(16).toString("base64url");
 }
-var import_node_crypto;
-var init_pkce = __esm(() => {
-  import_node_crypto = require("node:crypto");
-});
+
+// apps/desktop/electron/mcp-local/server.ts
+var import_node_os3 = require("node:os");
 
 // apps/desktop/electron/local-store/driver.ts
+var import_node_module = require("node:module");
+var import_node_path4 = require("node:path");
 function sqliteDriverName() {
   return "Bun" in globalThis ? "bun:sqlite" : "node:sqlite";
 }
@@ -644,13 +1287,8 @@ function openDatabase(path) {
     }
   };
 }
-var import_node_module, import_node_path4;
-var init_driver = __esm(() => {
-  import_node_module = require("node:module");
-  import_node_path4 = require("node:path");
-});
-
 // apps/desktop/electron/local-store/ids.ts
+var import_node_crypto2 = require("node:crypto");
 function uuidv7(now = Date.now()) {
   const bytes = import_node_crypto2.randomBytes(16);
   let ms = BigInt(now);
@@ -663,9 +1301,12 @@ function uuidv7(now = Date.now()) {
   const hex = bytes.toString("hex");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
+var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isUuid(value) {
   return UUID.test(value);
 }
+var RANK_WIDTH = 16;
+var RANK_STEP = 1e6;
 function rankString(value) {
   return String(value).padStart(RANK_WIDTH, "0");
 }
@@ -707,40 +1348,9 @@ function normalizeRepo(remote) {
 function formatTaskId(category, seq) {
   return category.format.replace("{prefix}", category.prefix).replace("{seq}", String(seq).padStart(category.pad, "0"));
 }
-var import_node_crypto2, UUID, RANK_WIDTH = 16, RANK_STEP = 1e6;
-var init_ids = __esm(() => {
-  import_node_crypto2 = require("node:crypto");
-  UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-});
-
 // apps/desktop/electron/local-store/schema.ts
-function userVersion(db) {
-  const row = db.prepare("PRAGMA user_version").get();
-  return Number(row?.user_version ?? 0);
-}
-function migrate(db) {
-  if (userVersion(db) === SCHEMA_VERSION)
-    return SCHEMA_VERSION;
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    const from = userVersion(db);
-    if (from > SCHEMA_VERSION)
-      throw new Error(`local store is at schema ${from}, newer than this build (${SCHEMA_VERSION})`);
-    for (let version = from;version < SCHEMA_VERSION; version += 1) {
-      db.exec(MIGRATIONS[version]);
-    }
-    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-  return SCHEMA_VERSION;
-}
-var MIGRATIONS, SCHEMA_VERSION;
-var init_schema = __esm(() => {
-  MIGRATIONS = [
-    `
+var MIGRATIONS = [
+  `
   CREATE TABLE workspace (
     id          TEXT PRIMARY KEY,
     slug        TEXT NOT NULL,
@@ -792,7 +1402,7 @@ var init_schema = __esm(() => {
   );
   INSERT INTO meta(key, value) VALUES ('change_seq', '0');
   `,
-    `
+  `
   ALTER TABLE workspace RENAME TO projects;
   ALTER TABLE work_item RENAME TO project_issues;
   ALTER TABLE project_issues RENAME COLUMN workspace_id TO project_id;
@@ -811,86 +1421,108 @@ var init_schema = __esm(() => {
   CREATE INDEX project_issues_changes ON project_issues(project_id, change_seq);
   CREATE INDEX project_issues_parent ON project_issues(parent_id);
   `
-  ];
-  SCHEMA_VERSION = MIGRATIONS.length;
-});
+];
+var SCHEMA_VERSION = MIGRATIONS.length;
+function userVersion(db) {
+  const row = db.prepare("PRAGMA user_version").get();
+  return Number(row?.user_version ?? 0);
+}
+function migrate(db) {
+  if (userVersion(db) === SCHEMA_VERSION)
+    return SCHEMA_VERSION;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const from = userVersion(db);
+    if (from > SCHEMA_VERSION)
+      throw new Error(`local store is at schema ${from}, newer than this build (${SCHEMA_VERSION})`);
+    for (let version = from;version < SCHEMA_VERSION; version += 1) {
+      db.exec(MIGRATIONS[version]);
+    }
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return SCHEMA_VERSION;
+}
+// apps/desktop/electron/local-store/store.ts
+var import_node_fs = require("node:fs");
+var import_node_path5 = require("node:path");
 
 // apps/desktop/electron/main/projects/review-defaults.ts
-var DEFAULT_COLUMNS, TASK_ID_FORMAT = "{prefix}-{seq}", TASK_ID_PAD = 2, DEFAULT_CATEGORIES, TAG_MAX = 3;
-var init_review_defaults = __esm(() => {
-  DEFAULT_COLUMNS = [
-    {
-      key: "backlog",
-      name: "Backlog",
-      role: "intake",
-      icon: "idea",
-      tone: "violet"
-    },
-    {
-      key: "todo",
-      name: "To-Do",
-      role: "start",
-      icon: "circle-dashed",
-      tone: "amber"
-    },
-    {
-      key: "processing",
-      name: "In Progress",
-      role: "active",
-      icon: "progress",
-      tone: "blue"
-    },
-    {
-      key: "review",
-      name: "Review",
-      role: "review",
-      icon: "progress",
-      tone: "teal"
-    },
-    { key: "done", name: "Done", role: "done", icon: "check", tone: "emerald" },
-    {
-      key: "dropped",
-      name: "Archived",
-      role: "archive",
-      icon: "archive",
-      tone: "neutral"
-    }
-  ];
-  DEFAULT_CATEGORIES = [
-    {
-      key: "product-design",
-      name: "Product Design",
-      prefix: "PD",
-      tone: "violet"
-    },
-    { key: "frontend", name: "Frontend", prefix: "FE", tone: "sky" },
-    { key: "backend", name: "Backend", prefix: "BE", tone: "emerald" },
-    {
-      key: "infrastructure",
-      name: "Infrastructure",
-      prefix: "INF",
-      tone: "amber"
-    },
-    { key: "documentation", name: "Documentation", prefix: "DOC", tone: "teal" }
-  ].map((category) => ({
-    ...category,
-    format: TASK_ID_FORMAT,
-    pad: TASK_ID_PAD
-  }));
-});
+var DEFAULT_COLUMNS = [
+  {
+    key: "backlog",
+    name: "Backlog",
+    role: "intake",
+    icon: "idea",
+    tone: "violet"
+  },
+  {
+    key: "todo",
+    name: "To-Do",
+    role: "start",
+    icon: "circle-dashed",
+    tone: "amber"
+  },
+  {
+    key: "processing",
+    name: "In Progress",
+    role: "active",
+    icon: "progress",
+    tone: "blue"
+  },
+  {
+    key: "review",
+    name: "Review",
+    role: "review",
+    icon: "progress",
+    tone: "teal"
+  },
+  { key: "done", name: "Done", role: "done", icon: "check", tone: "emerald" },
+  {
+    key: "dropped",
+    name: "Archived",
+    role: "archive",
+    icon: "archive",
+    tone: "neutral"
+  }
+];
+var TASK_ID_FORMAT = "{prefix}-{seq}";
+var TASK_ID_PAD = 2;
+var DEFAULT_CATEGORIES = [
+  {
+    key: "product-design",
+    name: "Product Design",
+    prefix: "PD",
+    tone: "violet"
+  },
+  { key: "frontend", name: "Frontend", prefix: "FE", tone: "sky" },
+  { key: "backend", name: "Backend", prefix: "BE", tone: "emerald" },
+  {
+    key: "infrastructure",
+    name: "Infrastructure",
+    prefix: "INF",
+    tone: "amber"
+  },
+  { key: "documentation", name: "Documentation", prefix: "DOC", tone: "teal" }
+].map((category) => ({
+  ...category,
+  format: TASK_ID_FORMAT,
+  pad: TASK_ID_PAD
+}));
+var TAG_MAX = 3;
 
 // apps/desktop/electron/local-store/types.ts
-var LocalStoreError;
-var init_types = __esm(() => {
-  LocalStoreError = class LocalStoreError extends Error {
-    code;
-    constructor(code, message) {
-      super(message);
-      this.name = "LocalStoreError";
-      this.code = code;
-    }
-  };
-});
+class LocalStoreError extends Error {
+  code;
+  constructor(code, message) {
+    super(message);
+    this.name = "LocalStoreError";
+    this.code = code;
+  }
+}
 
 // apps/desktop/electron/local-store/cards.ts
 function invalid(message) {
@@ -1093,6 +1725,7 @@ function buildDispatch(card, streams, checklist) {
   }
   return { waves: streamWaves(streams), briefs };
 }
+var CHECKLIST_TEXT_MAX = 2000;
 function normalizeChecklist(input, options) {
   if (input === undefined || input === null)
     return [];
@@ -1259,13 +1892,9 @@ function toCardDetail(row) {
     commentCount: 0
   };
 }
-var CHECKLIST_TEXT_MAX = 2000;
-var init_cards = __esm(() => {
-  init_src();
-  init_types();
-});
 
 // apps/desktop/electron/local-store/store.ts
+var DATA_FILE_NAME = "data.sqlite";
 function localStorePath() {
   return import_node_path5.join(appHomeDir(), DATA_FILE_NAME);
 }
@@ -1839,3319 +2468,7 @@ function openLocalStore(options = {}) {
   }
   return new LocalStore(db, path);
 }
-var import_node_fs, import_node_path5, DATA_FILE_NAME = "data.sqlite";
-var init_store = __esm(() => {
-  init_paths();
-  init_review_defaults();
-  init_cards();
-  init_driver();
-  init_ids();
-  init_schema();
-  init_types();
-  import_node_fs = require("node:fs");
-  import_node_path5 = require("node:path");
-});
-
-// apps/desktop/electron/local-store/index.ts
-var init_local_store = __esm(() => {
-  init_driver();
-  init_ids();
-  init_schema();
-  init_store();
-  init_types();
-});
-
-// apps/desktop/electron/main/agent-home.ts
-function codexHome(home = import_node_os3.homedir()) {
-  return process.env.CODEX_HOME || import_node_path6.join(home, ".codex");
-}
-async function readText(path, max = CONFIG_MAX_BYTES) {
-  try {
-    const info = await import_promises3.stat(path);
-    if (!info.isFile() || info.size > max)
-      return null;
-    return await import_promises3.readFile(path, "utf8");
-  } catch {
-    return null;
-  }
-}
-var import_promises3, import_node_os3, import_node_path6, claudeDir = (home = import_node_os3.homedir()) => process.env.CLAUDE_CONFIG_DIR || import_node_path6.join(home, ".claude"), CONFIG_MAX_BYTES;
-var init_agent_home = __esm(() => {
-  import_promises3 = require("node:fs/promises");
-  import_node_os3 = require("node:os");
-  import_node_path6 = require("node:path");
-  CONFIG_MAX_BYTES = 512 * 1024;
-});
-
-// node_modules/.bun/ignore@7.0.14/node_modules/ignore/index.js
-var require_ignore = __commonJS(function(exports2, module2) {
-  function makeArray(subject) {
-    return Array.isArray(subject) ? subject : [subject];
-  }
-  var UNDEFINED = undefined;
-  var EMPTY = "";
-  var SPACE = " ";
-  var ESCAPE = "\\";
-  var REGEX_LITERAL_SPECIAL = /[.*+?()[\]{}^$|\\/]/;
-  var BOM = "\uFEFF";
-  var REGEX_INVALID_TRAILING_BACKSLASH = /(?:[^\\]|^)\\$/;
-  var REGEX_ANCHORED_GLOBSTAR = /^\/\*{2,}$/;
-  var REGEX_REPLACE_LEADING_EXCAPED_EXCLAMATION = /^\\!/;
-  var REGEX_REPLACE_LEADING_EXCAPED_HASH = /^\\#/;
-  var REGEX_SPLITALL_CRLF = /\r?\n/g;
-  var DOUBLE_SLASH = "//";
-  var SLASH_CODE = 47;
-  var DOT_CODE = 46;
-  var SLASH = "/";
-  var TMP_KEY_IGNORE = "node-ignore";
-  if (typeof Symbol !== "undefined") {
-    TMP_KEY_IGNORE = Symbol.for("node-ignore");
-  }
-  var KEY_IGNORE = TMP_KEY_IGNORE;
-  var define = (object, key, value) => {
-    Object.defineProperty(object, key, { value });
-    return value;
-  };
-  var RETURN_FALSE = () => false;
-  var POSIX_CLASSES = {
-    alnum: "0-9A-Za-z",
-    alpha: "A-Za-z",
-    blank: " \\t",
-    cntrl: "\\x00-\\x1f\\x7f",
-    digit: "0-9",
-    graph: "!-.0-~",
-    lower: "a-z",
-    print: " -.0-~",
-    punct: "!-.:-@\\[-`{-~",
-    space: " \\t\\n\\r",
-    upper: "A-Z",
-    xdigit: "0-9A-Fa-f"
-  };
-  var CLASS_MEMBERS_TO_ESCAPE = "\\]^-[";
-  var escapeMember = (char) => CLASS_MEMBERS_TO_ESCAPE.indexOf(char) < 0 ? char : ESCAPE + char;
-  var NON_SLASH = "(?!\\/)";
-  var classSource = (negated, body) => {
-    if (negated) {
-      return `[^\\/${body}]`;
-    }
-    const source = `[${body}]`;
-    return new RegExp(source).test("/") ? NON_SLASH + source : source;
-  };
-  var scanBracket = (pattern, start) => {
-    const { length } = pattern;
-    let index = start + 1;
-    let negated = EMPTY;
-    const lead = pattern[index];
-    if (lead === "!" || lead === "^") {
-      negated = "^";
-      index++;
-    }
-    let body = EMPTY;
-    let prev = EMPTY;
-    for (;; ) {
-      const char = pattern[index];
-      if (char === UNDEFINED) {
-        return null;
-      }
-      if (char === ESCAPE) {
-        const escaped = pattern[index + 1];
-        if (escaped === UNDEFINED) {
-          return null;
-        }
-        body += escapeMember(escaped);
-        prev = escaped;
-        index++;
-      } else if (char === "-" && prev && index + 1 < length && pattern[index + 1] !== "]") {
-        index++;
-        let to = pattern[index];
-        if (to === ESCAPE) {
-          to = pattern[index += 1];
-        }
-        if (prev <= to) {
-          body += `-${escapeMember(to)}`;
-        }
-        prev = EMPTY;
-      } else if (char === "[" && pattern[index + 1] === ":") {
-        const nameStart = index + 2;
-        let end = nameStart;
-        while (end < length && pattern[end] !== "]") {
-          end++;
-        }
-        if (end === length) {
-          return null;
-        }
-        if (end > nameStart && pattern[end - 1] === ":") {
-          const name = pattern.slice(nameStart, end - 1);
-          if (!Object.prototype.hasOwnProperty.call(POSIX_CLASSES, name)) {
-            return null;
-          }
-          body += POSIX_CLASSES[name];
-          prev = EMPTY;
-          index = end;
-        } else {
-          body += escapeMember("[");
-          prev = "[";
-          index = nameStart - 2;
-        }
-      } else {
-        body += escapeMember(char);
-        prev = char;
-      }
-      index++;
-      if (pattern[index] === "]") {
-        return {
-          end: index,
-          source: classSource(negated, body)
-        };
-      }
-    }
-  };
-  var NEVER_MATCH = "[]";
-  var PLACEHOLDER = "\x00";
-  var REGEX_RESTORE_PLACEHOLDER = new RegExp(`${PLACEHOLDER}(\\d+)${PLACEHOLDER}`, "g");
-  var TRAILING_WILDCARD = "";
-  var TRAILING_DOUBLESTAR = "";
-  var isReserved = (char) => char === PLACEHOLDER || char === TRAILING_WILDCARD || char === TRAILING_DOUBLESTAR;
-  var extractBrackets = (pattern) => {
-    const sources = [];
-    const hold = (source) => `${PLACEHOLDER}${sources.push(source) - 1}${PLACEHOLDER}`;
-    const { length } = pattern;
-    let out = EMPTY;
-    let index = 0;
-    while (index < length) {
-      const char = pattern[index];
-      if (char === ESCAPE) {
-        const escaped = pattern[index + 1];
-        if (escaped === UNDEFINED || escaped === SLASH && index + 2 === length) {
-          out += hold(NEVER_MATCH);
-        } else if (escaped === "*" || escaped === "[" || escaped === SPACE) {
-          out += pattern.slice(index, index + 2);
-        } else {
-          out += hold(REGEX_LITERAL_SPECIAL.test(escaped) ? ESCAPE + escaped : isReserved(escaped) ? `[${escaped}]` : escaped);
-        }
-        index += 2;
-      } else if (isReserved(char)) {
-        out += hold(`[${char}]`);
-        index++;
-      } else if (char === "[") {
-        const scanned = scanBracket(pattern, index);
-        if (scanned === null) {
-          out += hold(NEVER_MATCH);
-          index = length;
-        } else {
-          out += hold(scanned.source);
-          index = scanned.end + 1;
-        }
-      } else {
-        out += char;
-        index++;
-      }
-    }
-    return {
-      source: out,
-      sources
-    };
-  };
-  var DIRECT = null;
-  var REGEX_INNER_SLASH = /\/(?!$)/;
-  var REPLACERS = [
-    [
-      /(\\+)( ?)/g,
-      (_, run, space) => space ? run.slice(0, run.length - run.length % 2) + SPACE : run,
-      ESCAPE + SPACE
-    ],
-    [
-      /(^|\/)\*{3,}(?=\/|$)/g,
-      (_, start) => `${start}**`,
-      "*"
-    ],
-    [
-      /[\\$.|*+(){^]/g,
-      (match) => `\\${match}`
-    ],
-    [
-      /(?!\\)\?/g,
-      () => "[^/]",
-      "?"
-    ],
-    [
-      /^\//,
-      () => "^",
-      SLASH
-    ],
-    [
-      /\//g,
-      () => "\\/",
-      SLASH
-    ],
-    [
-      /^\^*(?:\\\*\\\*\\\/)+/,
-      () => "^(?:.*\\/)?",
-      "*"
-    ],
-    [
-      DIRECT,
-      (source, pattern) => {
-        if (!source || source[0] === "^") {
-          return source;
-        }
-        const anchor = !REGEX_INNER_SLASH.test(pattern) ? "(?:^|\\/)" : "^";
-        return anchor + source;
-      }
-    ],
-    [
-      /\\\/\\\*\\\*(?=\\\/|$)/g,
-      (_, index, str) => index + 6 < str.length ? str.slice(index + 6) === "\\/" ? "(?:\\/[^\\/]+)+" : "(?:\\/[^\\/]+)*" : `\\/${TRAILING_DOUBLESTAR}`,
-      "*"
-    ],
-    [
-      /(^|[^\\]+)(\\\*)+(?=.+)/g,
-      (_, p1, p2) => {
-        const unescaped = p2.replace(/\\\*/g, "[^\\/]*");
-        return p1 + unescaped;
-      },
-      "*"
-    ],
-    [
-      /(^|[^\\])((?:\\\\)*)\\\*$/,
-      (match, p1, p2) => p2 === EMPTY ? p1 + TRAILING_WILDCARD : match,
-      "*"
-    ],
-    [
-      /\\\\\\(?=[$.|*+(){^])/g,
-      () => ESCAPE,
-      ESCAPE + ESCAPE
-    ],
-    [
-      /\\\\/g,
-      () => ESCAPE,
-      ESCAPE + ESCAPE
-    ],
-    [
-      /\\\[([^\]/]*?)($|\])/g,
-      (match, range, close) => `\\[${range}${close}`,
-      "["
-    ],
-    [
-      DIRECT,
-      (source) => {
-        const last = source[source.length - 1];
-        if (!last || last === TRAILING_WILDCARD || last === TRAILING_DOUBLESTAR) {
-          return source;
-        }
-        return last === SLASH ? `${source}$` : `${source}(?=$|\\/$)`;
-      }
-    ]
-  ];
-  var REGEX_REPLACE_TRAILING_WILDCARD = /(^|\\\/)?\uE000$/;
-  var MODE_IGNORE = "regex";
-  var MODE_CHECK_IGNORE = "checkRegex";
-  var UNDERSCORE = "_";
-  var replaceTrailingWildcard = (_, p1) => {
-    const prefix = p1 ? `${p1}[^/]+` : "[^/]*";
-    return `${prefix}(?=$|\\/$)`;
-  };
-  var REGEX_REPLACE_TRAILING_DOUBLESTAR = /\uE001$/;
-  var replaceTrailingDoublestar = () => ".+(?=$|\\/$)";
-  var WILDCARD = "[^\\/]*";
-  var separatorAfter = (run, at) => {
-    let separator = EMPTY;
-    for (let index = at + 1;index < run.length && !run[index].wildcard; index++) {
-      separator += run[index].single;
-    }
-    return separator;
-  };
-  var pinWildcards = (source) => {
-    if (source.indexOf(WILDCARD) < 0) {
-      return source;
-    }
-    const tokens = [];
-    const { length } = source;
-    let index = 0;
-    while (index < length) {
-      const char = source[index];
-      if (source.startsWith(WILDCARD, index)) {
-        tokens.push({ wildcard: true });
-        index += WILDCARD.length;
-      } else if (char === "[") {
-        let end = index + 1;
-        if (source[end] === "^") {
-          end++;
-        }
-        if (source[end] === "]") {
-          end++;
-        }
-        while (end < length && source[end] !== "]") {
-          end += source[end] === ESCAPE ? 2 : 1;
-        }
-        end++;
-        tokens.push({ single: source.slice(index, end) });
-        index = end;
-      } else if (char === ESCAPE) {
-        tokens.push({ single: source.slice(index, index + 2) });
-        index += 2;
-      } else if (char === "(") {
-        let depth = 0;
-        let end = index;
-        do {
-          if (source[end] === ESCAPE) {
-            end++;
-          } else if (source[end] === "(") {
-            depth++;
-          } else if (source[end] === ")") {
-            depth--;
-          }
-          end++;
-        } while (end < length && depth > 0);
-        if ("*+?".indexOf(source[end]) >= 0) {
-          end++;
-        }
-        tokens.push({ boundary: source.slice(index, end) });
-        index = end;
-      } else if (char === "^" || char === "$") {
-        tokens.push({ boundary: char });
-        index++;
-      } else {
-        tokens.push({ single: char });
-        index++;
-      }
-    }
-    let out = EMPTY;
-    let run = [];
-    const flush = () => {
-      let lastWildcard;
-      run.forEach((token, at) => {
-        if (token.wildcard) {
-          lastWildcard = at;
-        }
-      });
-      run.forEach((token, at) => {
-        if (!token.wildcard) {
-          out += token.single;
-          return;
-        }
-        out += at === lastWildcard ? WILDCARD : `(?:(?!${separatorAfter(run, at)})[^\\/])*`;
-      });
-      run = [];
-    };
-    tokens.forEach((token) => {
-      if (token.boundary === undefined) {
-        run.push(token);
-        return;
-      }
-      flush();
-      out += token.boundary;
-    });
-    flush();
-    return out;
-  };
-  var makeRegexPrefix = (pattern) => {
-    if (REGEX_ANCHORED_GLOBSTAR.test(pattern)) {
-      pattern = "**";
-    }
-    const { source, sources } = extractBrackets(pattern);
-    const replaced = REPLACERS.reduce((prev, [matcher, replacer, required]) => {
-      if (matcher === DIRECT) {
-        return replacer(prev, pattern);
-      }
-      if (required !== UNDEFINED && prev.indexOf(required) < 0) {
-        return prev;
-      }
-      return matcher.test(prev) ? prev.replace(matcher, replacer.bind(pattern)) : prev;
-    }, source);
-    return sources.length ? replaced.replace(REGEX_RESTORE_PLACEHOLDER, (match, index) => sources[index]) : replaced;
-  };
-  var checkSourceOf = (body, prefix) => {
-    if (body[body.length - 1] === SLASH) {
-      prefix = makeRegexPrefix(body.slice(0, -1));
-    }
-    const head = prefix.slice(0, -1);
-    const last = prefix[prefix.length - 1];
-    return last === TRAILING_WILDCARD ? `${head}$` : last === TRAILING_DOUBLESTAR ? `${head}.*$` : NEVER_MATCH;
-  };
-  var matchesBasename = (body) => {
-    const index = body.indexOf(SLASH);
-    return index < 0 || index === body.length - 1;
-  };
-  var basenameOf = (path) => {
-    const end = path.length - 1;
-    const index = path.lastIndexOf(SLASH, path[end] === SLASH ? end - 1 : end);
-    return index < 0 ? path : path.slice(index + 1);
-  };
-  var parentOf = (path) => {
-    if (path.charCodeAt(0) === SLASH_CODE || path.indexOf(DOUBLE_SLASH) >= 0) {
-      const slices = path.split(SLASH).filter(Boolean);
-      slices.pop();
-      return slices.length ? slices.join(SLASH) + SLASH : EMPTY;
-    }
-    const end = path.length - 1;
-    const cut = path.lastIndexOf(SLASH, path.charCodeAt(end) === SLASH_CODE ? end - 1 : end);
-    return cut < 0 ? EMPTY : path.slice(0, cut + 1);
-  };
-  var isString = (subject) => typeof subject === "string";
-  var checkPattern = (pattern) => pattern && isString(pattern) && !REGEX_INVALID_TRAILING_BACKSLASH.test(pattern);
-  var splitPattern = (pattern) => pattern.split(REGEX_SPLITALL_CRLF).filter(Boolean);
-
-  class IgnoreRule {
-    constructor(pattern, mark, body, ignoreCase, negative, prefix) {
-      this.pattern = pattern;
-      this.mark = mark;
-      this.negative = negative;
-      define(this, "body", body);
-      define(this, "ignoreCase", ignoreCase);
-      define(this, "regexPrefix", prefix);
-    }
-    get _basenameOnly() {
-      return define(this, "_basenameOnly", matchesBasename(this.body));
-    }
-    get regex() {
-      const key = UNDERSCORE + MODE_IGNORE;
-      if (this[key]) {
-        return this[key];
-      }
-      return this._make(MODE_IGNORE, key);
-    }
-    get checkRegex() {
-      const key = UNDERSCORE + MODE_CHECK_IGNORE;
-      if (this[key]) {
-        return this[key];
-      }
-      return this._make(MODE_CHECK_IGNORE, key);
-    }
-    _make(mode, key) {
-      const str = pinWildcards(mode === MODE_IGNORE ? this.regexPrefix.replace(REGEX_REPLACE_TRAILING_WILDCARD, replaceTrailingWildcard).replace(REGEX_REPLACE_TRAILING_DOUBLESTAR, replaceTrailingDoublestar) : checkSourceOf(this.body, this.regexPrefix));
-      const regex = this.ignoreCase ? new RegExp(str, "i") : new RegExp(str);
-      return define(this, key, regex);
-    }
-  }
-  var isLineEnd = (char) => char === "\r" || char === `
-`;
-  var trimEnd = (body) => {
-    let end = body.length;
-    while (end && isLineEnd(body[end - 1])) {
-      end--;
-    }
-    const lineEnd = end;
-    while (end && body[end - 1] === SPACE) {
-      end--;
-    }
-    if (end === lineEnd) {
-      return body.slice(0, end);
-    }
-    let backslashes = 0;
-    while (backslashes < end && body[end - backslashes - 1] === ESCAPE) {
-      backslashes++;
-    }
-    return backslashes % 2 ? body.slice(0, end - 1) + SPACE : body.slice(0, end);
-  };
-  var createRule = ({
-    pattern,
-    mark
-  }, ignoreCase) => {
-    let body = pattern[0] === BOM ? pattern.slice(1) : pattern;
-    if (body[0] === "#") {
-      return;
-    }
-    let negative = false;
-    if (body[0] === "!") {
-      negative = true;
-      body = body.slice(1);
-    }
-    const last = body[body.length - 1];
-    if (last === SPACE || last === "\r" || last === `
-`) {
-      body = trimEnd(body);
-    }
-    if (!body) {
-      return;
-    }
-    body = body.replace(REGEX_REPLACE_LEADING_EXCAPED_EXCLAMATION, "!").replace(REGEX_REPLACE_LEADING_EXCAPED_HASH, "#");
-    const regexPrefix = makeRegexPrefix(body);
-    return new IgnoreRule(pattern, mark, body, ignoreCase, negative, regexPrefix);
-  };
-
-  class RuleManager {
-    constructor(ignoreCase) {
-      this._ignoreCase = ignoreCase;
-      this._rules = [];
-      this._basenameCount = 0;
-    }
-    _add(pattern) {
-      if (pattern && pattern[KEY_IGNORE]) {
-        this._rules = this._rules.concat(pattern._rules._rules);
-        this._basenameCount += pattern._rules._basenameCount;
-        this._added = true;
-        return;
-      }
-      if (isString(pattern)) {
-        pattern = {
-          pattern
-        };
-      }
-      const rule = checkPattern(pattern.pattern) && createRule(pattern, this._ignoreCase);
-      if (rule) {
-        this._added = true;
-        this._rules.push(rule);
-        if (matchesBasename(rule.body)) {
-          this._basenameCount++;
-        }
-      }
-    }
-    add(pattern) {
-      this._added = false;
-      makeArray(isString(pattern) ? splitPattern(pattern) : pattern).forEach(this._add, this);
-      if (this._added) {
-        this._literalRules = UNDEFINED;
-      }
-      return this._added;
-    }
-    testLiteral(path) {
-      const rules = this._literalRules || (this._literalRules = this._rules.filter(({ body }) => body[body.length - (body[body.length - 1] === SLASH ? 2 : 1)] === "*"));
-      let ignored = false;
-      let unignored = false;
-      let matchedRule;
-      for (let index = rules.length - 1;index >= 0; index--) {
-        const rule = rules[index];
-        if (rule.checkRegex.test(path)) {
-          ignored = !rule.negative;
-          unignored = rule.negative;
-          matchedRule = rule.negative ? UNDEFINED : rule;
-          break;
-        }
-      }
-      const ret = {
-        ignored,
-        unignored
-      };
-      if (matchedRule) {
-        ret.rule = matchedRule;
-      }
-      return ret;
-    }
-    test(path, mode) {
-      const rules = this._rules;
-      const { length } = rules;
-      const shortcut = this._basenameCount * 2 >= length;
-      const basename = shortcut ? basenameOf(path) : path;
-      for (let index = length - 1;index >= 0; index--) {
-        const rule = rules[index];
-        if (rule[mode].test(shortcut && rule._basenameOnly ? basename : path)) {
-          const { negative } = rule;
-          const ret = {
-            ignored: !negative,
-            unignored: negative
-          };
-          if (!negative) {
-            ret.rule = rule;
-          }
-          return ret;
-        }
-      }
-      return {
-        ignored: false,
-        unignored: false
-      };
-    }
-  }
-  var throwError = (message, Ctor) => {
-    throw new Ctor(message);
-  };
-  var checkPath = (path, originalPath, doThrow) => {
-    if (!isString(path)) {
-      return doThrow(`path must be a string, but got \`${originalPath}\``, TypeError);
-    }
-    if (!path) {
-      return doThrow(`path must not be empty`, TypeError);
-    }
-    if (checkPath.isNotRelative(path)) {
-      const r = "`path.relative()`d";
-      return doThrow(`path should be a ${r} string, but got "${originalPath}"`, RangeError);
-    }
-    return true;
-  };
-  var isNotRelative = (path) => {
-    const first = path.charCodeAt(0);
-    if (first === SLASH_CODE) {
-      return true;
-    }
-    if (first !== DOT_CODE) {
-      return false;
-    }
-    if (path.length === 1) {
-      return true;
-    }
-    const second = path.charCodeAt(1);
-    if (second === SLASH_CODE) {
-      return true;
-    }
-    if (second !== DOT_CODE) {
-      return false;
-    }
-    return path.length === 2 || path.charCodeAt(2) === SLASH_CODE;
-  };
-  checkPath.isNotRelative = isNotRelative;
-  checkPath.convert = (p) => p;
-
-  class Ignore {
-    constructor({
-      ignorecase = true,
-      ignoreCase = ignorecase,
-      allowRelativePaths = false
-    } = {}) {
-      define(this, KEY_IGNORE, true);
-      this._rules = new RuleManager(ignoreCase);
-      this._strictPathCheck = !allowRelativePaths;
-      this._initCache();
-    }
-    _initCache() {
-      this._ignoreCache = Object.create(null);
-      this._testCache = Object.create(null);
-    }
-    add(pattern) {
-      if (this._rules.add(pattern)) {
-        this._initCache();
-      }
-      return this;
-    }
-    addPattern(pattern) {
-      return this.add(pattern);
-    }
-    _test(originalPath, cache) {
-      const path = originalPath && checkPath.convert(originalPath);
-      checkPath(path, originalPath, this._strictPathCheck ? throwError : RETURN_FALSE);
-      return this._t(path, cache);
-    }
-    checkIgnore(path) {
-      if (path.charCodeAt(path.length - 1) !== SLASH_CODE) {
-        return this.test(path);
-      }
-      const dir = this._t(path, this._testCache);
-      if (dir.ignored) {
-        return dir;
-      }
-      const literal = this._rules.testLiteral(path);
-      return literal.ignored || literal.unignored ? literal : dir;
-    }
-    _t(path, cache) {
-      if (path in cache) {
-        return cache[path];
-      }
-      const parentPath = parentOf(path);
-      const parent = parentPath ? this._t(parentPath, cache) : UNDEFINED;
-      return cache[path] = parent && parent.ignored ? parent : this._rules.test(path, MODE_IGNORE);
-    }
-    ignores(path) {
-      return this._test(path, this._ignoreCache).ignored;
-    }
-    createFilter() {
-      return (path) => !this.ignores(path);
-    }
-    filter(paths) {
-      return makeArray(paths).filter(this.createFilter());
-    }
-    test(path) {
-      return this._test(path, this._testCache);
-    }
-  }
-  var factory = (options) => new Ignore(options);
-  var isPathValid = (path) => checkPath(path && checkPath.convert(path), path, RETURN_FALSE);
-  var setupWindows = () => {
-    const makePosix = (str) => /^\\\\\?\\/.test(str) || /["<>|\u0000-\u001F]+/u.test(str) ? str : str.replace(/\\/g, "/");
-    checkPath.convert = makePosix;
-    const REGEX_TEST_WINDOWS_PATH_ABSOLUTE = /^[a-z]:\//i;
-    checkPath.isNotRelative = (path) => REGEX_TEST_WINDOWS_PATH_ABSOLUTE.test(path) || isNotRelative(path);
-  };
-  if (typeof process !== "undefined" && process.platform === "win32") {
-    setupWindows();
-  }
-  module2.exports = factory;
-  factory.default = factory;
-  module2.exports.isPathValid = isPathValid;
-  define(module2.exports, Symbol.for("setupWindows"), setupWindows);
-});
-
-// node_modules/.bun/picomatch@4.0.7/node_modules/picomatch/lib/constants.js
-var require_constants = __commonJS(function(exports2, module2) {
-  var WIN_SLASH = "\\\\/";
-  var WIN_NO_SLASH = `[^${WIN_SLASH}]`;
-  var DEFAULT_MAX_EXTGLOB_RECURSION = 0;
-  var DOT_LITERAL = "\\.";
-  var PLUS_LITERAL = "\\+";
-  var QMARK_LITERAL = "\\?";
-  var SLASH_LITERAL = "\\/";
-  var ONE_CHAR = "(?=.)";
-  var QMARK = "[^/]";
-  var END_ANCHOR = `(?:${SLASH_LITERAL}|$)`;
-  var START_ANCHOR = `(?:^|${SLASH_LITERAL})`;
-  var DOTS_SLASH = `${DOT_LITERAL}{1,2}${END_ANCHOR}`;
-  var NO_DOT = `(?!${DOT_LITERAL})`;
-  var NO_DOTS = `(?!${START_ANCHOR}${DOTS_SLASH})`;
-  var NO_DOT_SLASH = `(?!${DOT_LITERAL}{0,1}${END_ANCHOR})`;
-  var NO_DOTS_SLASH = `(?!${DOTS_SLASH})`;
-  var QMARK_NO_DOT = `[^.${SLASH_LITERAL}]`;
-  var STAR = `${QMARK}*?`;
-  var SEP = "/";
-  var POSIX_CHARS = {
-    DOT_LITERAL,
-    PLUS_LITERAL,
-    QMARK_LITERAL,
-    SLASH_LITERAL,
-    ONE_CHAR,
-    QMARK,
-    END_ANCHOR,
-    DOTS_SLASH,
-    NO_DOT,
-    NO_DOTS,
-    NO_DOT_SLASH,
-    NO_DOTS_SLASH,
-    QMARK_NO_DOT,
-    STAR,
-    START_ANCHOR,
-    SEP
-  };
-  var WINDOWS_CHARS = {
-    ...POSIX_CHARS,
-    SLASH_LITERAL: `[${WIN_SLASH}]`,
-    QMARK: WIN_NO_SLASH,
-    STAR: `${WIN_NO_SLASH}*?`,
-    DOTS_SLASH: `${DOT_LITERAL}{1,2}(?:[${WIN_SLASH}]|$)`,
-    NO_DOT: `(?!${DOT_LITERAL})`,
-    NO_DOTS: `(?!(?:^|[${WIN_SLASH}])${DOT_LITERAL}{1,2}(?:[${WIN_SLASH}]|$))`,
-    NO_DOT_SLASH: `(?!${DOT_LITERAL}{0,1}(?:[${WIN_SLASH}]|$))`,
-    NO_DOTS_SLASH: `(?!${DOT_LITERAL}{1,2}(?:[${WIN_SLASH}]|$))`,
-    QMARK_NO_DOT: `[^.${WIN_SLASH}]`,
-    START_ANCHOR: `(?:^|[${WIN_SLASH}])`,
-    END_ANCHOR: `(?:[${WIN_SLASH}]|$)`,
-    SEP: "\\"
-  };
-  var POSIX_REGEX_SOURCE = {
-    __proto__: null,
-    alnum: "a-zA-Z0-9",
-    alpha: "a-zA-Z",
-    ascii: "\\x00-\\x7F",
-    blank: " \\t",
-    cntrl: "\\x00-\\x1F\\x7F",
-    digit: "0-9",
-    graph: "\\x21-\\x7E",
-    lower: "a-z",
-    print: "\\x20-\\x7E ",
-    punct: "\\-!\"#$%&'()\\*+,./:;<=>?@[\\]^_`{|}~",
-    space: " \\t\\r\\n\\v\\f",
-    upper: "A-Z",
-    word: "A-Za-z0-9_",
-    xdigit: "A-Fa-f0-9"
-  };
-  module2.exports = {
-    DEFAULT_MAX_EXTGLOB_RECURSION,
-    MAX_LENGTH: 1024 * 64,
-    POSIX_REGEX_SOURCE,
-    REGEX_BACKSLASH: /\\(?![*+?^${}(|)[\]])/g,
-    REGEX_NON_SPECIAL_CHARS: /^[^@![\].,$*+?^{}()|\\/]+/,
-    REGEX_SPECIAL_CHARS: /[-*+?.^${}(|)[\]]/,
-    REGEX_SPECIAL_CHARS_BACKREF: /(\\?)((\W)(\3*))/g,
-    REGEX_SPECIAL_CHARS_GLOBAL: /([-*+?.^${}(|)[\]])/g,
-    REGEX_REMOVE_BACKSLASH: /(?:\[.*?[^\\]\]|\\(?=.))/g,
-    REPLACEMENTS: {
-      __proto__: null,
-      "***": "*",
-      "**/**": "**",
-      "**/**/**": "**"
-    },
-    CHAR_0: 48,
-    CHAR_9: 57,
-    CHAR_UPPERCASE_A: 65,
-    CHAR_LOWERCASE_A: 97,
-    CHAR_UPPERCASE_Z: 90,
-    CHAR_LOWERCASE_Z: 122,
-    CHAR_LEFT_PARENTHESES: 40,
-    CHAR_RIGHT_PARENTHESES: 41,
-    CHAR_ASTERISK: 42,
-    CHAR_AMPERSAND: 38,
-    CHAR_AT: 64,
-    CHAR_BACKWARD_SLASH: 92,
-    CHAR_CARRIAGE_RETURN: 13,
-    CHAR_CIRCUMFLEX_ACCENT: 94,
-    CHAR_COLON: 58,
-    CHAR_COMMA: 44,
-    CHAR_DOT: 46,
-    CHAR_DOUBLE_QUOTE: 34,
-    CHAR_EQUAL: 61,
-    CHAR_EXCLAMATION_MARK: 33,
-    CHAR_FORM_FEED: 12,
-    CHAR_FORWARD_SLASH: 47,
-    CHAR_GRAVE_ACCENT: 96,
-    CHAR_HASH: 35,
-    CHAR_HYPHEN_MINUS: 45,
-    CHAR_LEFT_ANGLE_BRACKET: 60,
-    CHAR_LEFT_CURLY_BRACE: 123,
-    CHAR_LEFT_SQUARE_BRACKET: 91,
-    CHAR_LINE_FEED: 10,
-    CHAR_NO_BREAK_SPACE: 160,
-    CHAR_PERCENT: 37,
-    CHAR_PLUS: 43,
-    CHAR_QUESTION_MARK: 63,
-    CHAR_RIGHT_ANGLE_BRACKET: 62,
-    CHAR_RIGHT_CURLY_BRACE: 125,
-    CHAR_RIGHT_SQUARE_BRACKET: 93,
-    CHAR_SEMICOLON: 59,
-    CHAR_SINGLE_QUOTE: 39,
-    CHAR_SPACE: 32,
-    CHAR_TAB: 9,
-    CHAR_UNDERSCORE: 95,
-    CHAR_VERTICAL_LINE: 124,
-    CHAR_ZERO_WIDTH_NOBREAK_SPACE: 65279,
-    extglobChars(chars) {
-      return {
-        "!": { type: "negate", open: "(?:(?!(?:", close: `))${chars.STAR})` },
-        "?": { type: "qmark", open: "(?:", close: ")?" },
-        "+": { type: "plus", open: "(?:", close: ")+" },
-        "*": { type: "star", open: "(?:", close: ")*" },
-        "@": { type: "at", open: "(?:", close: ")" }
-      };
-    },
-    globChars(win32) {
-      return win32 === true ? WINDOWS_CHARS : POSIX_CHARS;
-    }
-  };
-});
-
-// node_modules/.bun/picomatch@4.0.7/node_modules/picomatch/lib/utils.js
-var require_utils = __commonJS(function(exports2) {
-  var {
-    REGEX_BACKSLASH,
-    REGEX_REMOVE_BACKSLASH,
-    REGEX_SPECIAL_CHARS,
-    REGEX_SPECIAL_CHARS_GLOBAL
-  } = require_constants();
-  exports2.isObject = (val) => val !== null && typeof val === "object" && !Array.isArray(val);
-  exports2.hasRegexChars = (str) => REGEX_SPECIAL_CHARS.test(str);
-  exports2.isRegexChar = (str) => str.length === 1 && exports2.hasRegexChars(str);
-  exports2.escapeRegex = (str) => str.replace(REGEX_SPECIAL_CHARS_GLOBAL, "\\$1");
-  exports2.toPosixSlashes = (str) => str.replace(REGEX_BACKSLASH, "/");
-  exports2.isWindows = () => {
-    if (typeof navigator !== "undefined" && navigator.platform) {
-      const platform = navigator.platform.toLowerCase();
-      return platform === "win32" || platform === "windows";
-    }
-    if (typeof process !== "undefined" && process.platform) {
-      return process.platform === "win32";
-    }
-    return false;
-  };
-  exports2.removeBackslashes = (str) => {
-    return str.replace(REGEX_REMOVE_BACKSLASH, (match) => {
-      return match === "\\" ? "" : match;
-    });
-  };
-  exports2.escapeLast = (input, char, lastIdx) => {
-    const idx = input.lastIndexOf(char, lastIdx);
-    if (idx === -1)
-      return input;
-    if (input[idx - 1] === "\\")
-      return exports2.escapeLast(input, char, idx - 1);
-    return `${input.slice(0, idx)}\\${input.slice(idx)}`;
-  };
-  exports2.removePrefix = (input, state = {}) => {
-    let output = input;
-    if (output.startsWith("./")) {
-      output = output.slice(2);
-      state.prefix = "./";
-    }
-    return output;
-  };
-  exports2.wrapOutput = (input, state = {}, options = {}) => {
-    const prepend = options.contains ? "" : "^";
-    const append = options.contains ? "" : "$";
-    let output = `${prepend}(?:${input})${append}`;
-    if (state.negated === true) {
-      output = `(?:^(?!${output}).*$)`;
-    }
-    return output;
-  };
-  exports2.basename = (path, { windows } = {}) => {
-    const segs = path.split(windows ? /[\\/]/ : "/");
-    const last = segs[segs.length - 1];
-    if (last === "") {
-      return segs[segs.length - 2];
-    }
-    return last;
-  };
-});
-
-// node_modules/.bun/picomatch@4.0.7/node_modules/picomatch/lib/scan.js
-var require_scan = __commonJS(function(exports2, module2) {
-  var utils = require_utils();
-  var {
-    CHAR_ASTERISK,
-    CHAR_AT,
-    CHAR_BACKWARD_SLASH,
-    CHAR_COMMA,
-    CHAR_DOT,
-    CHAR_EXCLAMATION_MARK,
-    CHAR_FORWARD_SLASH,
-    CHAR_LEFT_CURLY_BRACE,
-    CHAR_LEFT_PARENTHESES,
-    CHAR_LEFT_SQUARE_BRACKET,
-    CHAR_PLUS,
-    CHAR_QUESTION_MARK,
-    CHAR_RIGHT_CURLY_BRACE,
-    CHAR_RIGHT_PARENTHESES,
-    CHAR_RIGHT_SQUARE_BRACKET
-  } = require_constants();
-  var isPathSeparator = (code) => {
-    return code === CHAR_FORWARD_SLASH || code === CHAR_BACKWARD_SLASH;
-  };
-  var depth = (token) => {
-    if (token.isPrefix !== true) {
-      token.depth = token.isGlobstar ? Infinity : 1;
-    }
-  };
-  var scan = (input, options) => {
-    const opts = options || {};
-    const length = input.length - 1;
-    const scanToEnd = opts.parts === true || opts.tokens === true || opts.scanToEnd === true;
-    const slashes = [];
-    const tokens = [];
-    const parts = [];
-    let str = input;
-    let index = -1;
-    let start = 0;
-    let lastIndex = 0;
-    let isBrace = false;
-    let isBracket = false;
-    let isGlob = false;
-    let isExtglob = false;
-    let isGlobstar = false;
-    let braceEscaped = false;
-    let backslashes = false;
-    let negated = false;
-    let negatedExtglob = false;
-    let finished = false;
-    let braces = 0;
-    let prev;
-    let code;
-    let token = { value: "", depth: 0, isGlob: false };
-    const eos = () => index >= length;
-    const peek = () => str.charCodeAt(index + 1);
-    const advance = () => {
-      prev = code;
-      return str.charCodeAt(++index);
-    };
-    while (index < length) {
-      code = advance();
-      let next;
-      if (code === CHAR_BACKWARD_SLASH) {
-        backslashes = token.backslashes = true;
-        code = advance();
-        if (code === CHAR_LEFT_CURLY_BRACE) {
-          braceEscaped = true;
-        }
-        continue;
-      }
-      if (braceEscaped === true || code === CHAR_LEFT_CURLY_BRACE) {
-        braces++;
-        while (eos() !== true && (code = advance())) {
-          if (code === CHAR_BACKWARD_SLASH) {
-            backslashes = token.backslashes = true;
-            advance();
-            continue;
-          }
-          if (code === CHAR_LEFT_CURLY_BRACE) {
-            braces++;
-            continue;
-          }
-          if (braceEscaped !== true && code === CHAR_DOT && (code = advance()) === CHAR_DOT) {
-            isBrace = token.isBrace = true;
-            isGlob = token.isGlob = true;
-            finished = true;
-            if (scanToEnd === true) {
-              continue;
-            }
-            break;
-          }
-          if (braceEscaped !== true && code === CHAR_COMMA) {
-            isBrace = token.isBrace = true;
-            isGlob = token.isGlob = true;
-            finished = true;
-            if (scanToEnd === true) {
-              continue;
-            }
-            break;
-          }
-          if (code === CHAR_RIGHT_CURLY_BRACE) {
-            braces--;
-            if (braces === 0) {
-              braceEscaped = false;
-              isBrace = token.isBrace = true;
-              finished = true;
-              break;
-            }
-          }
-        }
-        if (scanToEnd === true) {
-          continue;
-        }
-        break;
-      }
-      if (code === CHAR_FORWARD_SLASH) {
-        slashes.push(index);
-        tokens.push(token);
-        token = { value: "", depth: 0, isGlob: false };
-        if (finished === true)
-          continue;
-        if (prev === CHAR_DOT && index === start + 1) {
-          start += 2;
-          continue;
-        }
-        lastIndex = index + 1;
-        continue;
-      }
-      if (opts.noext !== true) {
-        const isExtglobChar = code === CHAR_PLUS || code === CHAR_AT || code === CHAR_ASTERISK || code === CHAR_QUESTION_MARK || code === CHAR_EXCLAMATION_MARK;
-        if (isExtglobChar === true && peek() === CHAR_LEFT_PARENTHESES) {
-          isGlob = token.isGlob = true;
-          isExtglob = token.isExtglob = true;
-          finished = true;
-          if (code === CHAR_EXCLAMATION_MARK && index === start) {
-            negatedExtglob = true;
-          }
-          if (scanToEnd === true) {
-            let parens = 0;
-            while (eos() !== true && (code = advance())) {
-              if (code === CHAR_BACKWARD_SLASH) {
-                backslashes = token.backslashes = true;
-                advance();
-                continue;
-              }
-              if (code === CHAR_LEFT_PARENTHESES) {
-                parens++;
-                continue;
-              }
-              if (code === CHAR_RIGHT_PARENTHESES && --parens === 0) {
-                finished = true;
-                break;
-              }
-            }
-            continue;
-          }
-          break;
-        }
-      }
-      if (code === CHAR_ASTERISK) {
-        if (prev === CHAR_ASTERISK)
-          isGlobstar = token.isGlobstar = true;
-        isGlob = token.isGlob = true;
-        finished = true;
-        if (scanToEnd === true) {
-          continue;
-        }
-        break;
-      }
-      if (code === CHAR_QUESTION_MARK) {
-        isGlob = token.isGlob = true;
-        finished = true;
-        if (scanToEnd === true) {
-          continue;
-        }
-        break;
-      }
-      if (code === CHAR_LEFT_SQUARE_BRACKET) {
-        while (eos() !== true && (next = advance())) {
-          if (next === CHAR_BACKWARD_SLASH) {
-            backslashes = token.backslashes = true;
-            advance();
-            continue;
-          }
-          if (next === CHAR_RIGHT_SQUARE_BRACKET) {
-            isBracket = token.isBracket = true;
-            isGlob = token.isGlob = true;
-            finished = true;
-            break;
-          }
-        }
-        if (scanToEnd === true) {
-          continue;
-        }
-        break;
-      }
-      if (opts.nonegate !== true && code === CHAR_EXCLAMATION_MARK && index === start) {
-        negated = token.negated = true;
-        start++;
-        continue;
-      }
-      if (opts.noparen !== true && code === CHAR_LEFT_PARENTHESES) {
-        isGlob = token.isGlob = true;
-        if (scanToEnd === true) {
-          let parens = 1;
-          while (eos() !== true && (code = advance())) {
-            if (code === CHAR_BACKWARD_SLASH) {
-              backslashes = token.backslashes = true;
-              advance();
-              continue;
-            }
-            if (code === CHAR_LEFT_PARENTHESES) {
-              parens++;
-              continue;
-            }
-            if (code === CHAR_RIGHT_PARENTHESES && --parens === 0) {
-              finished = true;
-              break;
-            }
-          }
-          continue;
-        }
-        break;
-      }
-      if (isGlob === true) {
-        finished = true;
-        if (scanToEnd === true) {
-          continue;
-        }
-        break;
-      }
-    }
-    if (opts.noext === true) {
-      isExtglob = false;
-      isGlob = false;
-    }
-    let base = str;
-    let prefix = "";
-    let glob = "";
-    if (start > 0) {
-      prefix = str.slice(0, start);
-      str = str.slice(start);
-      lastIndex -= start;
-    }
-    if (base && isGlob === true && lastIndex > 0) {
-      base = str.slice(0, lastIndex);
-      glob = str.slice(lastIndex);
-    } else if (isGlob === true) {
-      base = "";
-      glob = str;
-    } else {
-      base = str;
-    }
-    if (base && base !== "" && base !== "/" && base !== str) {
-      if (isPathSeparator(base.charCodeAt(base.length - 1))) {
-        base = base.slice(0, -1);
-      }
-    }
-    if (opts.unescape === true) {
-      if (glob)
-        glob = utils.removeBackslashes(glob);
-      if (base && backslashes === true) {
-        base = utils.removeBackslashes(base);
-      }
-    }
-    const state = {
-      prefix,
-      input,
-      start,
-      base,
-      glob,
-      isBrace,
-      isBracket,
-      isGlob,
-      isExtglob,
-      isGlobstar,
-      negated,
-      negatedExtglob
-    };
-    if (opts.tokens === true) {
-      state.maxDepth = 0;
-      if (!isPathSeparator(code)) {
-        tokens.push(token);
-      }
-      state.tokens = tokens;
-    }
-    if (opts.parts === true || opts.tokens === true) {
-      let prevIndex;
-      for (let idx = 0;idx < slashes.length; idx++) {
-        const n = prevIndex !== undefined ? prevIndex + 1 : start;
-        const i = slashes[idx];
-        const value = input.slice(n, i);
-        if (opts.tokens) {
-          if (idx === 0 && start !== 0) {
-            tokens[idx].isPrefix = true;
-            tokens[idx].value = prefix;
-          } else {
-            tokens[idx].value = value;
-          }
-          depth(tokens[idx]);
-          state.maxDepth += tokens[idx].depth;
-        }
-        if (i >= start) {
-          parts.push(value);
-          prevIndex = i;
-        }
-      }
-      const n = prevIndex !== undefined ? prevIndex + 1 : start;
-      const value = input.slice(n);
-      parts.push(value);
-      if (opts.tokens && prevIndex && prevIndex + 1 < input.length) {
-        tokens[tokens.length - 1].value = value;
-        depth(tokens[tokens.length - 1]);
-        state.maxDepth += tokens[tokens.length - 1].depth;
-      }
-      state.slashes = slashes;
-      state.parts = parts;
-    }
-    return state;
-  };
-  module2.exports = scan;
-});
-
-// node_modules/.bun/picomatch@4.0.7/node_modules/picomatch/lib/parse.js
-var require_parse = __commonJS(function(exports2, module2) {
-  var constants = require_constants();
-  var utils = require_utils();
-  var {
-    MAX_LENGTH,
-    POSIX_REGEX_SOURCE,
-    REGEX_NON_SPECIAL_CHARS,
-    REGEX_SPECIAL_CHARS_BACKREF,
-    REPLACEMENTS
-  } = constants;
-  var expandRange = (args, options) => {
-    if (typeof options.expandRange === "function") {
-      return options.expandRange(...args, options);
-    }
-    args.sort();
-    const value = `[${args.join("-")}]`;
-    try {
-      new RegExp(value);
-    } catch (ex) {
-      return args.map((v) => utils.escapeRegex(v)).join("..");
-    }
-    return value;
-  };
-  var syntaxError = (type, char) => {
-    return `Missing ${type}: "${char}" - use "\\\\${char}" to match literal characters`;
-  };
-  var splitTopLevel = (input) => {
-    const parts = [];
-    let bracket = 0;
-    let paren = 0;
-    let quote = 0;
-    let value = "";
-    let escaped = false;
-    for (const ch of input) {
-      if (escaped === true) {
-        value += ch;
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        value += ch;
-        escaped = true;
-        continue;
-      }
-      if (ch === '"') {
-        quote = quote === 1 ? 0 : 1;
-        value += ch;
-        continue;
-      }
-      if (quote === 0) {
-        if (ch === "[") {
-          bracket++;
-        } else if (ch === "]" && bracket > 0) {
-          bracket--;
-        } else if (bracket === 0) {
-          if (ch === "(") {
-            paren++;
-          } else if (ch === ")" && paren > 0) {
-            paren--;
-          } else if (ch === "|" && paren === 0) {
-            parts.push(value);
-            value = "";
-            continue;
-          }
-        }
-      }
-      value += ch;
-    }
-    parts.push(value);
-    return parts;
-  };
-  var isPlainBranch = (branch) => {
-    let escaped = false;
-    for (const ch of branch) {
-      if (escaped === true) {
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (/[?*+@!()[\]{}]/.test(ch)) {
-        return false;
-      }
-    }
-    return true;
-  };
-  var normalizeSimpleBranch = (branch) => {
-    let value = branch.trim();
-    let changed = true;
-    while (changed === true) {
-      changed = false;
-      if (/^@\([^\\()[\]{}|]+\)$/.test(value)) {
-        value = value.slice(2, -1);
-        changed = true;
-      }
-    }
-    if (!isPlainBranch(value)) {
-      return;
-    }
-    return value.replace(/\\(.)/g, "$1");
-  };
-  var hasRepeatedCharPrefixOverlap = (branches) => {
-    const values = branches.map(normalizeSimpleBranch).filter(Boolean);
-    for (let i = 0;i < values.length; i++) {
-      for (let j = i + 1;j < values.length; j++) {
-        const a = values[i];
-        const b = values[j];
-        const char = a[0];
-        if (!char || a !== char.repeat(a.length) || b !== char.repeat(b.length)) {
-          continue;
-        }
-        if (a === b || a.startsWith(b) || b.startsWith(a)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  };
-  var parseRepeatedExtglob = (pattern, requireEnd = true) => {
-    if (pattern[0] !== "+" && pattern[0] !== "*" || pattern[1] !== "(") {
-      return;
-    }
-    let bracket = 0;
-    let paren = 0;
-    let quote = 0;
-    let escaped = false;
-    for (let i = 1;i < pattern.length; i++) {
-      const ch = pattern[i];
-      if (escaped === true) {
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (ch === '"') {
-        quote = quote === 1 ? 0 : 1;
-        continue;
-      }
-      if (quote === 1) {
-        continue;
-      }
-      if (ch === "[") {
-        bracket++;
-        continue;
-      }
-      if (ch === "]" && bracket > 0) {
-        bracket--;
-        continue;
-      }
-      if (bracket > 0) {
-        continue;
-      }
-      if (ch === "(") {
-        paren++;
-        continue;
-      }
-      if (ch === ")") {
-        paren--;
-        if (paren === 0) {
-          if (requireEnd === true && i !== pattern.length - 1) {
-            return;
-          }
-          return {
-            type: pattern[0],
-            body: pattern.slice(2, i),
-            end: i
-          };
-        }
-      }
-    }
-  };
-  var buildCharClassStar = (chars) => {
-    const source = chars.length === 1 ? utils.escapeRegex(chars[0]) : `[${chars.map((ch) => utils.escapeRegex(ch)).join("")}]`;
-    return `${source}*`;
-  };
-  var getStarExtglobSequenceChars = (pattern) => {
-    let index = 0;
-    const chars = [];
-    while (index < pattern.length) {
-      const match = parseRepeatedExtglob(pattern.slice(index), false);
-      if (!match || match.type !== "*") {
-        return;
-      }
-      const branches = splitTopLevel(match.body).map((branch) => branch.trim());
-      if (branches.length !== 1) {
-        return;
-      }
-      const branch = normalizeSimpleBranch(branches[0]);
-      if (!branch || branch.length !== 1) {
-        return;
-      }
-      chars.push(branch);
-      index += match.end + 1;
-    }
-    if (chars.length < 1) {
-      return;
-    }
-    return chars;
-  };
-  var repeatedExtglobRecursion = (pattern) => {
-    let depth = 0;
-    let value = pattern.trim();
-    let match = parseRepeatedExtglob(value);
-    while (match) {
-      depth++;
-      value = match.body.trim();
-      match = parseRepeatedExtglob(value);
-    }
-    return depth;
-  };
-  var analyzeRepeatedExtglob = (body, options) => {
-    if (options.maxExtglobRecursion === false) {
-      return { risky: false };
-    }
-    const max = typeof options.maxExtglobRecursion === "number" ? options.maxExtglobRecursion : constants.DEFAULT_MAX_EXTGLOB_RECURSION;
-    const branches = splitTopLevel(body).map((branch) => branch.trim());
-    if (branches.length > 1) {
-      if (branches.some((branch) => branch === "") || branches.some((branch) => /^[*?]+$/.test(branch)) || hasRepeatedCharPrefixOverlap(branches)) {
-        return { risky: true };
-      }
-    }
-    const safeChars = [];
-    let sawStarSequence = false;
-    let combinable = true;
-    for (const branch of branches) {
-      const chars = getStarExtglobSequenceChars(branch);
-      if (chars) {
-        sawStarSequence = true;
-        safeChars.push(...chars);
-        continue;
-      }
-      const literal = normalizeSimpleBranch(branch);
-      if (literal && literal.length === 1) {
-        safeChars.push(literal);
-        continue;
-      }
-      combinable = false;
-      if (repeatedExtglobRecursion(branch) > max) {
-        return { risky: true };
-      }
-    }
-    if (sawStarSequence) {
-      return combinable ? { risky: true, safeOutput: buildCharClassStar([...new Set(safeChars)]) } : { risky: true };
-    }
-    return { risky: false };
-  };
-  var parse = (input, options) => {
-    if (typeof input !== "string") {
-      throw new TypeError("Expected a string");
-    }
-    input = REPLACEMENTS[input] || input;
-    const opts = { ...options };
-    const max = typeof opts.maxLength === "number" ? Math.min(MAX_LENGTH, opts.maxLength) : MAX_LENGTH;
-    let len = input.length;
-    if (len > max) {
-      throw new SyntaxError(`Input length: ${len}, exceeds maximum allowed length: ${max}`);
-    }
-    const bos = { type: "bos", value: "", output: opts.prepend || "" };
-    const tokens = [bos];
-    const capture = opts.capture ? "" : "?:";
-    const PLATFORM_CHARS = constants.globChars(opts.windows);
-    const EXTGLOB_CHARS = constants.extglobChars(PLATFORM_CHARS);
-    const {
-      DOT_LITERAL,
-      PLUS_LITERAL,
-      SLASH_LITERAL,
-      ONE_CHAR,
-      DOTS_SLASH,
-      NO_DOT,
-      NO_DOT_SLASH,
-      NO_DOTS_SLASH,
-      QMARK,
-      QMARK_NO_DOT,
-      STAR,
-      START_ANCHOR
-    } = PLATFORM_CHARS;
-    const globstar = (opts) => {
-      return `(${capture}(?:(?!${START_ANCHOR}${opts.dot ? DOTS_SLASH : DOT_LITERAL}).)*?)`;
-    };
-    const nodot = opts.dot ? "" : NO_DOT;
-    const qmarkNoDot = opts.dot ? QMARK : QMARK_NO_DOT;
-    let star = opts.bash === true ? globstar(opts) : STAR;
-    if (opts.capture) {
-      star = `(${star})`;
-    }
-    if (typeof opts.noext === "boolean") {
-      opts.noextglob = opts.noext;
-    }
-    const state = {
-      input,
-      index: -1,
-      start: 0,
-      dot: opts.dot === true,
-      consumed: "",
-      output: "",
-      prefix: "",
-      backtrack: false,
-      negated: false,
-      brackets: 0,
-      braces: 0,
-      parens: 0,
-      quotes: 0,
-      globstar: false,
-      tokens
-    };
-    input = utils.removePrefix(input, state);
-    len = input.length;
-    const extglobs = [];
-    const braces = [];
-    const stack = [];
-    let prev = bos;
-    let value;
-    const eos = () => state.index === len - 1;
-    const peek = state.peek = (n = 1) => input[state.index + n];
-    const advance = state.advance = () => input[++state.index] || "";
-    const remaining = () => input.slice(state.index + 1);
-    const consume = (value = "", num = 0) => {
-      state.consumed += value;
-      state.index += num;
-    };
-    const append = (token) => {
-      state.output += token.output != null ? token.output : token.value;
-      consume(token.value);
-    };
-    const negate = () => {
-      let count = 1;
-      while (peek() === "!" && (peek(2) !== "(" || peek(3) === "?")) {
-        advance();
-        state.start++;
-        count++;
-      }
-      if (count % 2 === 0) {
-        return false;
-      }
-      state.negated = true;
-      state.start++;
-      return true;
-    };
-    const increment = (type) => {
-      state[type]++;
-      stack.push(type);
-    };
-    const decrement = (type) => {
-      state[type]--;
-      stack.pop();
-    };
-    const push = (tok) => {
-      if (prev.type === "globstar") {
-        const isBrace = state.braces > 0 && (tok.type === "comma" || tok.type === "brace");
-        const isExtglob = tok.extglob === true || extglobs.length && (tok.type === "pipe" || tok.type === "paren");
-        if (tok.type !== "slash" && tok.type !== "paren" && !isBrace && !isExtglob) {
-          state.output = state.output.slice(0, -prev.output.length);
-          prev.type = "star";
-          prev.value = "*";
-          prev.output = star;
-          state.output += prev.output;
-        }
-      }
-      if (extglobs.length && tok.type !== "paren") {
-        extglobs[extglobs.length - 1].inner += tok.value;
-      }
-      if (tok.value || tok.output)
-        append(tok);
-      if (prev && prev.type === "text" && tok.type === "text") {
-        prev.output = (prev.output || prev.value) + tok.value;
-        prev.value += tok.value;
-        return;
-      }
-      tok.prev = prev;
-      tokens.push(tok);
-      prev = tok;
-    };
-    const extglobOpen = (type, value) => {
-      const token = { ...EXTGLOB_CHARS[value], conditions: 1, inner: "" };
-      token.prev = prev;
-      token.parens = state.parens;
-      token.output = state.output;
-      token.startIndex = state.index;
-      token.tokensIndex = tokens.length;
-      const output = (opts.capture ? "(" : "") + token.open;
-      increment("parens");
-      push({ type, value, output: state.output ? "" : ONE_CHAR });
-      push({ type: "paren", extglob: true, value: advance(), output });
-      extglobs.push(token);
-    };
-    const extglobClose = (token) => {
-      const literal = input.slice(token.startIndex, state.index + 1);
-      const body = input.slice(token.startIndex + 2, state.index);
-      const analysis = analyzeRepeatedExtglob(body, opts);
-      if ((token.type === "plus" || token.type === "star") && analysis.risky) {
-        const safeOutput = analysis.safeOutput ? (token.output ? "" : ONE_CHAR) + (opts.capture ? `(${analysis.safeOutput})` : analysis.safeOutput) : undefined;
-        const open = tokens[token.tokensIndex];
-        open.type = "text";
-        open.value = literal;
-        open.output = safeOutput || utils.escapeRegex(literal);
-        for (let i = token.tokensIndex + 1;i < tokens.length; i++) {
-          tokens[i].value = "";
-          tokens[i].output = "";
-          delete tokens[i].suffix;
-        }
-        state.output = token.output + open.output;
-        state.backtrack = true;
-        push({ type: "paren", extglob: true, value, output: "" });
-        decrement("parens");
-        return;
-      }
-      let output = token.close + (opts.capture ? ")" : "");
-      let rest;
-      if (token.type === "negate") {
-        let extglobStar = star;
-        if (token.inner && token.inner.length > 1 && token.inner.includes("/")) {
-          extglobStar = globstar(opts);
-        }
-        if (extglobStar !== star || eos() || /^\)+$/.test(remaining())) {
-          output = token.close = `)$))${extglobStar}`;
-        }
-        if (token.inner.includes("*") && (rest = remaining()) && /^\.[^\\/.]+$/.test(rest)) {
-          const expression = parse(rest, { ...options, fastpaths: false }).output;
-          output = token.close = `)${expression})${extglobStar})`;
-        }
-        if (token.prev.type === "bos") {
-          state.negatedExtglob = true;
-        }
-      }
-      push({ type: "paren", extglob: true, value, output });
-      decrement("parens");
-    };
-    if (opts.fastpaths !== false && !/(^[*!]|[/()[\]{}"])/.test(input)) {
-      let backslashes = false;
-      let output = input.replace(REGEX_SPECIAL_CHARS_BACKREF, (m, esc, chars, first, rest, index) => {
-        if (first === "\\") {
-          backslashes = true;
-          return m;
-        }
-        if (first === "?") {
-          if (esc) {
-            return esc + first + (rest ? QMARK.repeat(rest.length) : "");
-          }
-          if (index === 0) {
-            return qmarkNoDot + (rest ? QMARK.repeat(rest.length) : "");
-          }
-          return QMARK.repeat(chars.length);
-        }
-        if (first === ".") {
-          return DOT_LITERAL.repeat(chars.length);
-        }
-        if (first === "*") {
-          if (esc) {
-            return esc + first + (rest ? star : "");
-          }
-          return star;
-        }
-        return esc ? m : `\\${m}`;
-      });
-      if (backslashes === true) {
-        if (opts.unescape === true) {
-          output = output.replace(/\\/g, "");
-        } else {
-          output = output.replace(/\\+/g, (m) => {
-            return m.length % 2 === 0 ? "\\\\" : m ? "\\" : "";
-          });
-        }
-      }
-      if (output === input && opts.contains === true) {
-        state.output = input;
-        return state;
-      }
-      state.output = utils.wrapOutput(output, state, options);
-      return state;
-    }
-    while (!eos()) {
-      value = advance();
-      if (value === "\x00") {
-        continue;
-      }
-      if (value === "\\") {
-        const next = peek();
-        if (next === "/" && opts.bash !== true) {
-          continue;
-        }
-        if (next === "." || next === ";") {
-          continue;
-        }
-        if (!next) {
-          value += "\\";
-          push({ type: "text", value });
-          continue;
-        }
-        const match = /^\\+/.exec(remaining());
-        let slashes = 0;
-        if (match && match[0].length > 2) {
-          slashes = match[0].length;
-          state.index += slashes;
-          if (slashes % 2 !== 0) {
-            value += "\\";
-          }
-        }
-        if (opts.unescape === true) {
-          value = advance();
-        } else {
-          value += advance();
-        }
-        if (state.brackets === 0) {
-          push({ type: "text", value });
-          continue;
-        }
-      }
-      if (state.brackets > 0 && (value !== "]" || prev.value === "[" || prev.value === "[^")) {
-        if (opts.posix !== false && value === ":") {
-          const inner = prev.value.slice(1);
-          if (inner.includes("[")) {
-            prev.posix = true;
-            if (inner.includes(":")) {
-              const idx = prev.value.lastIndexOf("[");
-              const pre = prev.value.slice(0, idx);
-              const rest = prev.value.slice(idx + 2);
-              const posix = POSIX_REGEX_SOURCE[rest];
-              if (posix) {
-                prev.value = pre + posix;
-                state.backtrack = true;
-                advance();
-                if (!bos.output && tokens.indexOf(prev) === 1) {
-                  bos.output = ONE_CHAR;
-                }
-                continue;
-              }
-            }
-          }
-        }
-        if (value === "[" && peek() !== ":" || value === "-" && peek() === "]") {
-          value = `\\${value}`;
-        }
-        if (value === "]" && (prev.value === "[" || prev.value === "[^")) {
-          value = `\\${value}`;
-        }
-        if (opts.posix === true && value === "!" && prev.value === "[") {
-          value = "^";
-        }
-        prev.value += value;
-        append({ value });
-        continue;
-      }
-      if (state.quotes === 1 && value !== '"') {
-        value = utils.escapeRegex(value);
-        prev.value += value;
-        append({ value });
-        continue;
-      }
-      if (value === '"') {
-        state.quotes = state.quotes === 1 ? 0 : 1;
-        if (opts.keepQuotes === true) {
-          push({ type: "text", value });
-        }
-        continue;
-      }
-      if (value === "(") {
-        increment("parens");
-        push({ type: "paren", value });
-        continue;
-      }
-      if (value === ")") {
-        if (state.parens === 0 && opts.strictBrackets === true) {
-          throw new SyntaxError(syntaxError("opening", "("));
-        }
-        const extglob = extglobs[extglobs.length - 1];
-        if (extglob && state.parens === extglob.parens + 1) {
-          extglobClose(extglobs.pop());
-          continue;
-        }
-        push({ type: "paren", value, output: state.parens ? ")" : "\\)" });
-        decrement("parens");
-        continue;
-      }
-      if (value === "[") {
-        if (opts.nobracket === true || !remaining().includes("]")) {
-          if (opts.nobracket !== true && opts.strictBrackets === true) {
-            throw new SyntaxError(syntaxError("closing", "]"));
-          }
-          value = `\\${value}`;
-        } else {
-          increment("brackets");
-        }
-        push({ type: "bracket", value });
-        continue;
-      }
-      if (value === "]") {
-        if (opts.nobracket === true || prev && prev.type === "bracket" && prev.value.length === 1) {
-          push({ type: "text", value, output: `\\${value}` });
-          continue;
-        }
-        if (state.brackets === 0) {
-          if (opts.strictBrackets === true) {
-            throw new SyntaxError(syntaxError("opening", "["));
-          }
-          push({ type: "text", value, output: `\\${value}` });
-          continue;
-        }
-        decrement("brackets");
-        const prevValue = prev.value.slice(1);
-        if (prev.posix !== true && prevValue[0] === "^" && !prevValue.includes("/")) {
-          value = `/${value}`;
-        }
-        prev.value += value;
-        append({ value });
-        if (opts.literalBrackets === false || utils.hasRegexChars(prevValue)) {
-          continue;
-        }
-        const escaped = utils.escapeRegex(prev.value);
-        state.output = state.output.slice(0, -prev.value.length);
-        if (opts.literalBrackets === true) {
-          state.output += escaped;
-          prev.value = escaped;
-          continue;
-        }
-        prev.value = `(${capture}${escaped}|${prev.value})`;
-        state.output += prev.value;
-        continue;
-      }
-      if (value === "{" && opts.nobrace !== true) {
-        increment("braces");
-        const open = {
-          type: "brace",
-          value,
-          output: "(",
-          outputIndex: state.output.length,
-          tokensIndex: state.tokens.length
-        };
-        braces.push(open);
-        push(open);
-        continue;
-      }
-      if (value === "}") {
-        const brace = braces[braces.length - 1];
-        if (opts.nobrace === true || !brace) {
-          push({ type: "text", value, output: value });
-          continue;
-        }
-        let output = ")";
-        if (brace.dots === true) {
-          const arr = tokens.slice();
-          const range = [];
-          for (let i = arr.length - 1;i >= 0; i--) {
-            tokens.pop();
-            if (arr[i].type === "brace") {
-              break;
-            }
-            if (arr[i].type !== "dots") {
-              range.unshift(arr[i].value);
-            }
-          }
-          output = expandRange(range, opts);
-          state.backtrack = true;
-        }
-        if (brace.comma !== true && brace.dots !== true) {
-          const out = state.output.slice(0, brace.outputIndex);
-          const toks = state.tokens.slice(brace.tokensIndex);
-          brace.value = brace.output = "\\{";
-          value = output = "\\}";
-          state.output = out;
-          for (const t of toks) {
-            state.output += t.output || t.value;
-          }
-        }
-        push({ type: "brace", value, output });
-        decrement("braces");
-        braces.pop();
-        continue;
-      }
-      if (value === "|") {
-        if (extglobs.length > 0) {
-          extglobs[extglobs.length - 1].conditions++;
-        }
-        push({ type: "text", value });
-        continue;
-      }
-      if (value === ",") {
-        let output = value;
-        const brace = braces[braces.length - 1];
-        if (brace && stack[stack.length - 1] === "braces") {
-          brace.comma = true;
-          output = "|";
-        }
-        push({ type: "comma", value, output });
-        continue;
-      }
-      if (value === "/") {
-        if (prev.type === "dot" && state.index === state.start + 1) {
-          state.start = state.index + 1;
-          state.consumed = "";
-          state.output = "";
-          tokens.pop();
-          prev = bos;
-          continue;
-        }
-        push({ type: "slash", value, output: SLASH_LITERAL });
-        continue;
-      }
-      if (value === ".") {
-        if (state.braces > 0 && prev.type === "dot") {
-          if (prev.value === ".")
-            prev.output = DOT_LITERAL;
-          const brace = braces[braces.length - 1];
-          prev.type = "dots";
-          prev.output += value;
-          prev.value += value;
-          brace.dots = true;
-          continue;
-        }
-        if (state.braces + state.parens === 0 && prev.type !== "bos" && prev.type !== "slash") {
-          push({ type: "text", value, output: DOT_LITERAL });
-          continue;
-        }
-        push({ type: "dot", value, output: DOT_LITERAL });
-        continue;
-      }
-      if (value === "?") {
-        const isGroup = prev && prev.value === "(";
-        if (!isGroup && opts.noextglob !== true && peek() === "(" && peek(2) !== "?") {
-          extglobOpen("qmark", value);
-          continue;
-        }
-        if (prev && prev.type === "paren") {
-          const next = peek();
-          let output = value;
-          if (prev.value === "(" && !/[!=<:]/.test(next) || next === "<" && !/<([!=]|\w+>)/.test(remaining())) {
-            output = `\\${value}`;
-          }
-          push({ type: "text", value, output });
-          continue;
-        }
-        if (opts.dot !== true && (prev.type === "slash" || prev.type === "bos")) {
-          push({ type: "qmark", value, output: QMARK_NO_DOT });
-          continue;
-        }
-        push({ type: "qmark", value, output: QMARK });
-        continue;
-      }
-      if (value === "!") {
-        if (opts.noextglob !== true && peek() === "(") {
-          if (peek(2) !== "?" || !/[!=<:]/.test(peek(3))) {
-            extglobOpen("negate", value);
-            continue;
-          }
-        }
-        if (opts.nonegate !== true && state.index === 0) {
-          negate();
-          continue;
-        }
-      }
-      if (value === "+") {
-        if (opts.noextglob !== true && peek() === "(" && peek(2) !== "?") {
-          extglobOpen("plus", value);
-          continue;
-        }
-        if (prev && prev.value === "(" || opts.regex === false) {
-          push({ type: "plus", value, output: PLUS_LITERAL });
-          continue;
-        }
-        if (prev && (prev.type === "bracket" || prev.type === "paren" || prev.type === "brace") || state.parens > 0) {
-          push({ type: "plus", value });
-          continue;
-        }
-        push({ type: "plus", value: PLUS_LITERAL });
-        continue;
-      }
-      if (value === "@") {
-        if (opts.noextglob !== true && peek() === "(" && peek(2) !== "?") {
-          push({ type: "at", extglob: true, value, output: "" });
-          continue;
-        }
-        push({ type: "text", value });
-        continue;
-      }
-      if (value !== "*") {
-        if (value === "$" || value === "^") {
-          value = `\\${value}`;
-        }
-        const match = REGEX_NON_SPECIAL_CHARS.exec(remaining());
-        if (match) {
-          value += match[0];
-          state.index += match[0].length;
-        }
-        push({ type: "text", value });
-        continue;
-      }
-      if (prev && (prev.type === "globstar" || prev.star === true)) {
-        prev.type = "star";
-        prev.star = true;
-        prev.value += value;
-        prev.output = star;
-        state.backtrack = true;
-        state.globstar = true;
-        consume(value);
-        continue;
-      }
-      let rest = remaining();
-      if (opts.noextglob !== true && /^\([^?]/.test(rest)) {
-        extglobOpen("star", value);
-        continue;
-      }
-      if (prev.type === "star") {
-        if (opts.noglobstar === true) {
-          consume(value);
-          continue;
-        }
-        const prior = prev.prev;
-        const before = prior.prev;
-        const isStart = prior.type === "slash" || prior.type === "bos";
-        const afterStar = before && (before.type === "star" || before.type === "globstar");
-        if (opts.bash === true && (!isStart || rest[0] && rest[0] !== "/")) {
-          push({ type: "star", value, output: "" });
-          continue;
-        }
-        const isBrace = state.braces > 0 && (prior.type === "comma" || prior.type === "brace");
-        const isExtglob = extglobs.length && (prior.type === "pipe" || prior.type === "paren");
-        if (!isStart && prior.type !== "paren" && !isBrace && !isExtglob) {
-          push({ type: "star", value, output: "" });
-          continue;
-        }
-        while (rest.slice(0, 3) === "/**") {
-          const after = input[state.index + 4];
-          if (after && after !== "/") {
-            break;
-          }
-          rest = rest.slice(3);
-          consume("/**", 3);
-        }
-        const isEnd = eos() || state.parens > 0 && rest === ")".repeat(state.parens) && !extglobs.some((extglob) => extglob.type === "negate");
-        if (prior.type === "bos" && eos()) {
-          prev.type = "globstar";
-          prev.value += value;
-          prev.output = globstar(opts);
-          state.output = prev.output;
-          state.globstar = true;
-          consume(value);
-          continue;
-        }
-        if (prior.type === "slash" && prior.prev.type !== "bos" && !afterStar && isEnd) {
-          state.output = state.output.slice(0, -(prior.output + prev.output).length);
-          prior.output = `(?:${prior.output}`;
-          prev.type = "globstar";
-          prev.output = globstar(opts) + (opts.strictSlashes ? ")" : "|$)");
-          prev.value += value;
-          state.globstar = true;
-          state.output += prior.output + prev.output;
-          consume(value);
-          continue;
-        }
-        if (prior.type === "slash" && prior.prev.type !== "bos" && rest[0] === "/") {
-          const end = rest[1] !== undefined ? "|$" : "";
-          state.output = state.output.slice(0, -(prior.output + prev.output).length);
-          prior.output = `(?:${prior.output}`;
-          prev.type = "globstar";
-          prev.output = `${globstar(opts)}${SLASH_LITERAL}|${SLASH_LITERAL}${end})`;
-          prev.value += value;
-          state.output += prior.output + prev.output;
-          state.globstar = true;
-          consume(value + advance());
-          push({ type: "slash", value: "/", output: "" });
-          continue;
-        }
-        if (prior.type === "bos" && rest[0] === "/") {
-          prev.type = "globstar";
-          prev.value += value;
-          prev.output = `(?:^|${SLASH_LITERAL}|${globstar(opts)}${SLASH_LITERAL})`;
-          state.output = prev.output;
-          state.globstar = true;
-          consume(value + advance());
-          push({ type: "slash", value: "/", output: "" });
-          continue;
-        }
-        state.output = state.output.slice(0, -prev.output.length);
-        prev.type = "globstar";
-        prev.output = globstar(opts);
-        prev.value += value;
-        state.output += prev.output;
-        state.globstar = true;
-        consume(value);
-        continue;
-      }
-      const token = { type: "star", value, output: star };
-      if (opts.bash === true) {
-        token.output = ".*?";
-        if (prev.type === "bos" || prev.type === "slash") {
-          token.output = nodot + token.output;
-        }
-        push(token);
-        continue;
-      }
-      if (prev && (prev.type === "bracket" || prev.type === "paren") && opts.regex === true) {
-        token.output = value;
-        push(token);
-        continue;
-      }
-      if (state.index === state.start || prev.type === "slash" || prev.type === "dot") {
-        if (prev.type === "dot") {
-          state.output += NO_DOT_SLASH;
-          prev.output += NO_DOT_SLASH;
-        } else if (opts.dot === true) {
-          state.output += NO_DOTS_SLASH;
-          prev.output += NO_DOTS_SLASH;
-        } else {
-          state.output += nodot;
-          prev.output += nodot;
-        }
-        if (peek() !== "*") {
-          state.output += ONE_CHAR;
-          prev.output += ONE_CHAR;
-        }
-      }
-      push(token);
-    }
-    while (state.brackets > 0) {
-      if (opts.strictBrackets === true)
-        throw new SyntaxError(syntaxError("closing", "]"));
-      state.output = utils.escapeLast(state.output, "[");
-      decrement("brackets");
-    }
-    while (state.parens > 0) {
-      if (opts.strictBrackets === true)
-        throw new SyntaxError(syntaxError("closing", ")"));
-      state.output = utils.escapeLast(state.output, "(");
-      decrement("parens");
-    }
-    while (state.braces > 0) {
-      if (opts.strictBrackets === true)
-        throw new SyntaxError(syntaxError("closing", "}"));
-      state.output = utils.escapeLast(state.output, "{");
-      decrement("braces");
-    }
-    if (opts.strictSlashes !== true && (prev.type === "star" || prev.type === "bracket")) {
-      push({ type: "maybe_slash", value: "", output: `${SLASH_LITERAL}?` });
-    }
-    if (state.backtrack === true) {
-      state.output = "";
-      for (const token of state.tokens) {
-        state.output += token.output != null ? token.output : token.value;
-        if (token.suffix) {
-          state.output += token.suffix;
-        }
-      }
-    }
-    return state;
-  };
-  parse.fastpaths = (input, options) => {
-    const opts = { ...options };
-    const max = typeof opts.maxLength === "number" ? Math.min(MAX_LENGTH, opts.maxLength) : MAX_LENGTH;
-    const len = input.length;
-    if (len > max) {
-      throw new SyntaxError(`Input length: ${len}, exceeds maximum allowed length: ${max}`);
-    }
-    input = REPLACEMENTS[input] || input;
-    const {
-      DOT_LITERAL,
-      SLASH_LITERAL,
-      ONE_CHAR,
-      DOTS_SLASH,
-      NO_DOT,
-      NO_DOTS,
-      NO_DOTS_SLASH,
-      STAR,
-      START_ANCHOR
-    } = constants.globChars(opts.windows);
-    const nodot = opts.dot ? NO_DOTS : NO_DOT;
-    const slashDot = opts.dot ? NO_DOTS_SLASH : NO_DOT;
-    const capture = opts.capture ? "" : "?:";
-    const state = { negated: false, prefix: "" };
-    let star = opts.bash === true ? ".*?" : STAR;
-    if (opts.capture) {
-      star = `(${star})`;
-    }
-    const globstar = (opts) => {
-      if (opts.noglobstar === true)
-        return star;
-      return `(${capture}(?:(?!${START_ANCHOR}${opts.dot ? DOTS_SLASH : DOT_LITERAL}).)*?)`;
-    };
-    const create = (str) => {
-      switch (str) {
-        case "*":
-          return `${nodot}${ONE_CHAR}${star}`;
-        case ".*":
-          return `${DOT_LITERAL}${ONE_CHAR}${star}`;
-        case "*.*":
-          return `${nodot}${star}${DOT_LITERAL}${ONE_CHAR}${star}`;
-        case "*/*":
-          return `${nodot}${star}${SLASH_LITERAL}${ONE_CHAR}${slashDot}${star}`;
-        case "**":
-          return nodot + globstar(opts);
-        case "**/*":
-          return `(?:${nodot}${globstar(opts)}${SLASH_LITERAL})?${slashDot}${ONE_CHAR}${star}`;
-        case "**/*.*":
-          return `(?:${nodot}${globstar(opts)}${SLASH_LITERAL})?${slashDot}${star}${DOT_LITERAL}${ONE_CHAR}${star}`;
-        case "**/.*":
-          return `(?:${nodot}${globstar(opts)}${SLASH_LITERAL})?${DOT_LITERAL}${ONE_CHAR}${star}`;
-        default: {
-          const match = /^(.*?)\.(\w+)$/.exec(str);
-          if (!match)
-            return;
-          const source = create(match[1]);
-          if (!source)
-            return;
-          return source + DOT_LITERAL + match[2];
-        }
-      }
-    };
-    const output = utils.removePrefix(input, state);
-    let source = create(output);
-    if (source && opts.strictSlashes !== true) {
-      source += `${SLASH_LITERAL}?`;
-    }
-    return source;
-  };
-  module2.exports = parse;
-});
-
-// node_modules/.bun/picomatch@4.0.7/node_modules/picomatch/lib/picomatch.js
-var require_picomatch = __commonJS(function(exports2, module2) {
-  var scan = require_scan();
-  var parse = require_parse();
-  var utils = require_utils();
-  var constants = require_constants();
-  var isObject = (val) => val && typeof val === "object" && !Array.isArray(val);
-  var picomatch = (glob, options, returnState = false) => {
-    if (Array.isArray(glob)) {
-      const fns = glob.map((input) => picomatch(input, options, returnState));
-      const arrayMatcher = (str) => {
-        for (const isMatch of fns) {
-          const state = isMatch(str);
-          if (state)
-            return state;
-        }
-        return false;
-      };
-      return arrayMatcher;
-    }
-    const isState = isObject(glob) && glob.tokens && glob.input;
-    if (glob === "" || typeof glob !== "string" && !isState) {
-      throw new TypeError("Expected pattern to be a non-empty string");
-    }
-    const opts = options || {};
-    const posix = opts.windows;
-    const regex = isState ? picomatch.compileRe(glob, options) : picomatch.makeRe(glob, options, false, true);
-    const state = regex.state;
-    delete regex.state;
-    let isIgnored = () => false;
-    if (opts.ignore) {
-      const ignoreOpts = { ...options, ignore: null, onMatch: null, onResult: null };
-      isIgnored = picomatch(opts.ignore, ignoreOpts, returnState);
-    }
-    const matcher = (input, returnObject = false) => {
-      const { isMatch, match, output } = picomatch.test(input, regex, options, { glob, posix });
-      const result = { glob, state, regex, posix, input, output, match, isMatch };
-      if (typeof opts.onResult === "function") {
-        opts.onResult(result);
-      }
-      if (isMatch === false) {
-        result.isMatch = false;
-        return returnObject ? result : false;
-      }
-      if (isIgnored(input)) {
-        if (typeof opts.onIgnore === "function") {
-          opts.onIgnore(result);
-        }
-        result.isMatch = false;
-        return returnObject ? result : false;
-      }
-      if (typeof opts.onMatch === "function") {
-        opts.onMatch(result);
-      }
-      return returnObject ? result : true;
-    };
-    if (returnState) {
-      matcher.state = state;
-    }
-    return matcher;
-  };
-  picomatch.test = (input, regex, options, { glob, posix } = {}) => {
-    if (typeof input !== "string") {
-      throw new TypeError("Expected input to be a string");
-    }
-    if (input === "") {
-      return { isMatch: false, output: "" };
-    }
-    const opts = options || {};
-    const format = opts.format || (posix ? utils.toPosixSlashes : null);
-    let match = input === glob;
-    let output = match && format ? format(input) : input;
-    if (match === false) {
-      output = format ? format(input) : input;
-      match = output === glob;
-    }
-    if (match === false || opts.capture === true) {
-      if (opts.matchBase === true || opts.basename === true) {
-        match = picomatch.matchBase(input, regex, options, posix);
-      } else {
-        match = regex.exec(output);
-      }
-    }
-    return { isMatch: Boolean(match), match, output };
-  };
-  picomatch.matchBase = (input, glob, options, posix = options && options.windows) => {
-    const regex = glob instanceof RegExp ? glob : picomatch.makeRe(glob, options);
-    return regex.test(utils.basename(input, { windows: posix }));
-  };
-  picomatch.isMatch = (str, patterns, options) => picomatch(patterns, options)(str);
-  picomatch.parse = (pattern, options) => {
-    if (Array.isArray(pattern))
-      return pattern.map((p) => picomatch.parse(p, options));
-    return parse(pattern, { ...options, fastpaths: false });
-  };
-  picomatch.scan = (input, options) => scan(input, options);
-  picomatch.compileRe = (state, options, returnOutput = false, returnState = false) => {
-    if (returnOutput === true) {
-      return state.output;
-    }
-    const opts = options || {};
-    const prepend = opts.contains ? "" : "^";
-    const append = opts.contains ? "" : "$";
-    let source = `${prepend}(?:${state.output})${append}`;
-    if (state && state.negated === true) {
-      source = `^(?!${source}).*$`;
-    }
-    const regex = picomatch.toRegex(source, options);
-    if (returnState === true) {
-      regex.state = state;
-    }
-    return regex;
-  };
-  picomatch.makeRe = (input, options = {}, returnOutput = false, returnState = false) => {
-    if (!input || typeof input !== "string") {
-      throw new TypeError("Expected a non-empty string");
-    }
-    let parsed = { negated: false, fastpaths: true };
-    if (options.fastpaths !== false && (input[0] === "." || input[0] === "*")) {
-      parsed.output = parse.fastpaths(input, options);
-    }
-    if (!parsed.output) {
-      parsed = parse(input, options);
-    }
-    return picomatch.compileRe(parsed, options, returnOutput, returnState);
-  };
-  picomatch.toRegex = (source, options) => {
-    try {
-      const opts = options || {};
-      return new RegExp(source, opts.flags || (opts.nocase ? "i" : ""));
-    } catch (err) {
-      if (options && options.debug === true)
-        throw err;
-      return /$^/;
-    }
-  };
-  picomatch.constants = constants;
-  module2.exports = picomatch;
-});
-
-// node_modules/.bun/picomatch@4.0.7/node_modules/picomatch/index.js
-var require_picomatch2 = __commonJS(function(exports2, module2) {
-  var pico = require_picomatch();
-  var utils = require_utils();
-  function picomatch(glob, options, returnState = false) {
-    if (options && (options.windows === null || options.windows === undefined)) {
-      options = { ...options, windows: utils.isWindows() };
-    }
-    return pico(glob, options, returnState);
-  }
-  Object.assign(picomatch, pico);
-  module2.exports = picomatch;
-});
-
-// node_modules/.bun/fdir@6.5.0+ef9fefe4b3f078a5/node_modules/fdir/dist/index.cjs
-var require_dist = __commonJS(function(exports2) {
-  var __create = Object.create;
-  var __defProp = Object.defineProperty;
-  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-  var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __getProtoOf = Object.getPrototypeOf;
-  var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __copyProps = (to, from, except, desc) => {
-    if (from && typeof from === "object" || typeof from === "function")
-      for (var keys = __getOwnPropNames(from), i = 0, n = keys.length, key;i < n; i++) {
-        key = keys[i];
-        if (!__hasOwnProp.call(to, key) && key !== except)
-          __defProp(to, key, {
-            get: ((k) => from[k]).bind(null, key),
-            enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable
-          });
-      }
-    return to;
-  };
-  var __toESM2 = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", {
-    value: mod,
-    enumerable: true
-  }) : target, mod));
-  var path = __toESM2(require("path"));
-  var fs = __toESM2(require("fs"));
-  function cleanPath(path$1) {
-    let normalized = (0, path.normalize)(path$1);
-    if (normalized.length > 1 && normalized[normalized.length - 1] === path.sep)
-      normalized = normalized.substring(0, normalized.length - 1);
-    return normalized;
-  }
-  var SLASHES_REGEX = /[\\/]/g;
-  function convertSlashes(path$1, separator) {
-    return path$1.replace(SLASHES_REGEX, separator);
-  }
-  var WINDOWS_ROOT_DIR_REGEX = /^[a-z]:[\\/]$/i;
-  function isRootDirectory(path$1) {
-    return path$1 === "/" || WINDOWS_ROOT_DIR_REGEX.test(path$1);
-  }
-  function normalizePath(path$1, options) {
-    const { resolvePaths, normalizePath: normalizePath$1, pathSeparator } = options;
-    const pathNeedsCleaning = process.platform === "win32" && path$1.includes("/") || path$1.startsWith(".");
-    if (resolvePaths)
-      path$1 = (0, path.resolve)(path$1);
-    if (normalizePath$1 || pathNeedsCleaning)
-      path$1 = cleanPath(path$1);
-    if (path$1 === ".")
-      return "";
-    const needsSeperator = path$1[path$1.length - 1] !== pathSeparator;
-    return convertSlashes(needsSeperator ? path$1 + pathSeparator : path$1, pathSeparator);
-  }
-  function joinPathWithBasePath(filename, directoryPath) {
-    return directoryPath + filename;
-  }
-  function joinPathWithRelativePath(root, options) {
-    return function(filename, directoryPath) {
-      const sameRoot = directoryPath.startsWith(root);
-      if (sameRoot)
-        return directoryPath.slice(root.length) + filename;
-      else
-        return convertSlashes((0, path.relative)(root, directoryPath), options.pathSeparator) + options.pathSeparator + filename;
-    };
-  }
-  function joinPath(filename) {
-    return filename;
-  }
-  function joinDirectoryPath(filename, directoryPath, separator) {
-    return directoryPath + filename + separator;
-  }
-  function build$7(root, options) {
-    const { relativePaths, includeBasePath } = options;
-    return relativePaths && root ? joinPathWithRelativePath(root, options) : includeBasePath ? joinPathWithBasePath : joinPath;
-  }
-  function pushDirectoryWithRelativePath(root) {
-    return function(directoryPath, paths) {
-      paths.push(directoryPath.substring(root.length) || ".");
-    };
-  }
-  function pushDirectoryFilterWithRelativePath(root) {
-    return function(directoryPath, paths, filters) {
-      const relativePath = directoryPath.substring(root.length) || ".";
-      if (filters.every((filter) => filter(relativePath, true)))
-        paths.push(relativePath);
-    };
-  }
-  var pushDirectory = (directoryPath, paths) => {
-    paths.push(directoryPath || ".");
-  };
-  var pushDirectoryFilter = (directoryPath, paths, filters) => {
-    const path$1 = directoryPath || ".";
-    if (filters.every((filter) => filter(path$1, true)))
-      paths.push(path$1);
-  };
-  var empty$2 = () => {};
-  function build$6(root, options) {
-    const { includeDirs, filters, relativePaths } = options;
-    if (!includeDirs)
-      return empty$2;
-    if (relativePaths)
-      return filters && filters.length ? pushDirectoryFilterWithRelativePath(root) : pushDirectoryWithRelativePath(root);
-    return filters && filters.length ? pushDirectoryFilter : pushDirectory;
-  }
-  var pushFileFilterAndCount = (filename, _paths, counts, filters) => {
-    if (filters.every((filter) => filter(filename, false)))
-      counts.files++;
-  };
-  var pushFileFilter = (filename, paths, _counts, filters) => {
-    if (filters.every((filter) => filter(filename, false)))
-      paths.push(filename);
-  };
-  var pushFileCount = (_filename, _paths, counts, _filters) => {
-    counts.files++;
-  };
-  var pushFile = (filename, paths) => {
-    paths.push(filename);
-  };
-  var empty$1 = () => {};
-  function build$5(options) {
-    const { excludeFiles, filters, onlyCounts } = options;
-    if (excludeFiles)
-      return empty$1;
-    if (filters && filters.length)
-      return onlyCounts ? pushFileFilterAndCount : pushFileFilter;
-    else if (onlyCounts)
-      return pushFileCount;
-    else
-      return pushFile;
-  }
-  var getArray = (paths) => {
-    return paths;
-  };
-  var getArrayGroup = () => {
-    return [""].slice(0, 0);
-  };
-  function build$4(options) {
-    return options.group ? getArrayGroup : getArray;
-  }
-  var groupFiles = (groups, directory, files) => {
-    groups.push({
-      directory,
-      files,
-      dir: directory
-    });
-  };
-  var empty = () => {};
-  function build$3(options) {
-    return options.group ? groupFiles : empty;
-  }
-  var resolveSymlinksAsync = function(path$1, state, callback$1) {
-    const { queue, fs: fs$1, options: { suppressErrors } } = state;
-    queue.enqueue();
-    fs$1.realpath(path$1, (error, resolvedPath) => {
-      if (error)
-        return queue.dequeue(suppressErrors ? null : error, state);
-      fs$1.stat(resolvedPath, (error$1, stat) => {
-        if (error$1)
-          return queue.dequeue(suppressErrors ? null : error$1, state);
-        if (stat.isDirectory() && isRecursive(path$1, resolvedPath, state))
-          return queue.dequeue(null, state);
-        callback$1(stat, resolvedPath);
-        queue.dequeue(null, state);
-      });
-    });
-  };
-  var resolveSymlinks = function(path$1, state, callback$1) {
-    const { queue, fs: fs$1, options: { suppressErrors } } = state;
-    queue.enqueue();
-    try {
-      const resolvedPath = fs$1.realpathSync(path$1);
-      const stat = fs$1.statSync(resolvedPath);
-      if (stat.isDirectory() && isRecursive(path$1, resolvedPath, state))
-        return;
-      callback$1(stat, resolvedPath);
-    } catch (e) {
-      if (!suppressErrors)
-        throw e;
-    }
-  };
-  function build$2(options, isSynchronous) {
-    if (!options.resolveSymlinks || options.excludeSymlinks)
-      return null;
-    return isSynchronous ? resolveSymlinks : resolveSymlinksAsync;
-  }
-  function isRecursive(path$1, resolved, state) {
-    if (state.options.useRealPaths)
-      return isRecursiveUsingRealPaths(resolved, state);
-    let parent = (0, path.dirname)(path$1);
-    let depth = 1;
-    while (parent !== state.root && depth < 2) {
-      const resolvedPath = state.symlinks.get(parent);
-      const isSameRoot = !!resolvedPath && (resolvedPath === resolved || resolvedPath.startsWith(resolved) || resolved.startsWith(resolvedPath));
-      if (isSameRoot)
-        depth++;
-      else
-        parent = (0, path.dirname)(parent);
-    }
-    state.symlinks.set(path$1, resolved);
-    return depth > 1;
-  }
-  function isRecursiveUsingRealPaths(resolved, state) {
-    return state.visited.includes(resolved + state.options.pathSeparator);
-  }
-  var onlyCountsSync = (state) => {
-    return state.counts;
-  };
-  var groupsSync = (state) => {
-    return state.groups;
-  };
-  var defaultSync = (state) => {
-    return state.paths;
-  };
-  var limitFilesSync = (state) => {
-    return state.paths.slice(0, state.options.maxFiles);
-  };
-  var onlyCountsAsync = (state, error, callback$1) => {
-    report(error, callback$1, state.counts, state.options.suppressErrors);
-    return null;
-  };
-  var defaultAsync = (state, error, callback$1) => {
-    report(error, callback$1, state.paths, state.options.suppressErrors);
-    return null;
-  };
-  var limitFilesAsync = (state, error, callback$1) => {
-    report(error, callback$1, state.paths.slice(0, state.options.maxFiles), state.options.suppressErrors);
-    return null;
-  };
-  var groupsAsync = (state, error, callback$1) => {
-    report(error, callback$1, state.groups, state.options.suppressErrors);
-    return null;
-  };
-  function report(error, callback$1, output, suppressErrors) {
-    if (error && !suppressErrors)
-      callback$1(error, output);
-    else
-      callback$1(null, output);
-  }
-  function build$1(options, isSynchronous) {
-    const { onlyCounts, group, maxFiles } = options;
-    if (onlyCounts)
-      return isSynchronous ? onlyCountsSync : onlyCountsAsync;
-    else if (group)
-      return isSynchronous ? groupsSync : groupsAsync;
-    else if (maxFiles)
-      return isSynchronous ? limitFilesSync : limitFilesAsync;
-    else
-      return isSynchronous ? defaultSync : defaultAsync;
-  }
-  var readdirOpts = { withFileTypes: true };
-  var walkAsync = (state, crawlPath, directoryPath, currentDepth, callback$1) => {
-    state.queue.enqueue();
-    if (currentDepth < 0)
-      return state.queue.dequeue(null, state);
-    const { fs: fs$1 } = state;
-    state.visited.push(crawlPath);
-    state.counts.directories++;
-    fs$1.readdir(crawlPath || ".", readdirOpts, (error, entries = []) => {
-      callback$1(entries, directoryPath, currentDepth);
-      state.queue.dequeue(state.options.suppressErrors ? null : error, state);
-    });
-  };
-  var walkSync = (state, crawlPath, directoryPath, currentDepth, callback$1) => {
-    const { fs: fs$1 } = state;
-    if (currentDepth < 0)
-      return;
-    state.visited.push(crawlPath);
-    state.counts.directories++;
-    let entries = [];
-    try {
-      entries = fs$1.readdirSync(crawlPath || ".", readdirOpts);
-    } catch (e) {
-      if (!state.options.suppressErrors)
-        throw e;
-    }
-    callback$1(entries, directoryPath, currentDepth);
-  };
-  function build(isSynchronous) {
-    return isSynchronous ? walkSync : walkAsync;
-  }
-  var Queue = class {
-    count = 0;
-    constructor(onQueueEmpty) {
-      this.onQueueEmpty = onQueueEmpty;
-    }
-    enqueue() {
-      this.count++;
-      return this.count;
-    }
-    dequeue(error, output) {
-      if (this.onQueueEmpty && (--this.count <= 0 || error)) {
-        this.onQueueEmpty(error, output);
-        if (error) {
-          output.controller.abort();
-          this.onQueueEmpty = undefined;
-        }
-      }
-    }
-  };
-  var Counter = class {
-    _files = 0;
-    _directories = 0;
-    set files(num) {
-      this._files = num;
-    }
-    get files() {
-      return this._files;
-    }
-    set directories(num) {
-      this._directories = num;
-    }
-    get directories() {
-      return this._directories;
-    }
-    get dirs() {
-      return this._directories;
-    }
-  };
-  var Aborter = class {
-    aborted = false;
-    abort() {
-      this.aborted = true;
-    }
-  };
-  var Walker = class {
-    root;
-    isSynchronous;
-    state;
-    joinPath;
-    pushDirectory;
-    pushFile;
-    getArray;
-    groupFiles;
-    resolveSymlink;
-    walkDirectory;
-    callbackInvoker;
-    constructor(root, options, callback$1) {
-      this.isSynchronous = !callback$1;
-      this.callbackInvoker = build$1(options, this.isSynchronous);
-      this.root = normalizePath(root, options);
-      this.state = {
-        root: isRootDirectory(this.root) ? this.root : this.root.slice(0, -1),
-        paths: [""].slice(0, 0),
-        groups: [],
-        counts: new Counter,
-        options,
-        queue: new Queue((error, state) => this.callbackInvoker(state, error, callback$1)),
-        symlinks: /* @__PURE__ */ new Map,
-        visited: [""].slice(0, 0),
-        controller: new Aborter,
-        fs: options.fs || fs
-      };
-      this.joinPath = build$7(this.root, options);
-      this.pushDirectory = build$6(this.root, options);
-      this.pushFile = build$5(options);
-      this.getArray = build$4(options);
-      this.groupFiles = build$3(options);
-      this.resolveSymlink = build$2(options, this.isSynchronous);
-      this.walkDirectory = build(this.isSynchronous);
-    }
-    start() {
-      this.pushDirectory(this.root, this.state.paths, this.state.options.filters);
-      this.walkDirectory(this.state, this.root, this.root, this.state.options.maxDepth, this.walk);
-      return this.isSynchronous ? this.callbackInvoker(this.state, null) : null;
-    }
-    walk = (entries, directoryPath, depth) => {
-      const { paths, options: { filters, resolveSymlinks: resolveSymlinks$1, excludeSymlinks, exclude, maxFiles, signal, useRealPaths, pathSeparator }, controller } = this.state;
-      if (controller.aborted || signal && signal.aborted || maxFiles && paths.length > maxFiles)
-        return;
-      const files = this.getArray(this.state.paths);
-      for (let i = 0;i < entries.length; ++i) {
-        const entry = entries[i];
-        if (entry.isFile() || entry.isSymbolicLink() && !resolveSymlinks$1 && !excludeSymlinks) {
-          const filename = this.joinPath(entry.name, directoryPath);
-          this.pushFile(filename, files, this.state.counts, filters);
-        } else if (entry.isDirectory()) {
-          let path$1 = joinDirectoryPath(entry.name, directoryPath, this.state.options.pathSeparator);
-          if (exclude && exclude(entry.name, path$1))
-            continue;
-          this.pushDirectory(path$1, paths, filters);
-          this.walkDirectory(this.state, path$1, path$1, depth - 1, this.walk);
-        } else if (this.resolveSymlink && entry.isSymbolicLink()) {
-          let path$1 = joinPathWithBasePath(entry.name, directoryPath);
-          this.resolveSymlink(path$1, this.state, (stat, resolvedPath) => {
-            if (stat.isDirectory()) {
-              resolvedPath = normalizePath(resolvedPath, this.state.options);
-              if (exclude && exclude(entry.name, useRealPaths ? resolvedPath : path$1 + pathSeparator))
-                return;
-              this.walkDirectory(this.state, resolvedPath, useRealPaths ? resolvedPath : path$1 + pathSeparator, depth - 1, this.walk);
-            } else {
-              resolvedPath = useRealPaths ? resolvedPath : path$1;
-              const filename = (0, path.basename)(resolvedPath);
-              const directoryPath$1 = normalizePath((0, path.dirname)(resolvedPath), this.state.options);
-              resolvedPath = this.joinPath(filename, directoryPath$1);
-              this.pushFile(resolvedPath, files, this.state.counts, filters);
-            }
-          });
-        }
-      }
-      this.groupFiles(this.state.groups, directoryPath, files);
-    };
-  };
-  function promise(root, options) {
-    return new Promise((resolve$1, reject) => {
-      callback(root, options, (err, output) => {
-        if (err)
-          return reject(err);
-        resolve$1(output);
-      });
-    });
-  }
-  function callback(root, options, callback$1) {
-    let walker = new Walker(root, options, callback$1);
-    walker.start();
-  }
-  function sync(root, options) {
-    const walker = new Walker(root, options);
-    return walker.start();
-  }
-  var APIBuilder = class {
-    constructor(root, options) {
-      this.root = root;
-      this.options = options;
-    }
-    withPromise() {
-      return promise(this.root, this.options);
-    }
-    withCallback(cb) {
-      callback(this.root, this.options, cb);
-    }
-    sync() {
-      return sync(this.root, this.options);
-    }
-  };
-  var pm = null;
-  try {
-    require.resolve("/Users/pp/fuongz_projects/lanework-public/node_modules/.bun/picomatch@4.0.7/node_modules/picomatch/index.js");
-    pm = require_picomatch2();
-  } catch {}
-  var Builder = class {
-    globCache = {};
-    options = {
-      maxDepth: Infinity,
-      suppressErrors: true,
-      pathSeparator: path.sep,
-      filters: []
-    };
-    globFunction;
-    constructor(options) {
-      this.options = {
-        ...this.options,
-        ...options
-      };
-      this.globFunction = this.options.globFunction;
-    }
-    group() {
-      this.options.group = true;
-      return this;
-    }
-    withPathSeparator(separator) {
-      this.options.pathSeparator = separator;
-      return this;
-    }
-    withBasePath() {
-      this.options.includeBasePath = true;
-      return this;
-    }
-    withRelativePaths() {
-      this.options.relativePaths = true;
-      return this;
-    }
-    withDirs() {
-      this.options.includeDirs = true;
-      return this;
-    }
-    withMaxDepth(depth) {
-      this.options.maxDepth = depth;
-      return this;
-    }
-    withMaxFiles(limit) {
-      this.options.maxFiles = limit;
-      return this;
-    }
-    withFullPaths() {
-      this.options.resolvePaths = true;
-      this.options.includeBasePath = true;
-      return this;
-    }
-    withErrors() {
-      this.options.suppressErrors = false;
-      return this;
-    }
-    withSymlinks({ resolvePaths = true } = {}) {
-      this.options.resolveSymlinks = true;
-      this.options.useRealPaths = resolvePaths;
-      return this.withFullPaths();
-    }
-    withAbortSignal(signal) {
-      this.options.signal = signal;
-      return this;
-    }
-    normalize() {
-      this.options.normalizePath = true;
-      return this;
-    }
-    filter(predicate) {
-      this.options.filters.push(predicate);
-      return this;
-    }
-    onlyDirs() {
-      this.options.excludeFiles = true;
-      this.options.includeDirs = true;
-      return this;
-    }
-    exclude(predicate) {
-      this.options.exclude = predicate;
-      return this;
-    }
-    onlyCounts() {
-      this.options.onlyCounts = true;
-      return this;
-    }
-    crawl(root) {
-      return new APIBuilder(root || ".", this.options);
-    }
-    withGlobFunction(fn) {
-      this.globFunction = fn;
-      return this;
-    }
-    crawlWithOptions(root, options) {
-      this.options = {
-        ...this.options,
-        ...options
-      };
-      return new APIBuilder(root || ".", this.options);
-    }
-    glob(...patterns) {
-      if (this.globFunction)
-        return this.globWithOptions(patterns);
-      return this.globWithOptions(patterns, ...[{ dot: true }]);
-    }
-    globWithOptions(patterns, ...options) {
-      const globFn = this.globFunction || pm;
-      if (!globFn)
-        throw new Error("Please specify a glob function to use glob matching.");
-      var isMatch = this.globCache[patterns.join("\x00")];
-      if (!isMatch) {
-        isMatch = globFn(patterns, ...options);
-        this.globCache[patterns.join("\x00")] = isMatch;
-      }
-      this.options.filters.push((path$1) => isMatch(path$1));
-      return this;
-    }
-  };
-  exports2.fdir = Builder;
-});
-
-// apps/desktop/electron/hook/lanework-checkpoint.ts
-var exports_lanework_checkpoint = {};
-__export(exports_lanework_checkpoint, {
-  buildBody: () => buildBody,
-  checkedApi: () => checkedApi,
-  digest: () => digest,
-  digestCodex: () => digestCodex,
-  digestOpencode: () => digestOpencode,
-  isSecretFile: () => isSecretFile,
-  readOpencodeSession: () => readOpencodeSession,
-  redact: () => redact,
-  snapshot: () => snapshot
-});
-module.exports = __toCommonJS(exports_lanework_checkpoint);
-init_src();
-var import_node_child_process7 = require("node:child_process");
-var import_node_crypto5 = require("node:crypto");
-var import_node_fs7 = require("node:fs");
-var import_node_os9 = require("node:os");
-var import_node_path13 = require("node:path");
-
-// apps/desktop/electron/main/git/runner.ts
-var import_node_child_process = require("node:child_process");
-var MAX_OUTPUT = 32 * 1024 * 1024;
-var DEFAULT_TIMEOUT = 15000;
-var BASE_FLAGS = [
-  "-c",
-  "core.quotepath=false",
-  "-c",
-  "color.ui=never",
-  "-c",
-  "core.fsmonitor=false",
-  "-c",
-  "log.showSignature=false",
-  "--no-pager",
-  "--literal-pathspecs"
-];
-var READ_FLAGS = [
-  ...BASE_FLAGS,
-  "--no-optional-locks",
-  "-c",
-  "core.hooksPath=/dev/null"
-];
-class GitMissingError extends Error {
-}
-function exec(flags, cwd, args, options) {
-  const ok = options.ok ?? [0];
-  return new Promise((resolve, reject) => {
-    import_node_child_process.execFile("git", [...flags, ...args], {
-      cwd,
-      timeout: options.timeout ?? DEFAULT_TIMEOUT,
-      maxBuffer: options.maxBuffer ?? MAX_OUTPUT,
-      windowsHide: true,
-      encoding: options.encoding ?? "utf8",
-      env: options.env ?? process.env
-    }, (error, stdout, stderr) => {
-      if (!error)
-        return resolve({ stdout, code: 0 });
-      const code = typeof error.code === "number" ? error.code : null;
-      if (error.code === "ENOENT")
-        return reject(new GitMissingError("git is not installed."));
-      if (code !== null && ok.includes(code))
-        return resolve({ stdout, code });
-      const message = options.encoding === "base64" ? Buffer.from(stderr, "base64").toString("utf8") : stderr || stdout;
-      const said = (message || error.message).trim();
-      reject(new Error(said.split(`
-`).slice(-6).join(`
-`).slice(0, 800)));
-    });
-  });
-}
-function gitRead(cwd, args, options = {}) {
-  return exec(READ_FLAGS, cwd, args, options);
-}
-async function gitReadOut(cwd, args, options = {}) {
-  return (await gitRead(cwd, args, options)).stdout;
-}
-
-// apps/desktop/electron/main/git/trust-gate.ts
-init_paths();
-var import_promises2 = require("node:fs/promises");
-var import_node_path3 = require("node:path");
-
-// apps/desktop/electron/main/git/repo-trust.ts
-var import_promises = require("node:fs/promises");
-var import_node_path2 = require("node:path");
-var OFF = new Set(["false", "no", "off", "0", ""]);
-function risky(key, value) {
-  const lower = key.toLowerCase();
-  if (lower.startsWith("filter."))
-    return true;
-  if (lower === "core.fsmonitor")
-    return !OFF.has(value.trim().toLowerCase());
-  if (lower === "core.hookspath")
-    return true;
-  if (lower === "core.sshcommand")
-    return true;
-  if (lower.startsWith("gpg."))
-    return true;
-  if (lower === "diff.external")
-    return true;
-  if (lower.startsWith("diff.") && (lower.endsWith(".command") || lower.endsWith(".textconv")))
-    return true;
-  return false;
-}
-async function commonDir(folder) {
-  try {
-    const raw = await gitReadOut(folder, ["rev-parse", "--git-common-dir"], {
-      timeout: 5000
-    });
-    const dir = raw.trim();
-    return dir ? import_node_path2.resolve(folder, dir) : null;
-  } catch {
-    return null;
-  }
-}
-async function configFindings(folder) {
-  const raw = await gitReadOut(folder, ["config", "--list", "--show-scope", "-z"], {
-    timeout: 5000
-  });
-  const found = [];
-  const parts = raw.split("\x00");
-  for (let i = 0;i + 1 < parts.length; i += 2) {
-    const scope = parts[i];
-    if (scope !== "local" && scope !== "worktree")
-      continue;
-    const entry = parts[i + 1];
-    const cut = entry.indexOf(`
-`);
-    const key = cut < 0 ? entry : entry.slice(0, cut);
-    const value = cut < 0 ? "true" : entry.slice(cut + 1);
-    if (risky(key, value))
-      found.push({ kind: "config", key, value });
-  }
-  return found;
-}
-async function hookFindings(dir) {
-  const hooks = import_node_path2.join(dir, "hooks");
-  const names = await import_promises.readdir(hooks).catch(() => []);
-  const found = [];
-  for (const name of names.sort()) {
-    if (name.endsWith(".sample"))
-      continue;
-    const info = await import_promises.stat(import_node_path2.join(hooks, name)).catch(() => null);
-    if (!info?.isFile())
-      continue;
-    if (process.platform !== "win32" && (info.mode & 73) === 0)
-      continue;
-    found.push({ kind: "hook", name });
-  }
-  return found;
-}
-async function scanRepoTrust(folder) {
-  const dir = await commonDir(folder);
-  if (!dir)
-    return { risky: false, findings: [], gitDir: null };
-  const [config, hooks] = await Promise.all([
-    configFindings(folder).catch(() => []),
-    hookFindings(dir)
-  ]);
-  const findings = [...config, ...hooks];
-  return { risky: findings.length > 0, findings, gitDir: dir };
-}
-function trustFingerprint(findings) {
-  return findings.map((f) => f.kind === "hook" ? `hook:${f.name}` : `config:${f.key}=${f.value}`).sort().join(`
-`);
-}
-
-class TrustStore {
-  onChange;
-  answers = new Map;
-  constructor(initial = {}, onChange) {
-    this.onChange = onChange;
-    for (const [folder, value] of Object.entries(initial))
-      this.answers.set(import_node_path2.resolve(folder), value);
-  }
-  get(folder) {
-    return this.answers.get(import_node_path2.resolve(folder));
-  }
-  set(folder, answer, scan) {
-    this.answers.set(import_node_path2.resolve(folder), {
-      answer,
-      fingerprint: trustFingerprint(scan.findings)
-    });
-    this.onChange?.(this.toJSON());
-  }
-  forget(folder) {
-    if (this.answers.delete(import_node_path2.resolve(folder)))
-      this.onChange?.(this.toJSON());
-  }
-  async decide(folder) {
-    const scan = await scanRepoTrust(folder);
-    if (!scan.risky)
-      return { kind: "run" };
-    const known = this.get(folder);
-    if (known && known.fingerprint === trustFingerprint(scan.findings))
-      return known.answer === "trusted" ? { kind: "run" } : { kind: "restricted" };
-    return { kind: "ask", scan };
-  }
-  toJSON() {
-    return Object.fromEntries(this.answers);
-  }
-}
-
-// apps/desktop/electron/main/git/trust-gate.ts
-var FRESH_MS = 60000;
-var asker = null;
-var store = null;
-var fresh = new Map;
-var pending = new Map;
-function storeFile() {
-  return import_node_path3.join(appHomeDir(), "repo-trust.json");
-}
-async function save(all) {
-  const file = storeFile();
-  await import_promises2.mkdir(import_node_path3.dirname(file), { recursive: true, mode: 448 });
-  const temp = `${file}.${process.pid}.tmp`;
-  await import_promises2.writeFile(temp, `${JSON.stringify(all, null, 2)}
-`, { mode: 384 });
-  await import_promises2.rename(temp, file);
-}
-function load() {
-  store ??= import_promises2.readFile(storeFile(), "utf8").then((text) => JSON.parse(text)).catch(() => ({})).then((initial) => new TrustStore(initial, (all) => {
-    save(all).catch(() => {});
-  }));
-  return store;
-}
-async function readsAllowed(folder) {
-  return await readsVerdict(folder) === "run";
-}
-function readsVerdict(folder) {
-  const key = import_node_path3.resolve(folder);
-  const until = fresh.get(key);
-  if (until !== undefined && until > Date.now())
-    return Promise.resolve("run");
-  const running = pending.get(key);
-  if (running)
-    return running;
-  const decided = decide(key).catch(() => "unchecked").finally(() => pending.delete(key));
-  pending.set(key, decided);
-  return decided;
-}
-async function decide(folder) {
-  const trust = await load();
-  const verdict = await trust.decide(folder);
-  if (verdict.kind === "run") {
-    fresh.set(folder, Date.now() + FRESH_MS);
-    return "run";
-  }
-  if (verdict.kind === "restricted")
-    return "refused";
-  if (!asker)
-    return "unchecked";
-  const answer = await asker(folder, verdict.scan);
-  trust.set(folder, answer, verdict.scan);
-  if (answer !== "trusted")
-    return "refused";
-  fresh.set(folder, Date.now() + FRESH_MS);
-  return "run";
-}
-
-// apps/desktop/electron/hook/cli.ts
-init_src();
-init_client();
-init_loopback();
-init_pkce();
-init_redirect();
-var import_node_child_process6 = require("node:child_process");
-var import_node_fs4 = require("node:fs");
-var import_node_os8 = require("node:os");
-var import_node_path11 = require("node:path");
-
-// apps/desktop/electron/mcp-local/server.ts
-init_local_store();
-var import_node_os6 = require("node:os");
-
 // apps/desktop/electron/mcp-local/schema.ts
-function paramSchema(param) {
-  const described = (schema) => param.description ? { ...schema, description: param.description } : schema;
-  switch (param.type) {
-    case "string":
-      return described(param.enum ? { type: "string", enum: [...param.enum] } : { type: "string" });
-    case "boolean":
-      return described({ type: "boolean" });
-    case "integer":
-      return described({
-        type: "integer",
-        ...param.minimum !== undefined ? { minimum: param.minimum } : {},
-        ...param.maximum !== undefined ? { maximum: param.maximum } : {}
-      });
-    case "string[]":
-      return described({ type: "array", items: { type: "string" } });
-    case "nullable-string":
-      return described({ type: ["string", "null"] });
-    case "string-map":
-      return described({
-        type: "object",
-        additionalProperties: { type: ["string", "null"] }
-      });
-    case "object":
-      return described(shapeSchema(param));
-    case "object[]":
-      return described({
-        type: "array",
-        items: shapeSchema(param),
-        ...param.minItems ? { minItems: param.minItems } : {}
-      });
-  }
-}
-function shapeSchema(shape) {
-  const properties = {};
-  for (const [name, param] of Object.entries(shape.properties))
-    properties[name] = paramSchema(param);
-  return {
-    type: "object",
-    properties,
-    ...shape.required?.length ? { required: [...shape.required] } : {},
-    additionalProperties: false
-  };
-}
-
 class InvalidParams extends Error {
   constructor(message) {
     super(message);
@@ -5232,931 +2549,6 @@ function checkShape(shape, args, prefix = "") {
 }
 
 // apps/desktop/electron/mcp-local/tools.ts
-init_cards();
-init_local_store();
-
-// apps/desktop/electron/main/transcripts/search.ts
-var import_promises6 = require("node:fs/promises");
-var import_node_os5 = require("node:os");
-var import_node_path9 = require("node:path");
-
-// apps/desktop/shared/terminal.ts
-var BACKGROUND_COMMAND_MAX = 4 * 1024;
-var BACKGROUND_OUTPUT_MAX = 64 * 1024;
-var SUBAGENT_INPUT_MAX = 8 * 1024;
-var AGENT_FACTS_READ_MAX = 4 * 1024 * 1024;
-var UUID2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function isAgentSessionId(value) {
-  return typeof value === "string" && UUID2.test(value);
-}
-var TERMINAL_LIMITS = {
-  perProject: 8,
-  maxGeometry: 1000,
-  scrollback: 5000,
-  maxInput: 256 * 1024
-};
-
-// apps/desktop/electron/main/transcripts/search.ts
-init_agent_home();
-
-// apps/desktop/electron/main/fs-kit/list-files.ts
-var import_ignore = __toESM(require_ignore(), 1);
-
-// apps/desktop/electron/main/fs-kit/rg.ts
-var import_node_child_process2 = require("node:child_process");
-var import_node_fs2 = require("node:fs");
-var import_node_module2 = require("node:module");
-var import_node_path7 = require("node:path");
-var __dirname = "/Users/pp/fuongz_projects/lanework-public/apps/desktop/electron/main/fs-kit", __filename = "/Users/pp/fuongz_projects/lanework-public/apps/desktop/electron/main/fs-kit/rg.ts";
-
-class RipgrepMissingError extends Error {
-}
-
-class FsSearchTimeoutError extends Error {
-}
-var cached = null;
-function rgPath() {
-  if (cached)
-    return cached;
-  const exe = process.platform === "win32" ? ".exe" : "";
-  const bundled = import_node_path7.join(__dirname, "..", "bin", `rg-${process.arch}${exe}`).replace(`${import_node_path7.sep}app.asar${import_node_path7.sep}`, `${import_node_path7.sep}app.asar.unpacked${import_node_path7.sep}`);
-  if (import_node_fs2.existsSync(bundled)) {
-    cached = bundled;
-    return cached;
-  }
-  const dev = devRgPath();
-  if (dev) {
-    cached = dev;
-    return cached;
-  }
-  throw new RipgrepMissingError("ripgrep is missing from this build. Run `bun run build` in apps/desktop.");
-}
-function devRgPath() {
-  const name = ["@vscode", "ripgrep"].join("/");
-  const exe = process.platform === "win32" ? "rg.exe" : "rg";
-  try {
-    const entry = import_node_fs2.realpathSync(import_node_module2.createRequire(__filename).resolve(name));
-    const found = import_node_module2.createRequire(entry).resolve(`${name}-${process.platform}-${process.arch}/bin/${exe}`);
-    return import_node_fs2.existsSync(found) ? found : null;
-  } catch {
-    return null;
-  }
-}
-function runRg(args, options) {
-  const bin = rgPath();
-  return new Promise((resolve, reject) => {
-    if (options.signal?.aborted)
-      return reject(abortReason(options.signal));
-    let child;
-    try {
-      child = import_node_child_process2.spawn(bin, ["--no-config", "--no-require-git", ...args], {
-        cwd: options.cwd,
-        stdio: ["ignore", "pipe", "pipe"],
-        windowsHide: true
-      });
-    } catch (error) {
-      return reject(error);
-    }
-    let stopped = false;
-    let timedOut = false;
-    let settled = false;
-    let rest = [];
-    let stderr = "";
-    const kill = () => {
-      if (child.exitCode === null && child.signalCode === null)
-        child.kill("SIGKILL");
-    };
-    const finish = (error) => {
-      if (settled)
-        return;
-      settled = true;
-      clearTimeout(timer);
-      options.signal?.removeEventListener("abort", onAbort);
-      kill();
-      if (error !== undefined)
-        reject(error);
-      else
-        resolve({ stopped, timedOut });
-    };
-    const onAbort = () => finish(abortReason(options.signal));
-    const timer = setTimeout(() => {
-      timedOut = true;
-      finish();
-    }, options.timeoutMs);
-    options.signal?.addEventListener("abort", onAbort, { once: true });
-    child.stdout?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk) => {
-      if (settled)
-        return;
-      let start = 0;
-      for (;; ) {
-        const end = chunk.indexOf(`
-`, start);
-        if (end === -1)
-          break;
-        let line = chunk.slice(start, end);
-        if (rest.length > 0) {
-          rest.push(line);
-          line = rest.join("");
-          rest = [];
-        }
-        start = end + 1;
-        if (line && options.onLine(line) === false) {
-          stopped = true;
-          return finish();
-        }
-      }
-      if (start < chunk.length)
-        rest.push(chunk.slice(start));
-    });
-    child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (chunk) => {
-      stderr = (stderr + chunk).slice(-4000);
-    });
-    child.once("error", (error) => finish(error.code === "ENOENT" ? new RipgrepMissingError(`ripgrep could not be started: ${bin}`) : error));
-    child.once("close", (code) => {
-      if (settled)
-        return;
-      const last = rest.join("");
-      if (last && options.onLine(last) === false)
-        stopped = true;
-      if (code === 2 && !stopped && /regex parse error|error parsing glob/i.test(stderr))
-        return finish(new Error(`Not a valid ${/glob/i.test(stderr) ? "file filter" : "regular expression"}: ${/error: (.+)/.exec(stderr)?.[1]?.trim() ?? "rg could not read it"}.`));
-      if (code === 0 || code === 1 || code === 2 || stopped)
-        return finish();
-      finish(new Error(stderr.trim().split(`
-`).slice(-3).join(`
-`) || `rg exited with ${code}`));
-    });
-  });
-}
-function abortReason(signal) {
-  return signal?.reason ?? new DOMException("The search was aborted.", "AbortError");
-}
-
-// apps/desktop/electron/main/fs-kit/list-files.ts
-var { fdir } = require_dist();
-var WALK_SKIP = new Set([
-  ".git",
-  "node_modules",
-  ".next",
-  "dist",
-  "build",
-  ".turbo"
-]);
-// apps/desktop/electron/main/terminal/agent-sessions.ts
-init_conversation();
-
-// apps/desktop/electron/main/transcripts/jsonl.ts
-var import_promises4 = require("node:fs/promises");
-var CHUNK = 64 * 1024;
-var META_CHUNK = 256 * 1024;
-var TITLE_MAX = 120;
-async function readRange(file, start, length) {
-  const handle = await import_promises4.open(file, "r");
-  try {
-    const buffer = Buffer.alloc(length);
-    const { bytesRead } = await handle.read(buffer, 0, length, start);
-    return buffer.subarray(0, bytesRead).toString("utf8");
-  } finally {
-    await handle.close();
-  }
-}
-function lines(text, { head }) {
-  const parts = text.split(`
-`);
-  if (head)
-    parts.pop();
-  else
-    parts.shift();
-  const out = [];
-  for (const part of parts) {
-    if (!part.trim())
-      continue;
-    try {
-      const value = JSON.parse(part);
-      if (value && typeof value === "object")
-        out.push(value);
-    } catch {}
-  }
-  return out;
-}
-function tidy(text) {
-  const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length > TITLE_MAX ? `${flat.slice(0, TITLE_MAX - 1)}…` : flat;
-}
-function claudeProjectDir(cwd) {
-  return cwd.replace(/[^A-Za-z0-9]/g, "-");
-}
-var LINE_STEP = 1024 * 1024;
-
-// apps/desktop/electron/main/transcripts/journal.ts
-var journals = new Map;
-var reading = new Map;
-
-// apps/desktop/electron/main/transcripts/activity.ts
-var endsRead = new Map;
-var endsReading = new Map;
-var STALE_MS = 10 * 60000;
-var SUBAGENT_STALE_MS = 60 * 60000;
-var META_MAX = 64 * 1024;
-
-// apps/desktop/electron/main/terminal/background-tasks.ts
-var import_node_child_process4 = require("node:child_process");
-var import_node_util2 = require("node:util");
-
-// apps/desktop/electron/main/terminal/process-table.ts
-var import_node_child_process3 = require("node:child_process");
-var import_node_util = require("node:util");
-var runFile = import_node_util.promisify(import_node_child_process3.execFile);
-
-// apps/desktop/electron/main/terminal/background-tasks.ts
-var WORKFLOW_AGENT_MAX = 200;
-var WORKFLOW_FILE_MAX = 4 * WORKFLOW_AGENT_MAX;
-var META_MAX2 = 64 * 1024;
-var STEP = 1024 * 1024;
-var runFile2 = import_node_util2.promisify(import_node_child_process4.execFile);
-var stoppedTasks = new Set;
-var cache = new Map;
-var reading2 = new Map;
-
-// apps/desktop/electron/main/terminal/agent-sessions.ts
-var PROMPT_SCAN = 16 * 1024 * 1024;
-function typed(text) {
-  if (typeof text !== "string")
-    return null;
-  const clean = text.trim();
-  if (!clean)
-    return null;
-  const orchestrate = clean.startsWith("<lanework_orchestrate");
-  if (orchestrate || clean.startsWith("<lanework_conductor")) {
-    const start = clean.lastIndexOf(`<user_request>
-`);
-    const end = clean.lastIndexOf(`
-</user_request>`);
-    if (start === -1 || end < start)
-      return null;
-    const request = clean.slice(start + 15, end).trim();
-    if (!request)
-      return null;
-    return tidy(orchestrate ? `/orchestrate ${request}` : mentionsAsNames(request));
-  }
-  if (clean.startsWith("<"))
-    return null;
-  return tidy(mentionsAsNames(clean));
-}
-function claudePrompt(line) {
-  if (line.type !== "user" || line.isMeta || line.isSidechain)
-    return null;
-  const content = line.message?.content;
-  if (typeof content === "string")
-    return typed(content);
-  if (Array.isArray(content)) {
-    for (const part of content)
-      if (part?.type === "text")
-        return typed(part.text);
-  }
-  return null;
-}
-function claudeImagePrompt(line) {
-  if (line.type !== "user" || line.isMeta || line.isSidechain)
-    return null;
-  const content = line.message?.content;
-  if (!Array.isArray(content))
-    return null;
-  const parts = content;
-  if (parts.some((part) => part?.type === "tool_result"))
-    return null;
-  const images = parts.filter((part) => part?.type === "image").length;
-  if (!images)
-    return null;
-  return images === 1 ? "Image" : `${images} images`;
-}
-var CARD_SCAN = 4 * 1024 * 1024;
-function codexPrompt(line) {
-  const payload = line.payload;
-  if (line.type === "event_msg" && payload?.type === "user_message")
-    return typed(payload.message);
-  if (line.type !== "response_item" || payload?.type !== "message" || payload.role !== "user" || !Array.isArray(payload.content))
-    return null;
-  for (const part of payload.content) {
-    if (part?.type !== "input_text" || typeof part.text !== "string")
-      continue;
-    if (part.text.startsWith("# AGENTS.md"))
-      return null;
-    const prompt = typed(part.text);
-    if (prompt)
-      return prompt;
-  }
-  return null;
-}
-var text = (value) => typeof value === "string" && value.trim() ? value.trim() : null;
-function codexRole(meta) {
-  const source = meta.source;
-  if (!source || typeof source !== "object" || !("subagent" in source))
-    return { kind: "conversation" };
-  const spawn = source.subagent?.thread_spawn;
-  if (!spawn)
-    return { kind: "helper" };
-  const root = [meta.session_id, spawn.parent_thread_id, meta.parent_thread_id].filter(isAgentSessionId).find((id) => id !== meta.id);
-  if (!root)
-    return { kind: "helper" };
-  const path = text(spawn.agent_path ?? meta.agent_path);
-  return {
-    kind: "spawned",
-    root,
-    nickname: text(spawn.agent_nickname ?? meta.agent_nickname),
-    task: path ? path.split("/").pop()?.replace(/_/g, " ") ?? null : null,
-    role: text(spawn.agent_role)
-  };
-}
-
-// apps/desktop/electron/main/terminal/opencode-sessions.ts
-var import_promises5 = require("node:fs/promises");
-var import_node_os4 = require("node:os");
-var import_node_path8 = require("node:path");
-var DEFAULT_TITLE = /^(New|Child) session - \d{4}-\d{2}-\d{2}T/;
-var TITLE_MAX2 = 200;
-function opencodeDataDir(home, env = process.env, realHome = true) {
-  if (realHome && env.OPENCODE_DATA_DIR)
-    return env.OPENCODE_DATA_DIR;
-  const app = realHome && env.OPENCODE_APPNAME?.trim() || "opencode";
-  if (realHome && env.XDG_DATA_HOME)
-    return import_node_path8.join(env.XDG_DATA_HOME, app);
-  return import_node_path8.join(home, ".local", "share", app);
-}
-function opencodeDataDirOf(home) {
-  return opencodeDataDir(home, process.env, home === import_node_os4.homedir());
-}
-function hasTable(db, name) {
-  return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined;
-}
-function schemaOf(db) {
-  const v2 = hasTable(db, "session_v2");
-  if (!v2 && !hasTable(db, "session"))
-    return null;
-  const table = v2 ? "session_v2" : "session";
-  const columns = new Set(db.prepare(`PRAGMA table_info(${table})`).all().flatMap((row) => typeof row.name === "string" ? [row.name] : []));
-  return { v2, table, columns };
-}
-async function withOpencodeDb(dataDir, fallback, read) {
-  const file = import_node_path8.join(dataDir, "opencode.db");
-  if (!(await import_promises5.stat(file).catch(() => null))?.isFile())
-    return fallback;
-  let db = null;
-  try {
-    const driver = await import("node:sqlite");
-    db = new driver.DatabaseSync(file, { readOnly: true });
-    const schema = schemaOf(db);
-    return schema ? read(db, schema) : fallback;
-  } catch {
-    return fallback;
-  } finally {
-    try {
-      db?.close();
-    } catch {}
-  }
-}
-function tidy2(text) {
-  const line = text.replace(/\s+/g, " ").trim();
-  return line.length > TITLE_MAX2 ? `${line.slice(0, TITLE_MAX2 - 1)}…` : line;
-}
-function opencodeTitle(title) {
-  if (typeof title !== "string" || DEFAULT_TITLE.test(title))
-    return null;
-  return tidy2(title) || null;
-}
-function opencodePromptText(data) {
-  if (typeof data !== "string")
-    return null;
-  try {
-    const text = JSON.parse(data).text;
-    return typeof text === "string" && text.trim() ? text : null;
-  } catch {
-    return null;
-  }
-}
-
-// apps/desktop/electron/main/transcripts/search.ts
-var SESSION_LIMIT = 20;
-var SESSION_LIMIT_MAX = 50;
-var LINES_PER_SESSION = 3;
-var RG_MAX_COUNT = 40;
-var FIRST_BATCH_BYTES = 128 * 1024 * 1024;
-var SNIPPET_MAX = 200;
-var SNIPPET_LEAD = 60;
-var OPENING_MAX = 4 * 1024 * 1024;
-var OPENCODE_ROWS = 12;
-async function searchSessions(query, options = {}) {
-  if (!query.trim())
-    return [];
-  const limit = Math.min(Math.max(1, Math.floor(options.limit ?? SESSION_LIMIT)), SESSION_LIMIT_MAX);
-  const harnesses = new Set(options.harnesses ?? ["claude", "codex", "opencode"]);
-  const home = options.home ?? import_node_os5.homedir();
-  const folders = options.folders ? new Set(options.folders) : null;
-  const finder = makeFinder(query, options);
-  const deadline = Date.now() + (options.timeoutMs ?? 1e4);
-  const found = new Map;
-  const keep = (match) => {
-    const key = `${match.harness}:${match.sessionId}`;
-    const had = found.get(key);
-    if (!had)
-      return void found.set(key, match);
-    for (const line of match.lines)
-      if (had.lines.length < LINES_PER_SESSION)
-        had.lines.push(line);
-    if (match.at > had.at)
-      had.at = match.at;
-  };
-  let opencode = null;
-  const startOpencode = () => {
-    opencode ??= harnesses.has("opencode") ? searchOpencode(home, query, finder, options, folders, limit, deadline) : Promise.resolve([]);
-    return opencode;
-  };
-  const candidates = (await Promise.all([
-    harnesses.has("claude") ? claudeCandidates(home, folders) : Promise.resolve([]),
-    harnesses.has("codex") ? codexCandidates(home, folders, options.signal) : Promise.resolve([])
-  ])).flat().sort((a, b) => b.mtimeMs - a.mtimeMs);
-  let timedOut = false;
-  let budget = FIRST_BATCH_BYTES;
-  let at = 0;
-  while (at < candidates.length && found.size < limit) {
-    const batch = [];
-    let bytes = 0;
-    while (at < candidates.length && (batch.length === 0 || bytes < budget)) {
-      const next = candidates[at++];
-      batch.push(next);
-      bytes += next.size;
-    }
-    budget *= 2;
-    const left = deadline - Date.now();
-    if (left <= 0) {
-      timedOut = true;
-      break;
-    }
-    const searching = searchFiles(batch, query, finder, options, left);
-    startOpencode();
-    const hits = await searching;
-    timedOut = hits.timedOut;
-    const matches = await Promise.all(batch.filter((file) => hits.lines.has(file.path)).map((file) => describe(file, hits.lines.get(file.path) ?? [], home, folders)));
-    for (const match of matches)
-      if (match)
-        keep(match);
-    if (timedOut)
-      break;
-  }
-  for (const match of await startOpencode())
-    keep(match);
-  const out = [...found.values()].sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
-  if (timedOut && out.length === 0)
-    throw new FsSearchTimeoutError("The search took too long.");
-  return out;
-}
-async function statCandidate(harness, path) {
-  const info = await import_promises6.stat(path).catch(() => null);
-  return info?.isFile() ? { harness, path, mtimeMs: info.mtimeMs, size: info.size } : null;
-}
-async function claudeCandidates(home, folders) {
-  const root = import_node_path9.join(claudeDir(home), "projects");
-  const dirs = folders ? [...new Set([...folders].map(claudeProjectDir))] : await import_promises6.readdir(root).catch(() => []);
-  const found = await Promise.all(dirs.map(async (dir) => {
-    const names = await import_promises6.readdir(import_node_path9.join(root, dir)).catch(() => []);
-    return Promise.all(names.filter((name) => isAgentSessionId(name.replace(/\.jsonl$/, ""))).filter((name) => name.endsWith(".jsonl")).map((name) => statCandidate("claude", import_node_path9.join(root, dir, name))));
-  }));
-  return found.flat().filter((file) => file !== null);
-}
-async function codexCandidates(home, folders, signal) {
-  const files = [];
-  const down = async (dir, depth) => {
-    const names = await import_promises6.readdir(dir).catch(() => []);
-    await Promise.all(names.map(async (name) => {
-      if (depth < 3)
-        return down(import_node_path9.join(dir, name), depth + 1);
-      if (name.startsWith("rollout-") && name.endsWith(".jsonl"))
-        files.push(import_node_path9.join(dir, name));
-    }));
-  };
-  await down(import_node_path9.join(codexHome(home), "sessions"), 0);
-  const stated = (await Promise.all(files.map((file) => statCandidate("codex", file)))).filter((file) => file !== null);
-  if (!folders)
-    return stated;
-  signal?.throwIfAborted();
-  const metas = await Promise.all(stated.map((file) => codexMeta(file.path)));
-  return stated.filter((_, index) => {
-    const cwd = metas[index]?.cwd;
-    return typeof cwd === "string" && folders.has(cwd);
-  });
-}
-var codexMetas = new Map;
-async function codexMeta(file) {
-  if (codexMetas.has(file))
-    return codexMetas.get(file) ?? null;
-  const head = lines(await readRange(file, 0, META_CHUNK).catch(() => ""), {
-    head: true
-  });
-  const meta = head.find((line) => line.type === "session_meta")?.payload ?? null;
-  if (meta)
-    codexMetas.set(file, meta);
-  return meta;
-}
-var MATCH_HEAD = /^\{"type":"match","data":\{"path":\{"text":"((?:[^"\\]|\\.)*)"\}/;
-var LINE_PARSE_MAX = 2 * 1024 * 1024;
-var SPOKEN_TYPES = {
-  claude: ["\\\"type\\\":\\\"user\\\"", "\\\"type\\\":\\\"assistant\\\""],
-  codex: ["\\\"type\\\":\\\"response_item\\\"", "\\\"type\\\":\\\"event_msg\\\""]
-};
-async function searchFiles(batch, query, finder, options, timeoutMs) {
-  const out = new Map;
-  const harness = new Map(batch.map((file) => [file.path, file.harness]));
-  const args = [
-    "--json",
-    options.regex ? "--no-fixed-strings" : "--fixed-strings",
-    options.caseSensitive ? "--case-sensitive" : "--ignore-case",
-    "--max-count",
-    String(RG_MAX_COUNT),
-    "--no-messages",
-    "--regexp",
-    query,
-    "--",
-    ...batch.map((file) => file.path)
-  ];
-  const result = await runRg(args, {
-    cwd: batch[0] ? import_node_path9.join(batch[0].path, "..") : import_node_os5.homedir(),
-    timeoutMs,
-    signal: options.signal,
-    onLine: (raw) => {
-      const head = MATCH_HEAD.exec(raw);
-      if (!head || raw.length > LINE_PARSE_MAX)
-        return;
-      let path;
-      try {
-        path = JSON.parse(`"${head[1]}"`);
-      } catch {
-        return;
-      }
-      const kind = harness.get(path);
-      const kept = out.get(path) ?? [];
-      if (!kind || kept.length >= LINES_PER_SESSION)
-        return;
-      if (!SPOKEN_TYPES[kind].some((type) => raw.includes(type)))
-        return;
-      let event;
-      try {
-        event = JSON.parse(raw);
-      } catch {
-        return;
-      }
-      const text = event.data.lines?.text;
-      if (text === undefined)
-        return;
-      const snippet = snippetOf(kind, text, event.data.line_number ?? 0, finder);
-      if (!snippet || kept.some((line) => line.text === snippet.text))
-        return;
-      kept.push(snippet);
-      out.set(path, kept);
-      return;
-    }
-  });
-  return { lines: out, timedOut: result.timedOut };
-}
-var NOT_SAID = new Set([
-  "id",
-  "type",
-  "uuid",
-  "parentUuid",
-  "tool_use_id",
-  "call_id",
-  "signature",
-  "data",
-  "encrypted_content",
-  "media_type",
-  "model",
-  "cwd",
-  "providerID"
-]);
-var INJECTED = /^(<[a-z][\w-]*[\s>]|# AGENTS\.md)/;
-function said(value, out, depth = 0) {
-  if (depth > 8 || out.length > 200)
-    return;
-  if (typeof value === "string") {
-    if (!INJECTED.test(value.trimStart()))
-      out.push(value);
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value)
-      said(item, out, depth + 1);
-    return;
-  }
-  if (value && typeof value === "object") {
-    for (const [key, item] of Object.entries(value))
-      if (!NOT_SAID.has(key))
-        said(item, out, depth + 1);
-  }
-}
-function spoken(harness, line) {
-  if (harness === "claude") {
-    if (line.type !== "user" && line.type !== "assistant")
-      return;
-    if (line.isMeta)
-      return;
-    return line.message?.content;
-  }
-  if (line.type !== "response_item" && line.type !== "event_msg")
-    return;
-  return line.payload;
-}
-function snippetOf(harness, raw, line, finder) {
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== "object")
-    return null;
-  const texts = [];
-  said(spoken(harness, parsed), texts);
-  return snippetFrom(texts, line, finder);
-}
-function snippetFrom(texts, line, finder) {
-  for (const text of texts) {
-    const pattern = finder(text);
-    const first = pattern.exec(text);
-    if (!first)
-      continue;
-    const start = first.index;
-    const end = start + first[0].length;
-    const from = Math.max(0, start - SNIPPET_LEAD * 2);
-    const to = Math.min(text.length, end + SNIPPET_MAX * 2);
-    let window = text.slice(from, to).replace(/\s+/g, " ");
-    const lead = window.search(finder(window));
-    if (lead === -1)
-      continue;
-    const cut = Math.max(0, lead - SNIPPET_LEAD);
-    window = window.slice(cut, cut + SNIPPET_MAX);
-    const before = from > 0 || cut > 0 ? "…" : "";
-    const after = to < text.length || window.length >= SNIPPET_MAX ? "…" : "";
-    const body = `${before}${window.trim()}${after}`;
-    const ranges = [];
-    const marks = finder(body);
-    for (const match of body.matchAll(new RegExp(marks.source, `${marks.flags}g`))) {
-      if (!match[0])
-        break;
-      ranges.push([match.index, match.index + match[0].length]);
-    }
-    if (ranges.length === 0)
-      continue;
-    return { line, text: body, ranges };
-  }
-  return null;
-}
-function makeFinder(query, options) {
-  const flags = options.caseSensitive ? "u" : "iu";
-  let source = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  if (options.regex) {
-    try {
-      new RegExp(query, flags);
-      source = query;
-    } catch {}
-  }
-  return () => new RegExp(source, flags);
-}
-var titles = new Map;
-async function describe(file, matched, home, folders) {
-  const cached = titles.get(file.path);
-  let value;
-  if (cached && cached.mtimeMs === file.mtimeMs)
-    value = cached.value;
-  else {
-    value = await (file.harness === "claude" ? claudeDescribed(file) : codexDescribed(file, home)).catch(() => null);
-    titles.set(file.path, { mtimeMs: file.mtimeMs, value });
-  }
-  if (!value)
-    return null;
-  if (folders && value.cwd !== null && !folders.has(value.cwd))
-    return null;
-  const root = file.harness === "claude" ? claudeDir(home) : codexHome(home);
-  return {
-    harness: file.harness,
-    sessionId: value.sessionId,
-    title: value.title,
-    at: new Date(file.mtimeMs).toISOString(),
-    file: import_node_path9.relative(root, file.path).split(import_node_path9.sep).join("/"),
-    lines: matched
-  };
-}
-async function claudeDescribed(file) {
-  const head = lines(await readRange(file.path, 0, CHUNK), { head: true });
-  const tail = file.size > CHUNK ? lines(await readRange(file.path, file.size - CHUNK, CHUNK), {
-    head: false
-  }) : head;
-  const named = [...tail, ...head].reverse().find((line) => line.type === "ai-title" && typeof line.aiTitle === "string")?.aiTitle;
-  const cwd = head.find((line) => typeof line.cwd === "string")?.cwd;
-  let title = named ? tidy(named) : head.map(claudePrompt).find(Boolean);
-  if (!title) {
-    const opening = lines(await readRange(file.path, 0, OPENING_MAX), {
-      head: true
-    });
-    title = opening.map(claudePrompt).find(Boolean) ?? opening.map(claudeImagePrompt).find(Boolean);
-  }
-  return {
-    sessionId: import_node_path9.basename(file.path, ".jsonl"),
-    title: title ?? "Untitled conversation",
-    cwd: typeof cwd === "string" ? cwd : null
-  };
-}
-var codexNamesRead = null;
-async function codexIndex(home) {
-  const file = import_node_path9.join(codexHome(home), "session_index.jsonl");
-  const mtimeMs = (await import_promises6.stat(file).catch(() => null))?.mtimeMs ?? 0;
-  if (codexNamesRead?.file === file && codexNamesRead.mtimeMs === mtimeMs)
-    return codexNamesRead.names;
-  const names = new Map;
-  const text = await readText(file, 16 * 1024 * 1024) ?? "";
-  for (const line of lines(`${text}
-`, { head: true }))
-    if (typeof line.id === "string" && typeof line.thread_name === "string")
-      names.set(line.id, line.thread_name);
-  codexNamesRead = { file, mtimeMs, names };
-  return names;
-}
-async function codexDescribed(file, home) {
-  const meta = await codexMeta(file.path);
-  if (!meta || !isAgentSessionId(meta.id))
-    return null;
-  const role = codexRole(meta);
-  if (role.kind === "helper")
-    return null;
-  const sessionId = role.kind === "spawned" ? role.root : meta.id;
-  const named = (await codexIndex(home)).get(sessionId);
-  let title = named ? tidy(named) : null;
-  if (!title && role.kind === "conversation") {
-    const head = lines(await readRange(file.path, 0, META_CHUNK), {
-      head: true
-    });
-    title = head.map(codexPrompt).find(Boolean) ?? null;
-  }
-  return {
-    sessionId,
-    title: title ?? "Codex conversation",
-    cwd: typeof meta.cwd === "string" ? meta.cwd : null
-  };
-}
-async function searchOpencode(home, query, finder, options, folders, limit, deadline) {
-  if (folders?.size === 0)
-    return [];
-  return withOpencodeDb(opencodeDataDirOf(home), [], (db) => {
-    let test;
-    let bound;
-    if (options.regex) {
-      const pattern = finder("");
-      db.function("lw_matches", { deterministic: true }, (value) => typeof value === "string" && pattern.test(value) ? 1 : 0);
-      test = "lw_matches(data) = 1 AND ?2 IS NOT NULL";
-      bound = query;
-    } else if (options.caseSensitive) {
-      test = "instr(data, ?2) > 0";
-      bound = query;
-    } else {
-      test = "data LIKE ?2 ESCAPE '\\'";
-      bound = `%${query.replace(/[\\%_]/g, "\\$&")}%`;
-    }
-    const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
-    const scope = folders ? JSON.stringify([...folders]) : null;
-    const sources = [];
-    if (tables.has("session_v2") && tables.has("session_message"))
-      sources.push({
-        table: "session_v2",
-        rows: db.prepare(`SELECT seq, data FROM session_message
-            WHERE session_id = ?1 AND type IN ('user', 'assistant')
-              AND ${test}
-            ORDER BY seq LIMIT ${OPENCODE_ROWS}`)
-      });
-    if (tables.has("session") && tables.has("part"))
-      sources.push({
-        table: "session",
-        rows: db.prepare(`SELECT 0 AS seq, data FROM part
-            WHERE session_id = ?1 AND ${test}
-            ORDER BY time_created LIMIT ${OPENCODE_ROWS}`)
-      });
-    const sessions = sources.flatMap(({ table, rows }) => db.prepare(`SELECT id, parent_id AS parent, title, time_updated AS updated
-               FROM ${table}
-              WHERE ?1 IS NULL OR directory IN (SELECT value FROM json_each(?1))`).all(scope).map((session) => ({ ...session, table, rows })));
-    sessions.sort((a, b) => (typeof b.updated === "number" ? b.updated : 0) - (typeof a.updated === "number" ? a.updated : 0));
-    const out = new Map;
-    for (const session of sessions) {
-      if (out.size >= limit || Date.now() > deadline)
-        break;
-      if (typeof session.id !== "string")
-        continue;
-      const sessionId = typeof session.parent === "string" ? session.parent : session.id;
-      const found = out.get(sessionId);
-      if (found && found.lines.length >= LINES_PER_SESSION)
-        continue;
-      const kept = found?.lines ?? [];
-      for (const row of session.rows.all(session.id, bound)) {
-        if (kept.length >= LINES_PER_SESSION)
-          break;
-        let data;
-        try {
-          data = JSON.parse(String(row.data));
-        } catch {
-          continue;
-        }
-        const texts = [];
-        said(data, texts);
-        const seq = typeof row.seq === "number" ? row.seq : 0;
-        const snippet = snippetFrom(texts, seq, finder);
-        if (snippet && !kept.some((line) => line.text === snippet.text))
-          kept.push(snippet);
-      }
-      if (found || kept.length === 0)
-        continue;
-      const updated = typeof session.updated === "number" ? session.updated : 0;
-      out.set(sessionId, {
-        harness: "opencode",
-        sessionId,
-        title: opencodeSessionTitle(db, session.table, sessionId) ?? "OpenCode session",
-        at: new Date(updated).toISOString(),
-        file: "opencode.db",
-        lines: kept
-      });
-    }
-    return [...out.values()];
-  });
-}
-function opencodeSessionTitle(db, table, id) {
-  const row = db.prepare(`SELECT title FROM ${table} WHERE id = ?`).get(id);
-  const named = opencodeTitle(row?.title);
-  if (named || table !== "session_v2")
-    return named;
-  const first = db.prepare(`SELECT data FROM session_message
-        WHERE session_id = ? AND type = 'user' ORDER BY seq LIMIT 1`).get(id);
-  const prompt = opencodePromptText(first?.data);
-  return prompt ? tidy(prompt) : null;
-}
-
-// apps/desktop/electron/mcp-local/tools.ts
-var BOARD_ID = {
-  type: "string",
-  description: "The board's id (the local project id) from list_boards. There is no default."
-};
-var CARD = {
-  type: "string",
-  description: "Card id or task id (e.g. BE-07)"
-};
-var REPO = {
-  type: "string",
-  description: "Output of `git remote get-url origin`, unmodified (ssh or https)"
-};
-var PRIORITY = {
-  type: "string",
-  enum: ["low", "medium", "high"]
-};
-var ASSIGNEES = {
-  type: "object",
-  description: "Agents assigned to the card. `users` is accepted and ignored: a local board has no accounts.",
-  properties: {
-    agents: { type: "string[]" },
-    users: { type: "string[]" }
-  }
-};
-var STREAMS = {
-  type: "object[]",
-  description: "Sub-agent streams (BE-19). Only for 2+ independent write areas. `owns`: exact paths or directories ending in `/`, no globs; two streams never own the same path. Shared files go in a W0 stream the others depend on. At most 4 streams per wave. Every stream needs at least one verify item tagged with its key.",
-  properties: {
-    key: { type: "string", description: "W0…W999; minted when absent" },
-    title: { type: "string" },
-    goal: { type: "string" },
-    role: { type: "string", enum: ["research", "implement", "test"] },
-    owns: { type: "string[]" },
-    reads: { type: "string[]" },
-    depends_on: { type: "string[]", description: "Stream keys" },
-    isolation: {
-      type: "string",
-      enum: ["worktree", "shared"],
-      description: "Default worktree"
-    }
-  },
-  required: ["title", "goal", "role"]
-};
-var CHECKLIST = {
-  type: "object[]",
-  description: "Decisions (what the user approves) and verify items (how the work is proved). Boxes sharing a `group` are pick-ONE options.",
-  properties: {
-    section: { type: "string", enum: ["decisions", "verify"] },
-    text: { type: "string" },
-    checked: { type: "boolean" },
-    group: { type: "string" },
-    key: { type: "string", description: "D1, V3…; minted if omitted" },
-    note: { type: "string" },
-    stream: {
-      type: "string",
-      description: "Verify items only: the stream key this item proves"
-    }
-  },
-  required: ["section", "text"]
-};
 function fail(code, message) {
   throw new LocalStoreError(code, message);
 }
@@ -6230,558 +2622,297 @@ function brief(card) {
     revision: card.revision
   };
 }
-var TOOLS = [
-  {
-    name: "list_boards",
-    description: "Every board on this machine, with its board id and linked repo. Call this FIRST: every other tool needs a `board_id` and there is no default. Pass `repo` (your `git remote get-url origin`, as is) to get only the board(s) linked to the repo you are working in.",
-    readOnly: true,
-    properties: { repo: REPO },
-    run(args, { store }) {
-      const remote = str2(args.repo);
-      if (remote === undefined) {
-        const boards = store.boardSummaries();
-        return {
-          boards,
-          next: boards.length === 0 ? "No boards yet. Ask the user whether to create one for this repo (create_board)." : "Ask the user which board this repo belongs to; never pick one by its name."
-        };
-      }
-      const repo = normalizeRepo(remote);
-      if (!repo)
-        fail("invalid", `not a git remote: ${remote}`);
-      const boards = store.boardSummaries(remote);
+var RUNS = {
+  list_boards(args, { store }) {
+    const remote = str2(args.repo);
+    if (remote === undefined) {
+      const boards = store.boardSummaries();
       return {
-        repo,
         boards,
-        next: boards.length === 1 ? "Use this board." : boards.length === 0 ? "No board is linked to this repo. Call list_boards without repo and ask the user which board it belongs to, or whether to create a new one; then link_repo or create_board." : "Several boards are linked to this repo. Ask the user which one."
+        next: boards.length === 0 ? "No boards yet. Ask the user whether to create one for this repo (create_board)." : "Ask the user which board this repo belongs to; never pick one by its name."
       };
     }
+    const repo = normalizeRepo(remote);
+    if (!repo)
+      fail("invalid", `not a git remote: ${remote}`);
+    const boards = store.boardSummaries(remote);
+    return {
+      repo,
+      boards,
+      next: boards.length === 1 ? "Use this board." : boards.length === 0 ? "No board is linked to this repo. Call list_boards without repo and ask the user which board it belongs to, or whether to create a new one; then link_repo or create_board." : "Several boards are linked to this repo. Ask the user which one."
+    };
   },
-  {
-    name: "create_board",
-    description: "Create a new board and link it to the git repo in one step. ONLY after the user chose to create a new board, never on your own initiative. Suggest `owner/name` from the remote as the name. Returns board_id for every other tool.",
-    readOnly: false,
-    properties: {
-      name: {
-        type: "string",
-        description: "Board name the user agreed to, e.g. `acme/widgets`"
+  create_board(args, { store }) {
+    const project = store.createProject({
+      name: String(args.name),
+      slug: str2(args.slug),
+      repo: String(args.repo)
+    });
+    return {
+      board_id: project.id,
+      board: {
+        workspaceId: project.id,
+        name: project.name,
+        slug: project.slug,
+        repo: project.repo
       },
-      repo: REPO,
-      slug: {
-        type: "string",
-        description: "Lower-case hyphenated key; omitted = derived from the name."
-      }
-    },
-    required: ["name", "repo"],
-    run(args, { store }) {
-      const project = store.createProject({
-        name: String(args.name),
-        slug: str2(args.slug),
-        repo: String(args.repo)
-      });
-      return {
-        board_id: project.id,
-        board: {
-          workspaceId: project.id,
-          name: project.name,
-          slug: project.slug,
-          repo: project.repo
-        },
-        next: "Use this board_id for every other tool. Read board_summary before creating a card."
-      };
-    }
+      next: "Use this board_id for every other tool. Read board_summary before creating a card."
+    };
   },
-  {
-    name: "link_repo",
-    description: "Link a board to a git repo so list_boards({ repo }) finds it. Only after the USER confirmed which board the repo belongs to. A board links to ONE repo; refuses to replace a different linked repo unless `replace` is true. A repo another board held moves to this one.",
-    readOnly: false,
-    properties: {
-      board_id: BOARD_ID,
-      repo: REPO,
-      replace: {
-        type: "boolean",
-        description: "Move the link from the repo it has now. Only when the user asked."
-      }
-    },
-    required: ["board_id", "repo"],
-    run(args, { store }) {
-      const board = boardOf(store, args.board_id);
-      const repo = normalizeRepo(String(args.repo));
-      if (!repo)
-        fail("invalid", `not a git remote: ${String(args.repo)}`);
-      if (board.repo && board.repo !== repo && args.replace !== true)
-        fail("conflict", `board is linked to ${board.repo}; pass replace: true only if the user asked to move it`);
-      const linked = store.linkRepo(board.id, String(args.repo));
-      return {
-        board: {
-          workspaceId: linked.id,
-          name: linked.name,
-          repo: linked.repo
-        },
-        replaced: board.repo && board.repo !== repo ? board.repo : null
-      };
-    }
-  },
-  {
-    name: "board_summary",
-    description: "Lane-by-lane counts of live cards, plus the board's categories and tag policy. Read this before creating a card so its category and tags match what the board already uses.",
-    readOnly: true,
-    properties: { board_id: BOARD_ID },
-    required: ["board_id"],
-    run(args, { store }) {
-      const board = boardOf(store, args.board_id);
-      const cards = store.listWorkItems(board.id);
-      const counts = new Map;
-      const tags = new Map;
-      for (const card of cards) {
-        counts.set(card.columnKey, (counts.get(card.columnKey) ?? 0) + 1);
-        for (const tag of card.tags)
-          tags.set(tag, (tags.get(tag) ?? 0) + 1);
-      }
-      const columns = [...board.config.columns].sort((a, b) => a.position - b.position);
-      return {
-        board: { workspaceId: board.id, name: board.name, repo: board.repo },
-        total: cards.length,
-        lanes: columns.map((column) => ({
-          key: column.key,
-          name: column.name,
-          role: column.role,
-          count: counts.get(column.key) ?? 0
-        })),
-        categories: board.config.categories.map((category) => ({
-          key: category.key,
-          name: category.name,
-          prefix: category.prefix,
-          next: (board.taskHeads[category.key] ?? 0) + 1
-        })),
-        tagPolicy: board.config.tags,
-        tags: [...tags.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([tag, count]) => ({ tag, count })),
-        labels: board.config.labels
-      };
-    }
-  },
-  {
-    name: "list_reviews",
-    description: "Cards on a board, in the order the board draws them. Filter by lane, category, tag or priority. Archived cards are excluded unless asked for.",
-    readOnly: true,
-    properties: {
-      board_id: BOARD_ID,
-      category: { type: "string", description: "Category key, e.g. backend" },
-      column: {
-        type: "string",
-        description: "Lane key, e.g. todo | processing | done"
+  link_repo(args, { store }) {
+    const board = boardOf(store, args.board_id);
+    const repo = normalizeRepo(String(args.repo));
+    if (!repo)
+      fail("invalid", `not a git remote: ${String(args.repo)}`);
+    if (board.repo && board.repo !== repo && args.replace !== true)
+      fail("conflict", `board is linked to ${board.repo}; pass replace: true only if the user asked to move it`);
+    const linked = store.linkRepo(board.id, String(args.repo));
+    return {
+      board: {
+        workspaceId: linked.id,
+        name: linked.name,
+        repo: linked.repo
       },
-      include_archived: { type: "boolean" },
-      limit: { type: "integer", minimum: 1, maximum: 200 },
-      priority: PRIORITY,
-      tag: { type: "string" },
-      task_id: {
-        type: "string",
-        description: "Exact task id such as BE-07, matched on the field, not the title"
-      }
-    },
-    required: ["board_id"],
-    run(args, { store }) {
-      const board = boardOf(store, args.board_id);
-      const order = columnOrder(board);
-      const taskId = str2(args.task_id)?.toUpperCase();
-      const cards = store.listWorkItems(board.id, {
-        column: str2(args.column),
-        category: str2(args.category),
-        priority: str2(args.priority),
-        tag: str2(args.tag),
-        includeDeleted: args.include_archived === true
-      }).filter((card) => !taskId || card.taskId === taskId).sort((a, b) => (order.get(a.columnKey)?.position ?? 999) - (order.get(b.columnKey)?.position ?? 999) || a.rank.localeCompare(b.rank) || a.id.localeCompare(b.id));
-      const limit = typeof args.limit === "number" ? args.limit : 50;
-      return {
-        total: cards.length,
-        items: cards.slice(0, limit),
-        truncated: cards.length > limit
-      };
-    }
+      replaced: board.repo && board.repo !== repo ? board.repo : null
+    };
   },
-  {
-    name: "get_review",
-    description: "One card with its checklist, tags and `streams`, plus the latest `checkpoint` another agent left on it (or null) and `dispatch`: the card's run plan, `{ waves, briefs }`, or null when it has no streams. `card` takes either the card's id or its task id (e.g. BE-07).",
-    readOnly: true,
-    properties: { board_id: BOARD_ID, card: CARD },
-    required: ["board_id", "card"],
-    run(args, { store }) {
-      const board = boardOf(store, args.board_id);
-      const item = cardOf(store, board, args.card);
-      const { latest } = store.listCheckpoints(item.id, {
-        project: board.id
-      });
-      return { item, checkpoint: latest, dispatch: item.dispatch };
+  board_summary(args, { store }) {
+    const board = boardOf(store, args.board_id);
+    const cards = store.listWorkItems(board.id);
+    const counts = new Map;
+    const tags = new Map;
+    for (const card of cards) {
+      counts.set(card.columnKey, (counts.get(card.columnKey) ?? 0) + 1);
+      for (const tag of card.tags)
+        tags.set(tag, (tags.get(tag) ?? 0) + 1);
     }
+    const columns = [...board.config.columns].sort((a, b) => a.position - b.position);
+    return {
+      board: { workspaceId: board.id, name: board.name, repo: board.repo },
+      total: cards.length,
+      lanes: columns.map((column) => ({
+        key: column.key,
+        name: column.name,
+        role: column.role,
+        count: counts.get(column.key) ?? 0
+      })),
+      categories: board.config.categories.map((category) => ({
+        key: category.key,
+        name: category.name,
+        prefix: category.prefix,
+        next: (board.taskHeads[category.key] ?? 0) + 1
+      })),
+      tagPolicy: board.config.tags,
+      tags: [...tags.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([tag, count]) => ({ tag, count })),
+      labels: board.config.labels
+    };
   },
-  {
-    name: "create_review",
-    description: "Open a new card on a board. Setting `category` also mints the card's permanent task id. Split into `streams` only for 2+ independent write areas. Shared files go in a W0 stream the others depend on. At most 4 streams per wave, no two streams in one wave own the same path, every stream needs at least one verify item tagged with its key. Isolation defaults to worktree.",
-    readOnly: false,
-    properties: {
-      board_id: BOARD_ID,
-      title: { type: "string" },
-      body: { type: "string", description: "Markdown" },
-      category: {
-        type: "string",
-        description: "Category key; mints the task id"
-      },
-      checklist: CHECKLIST,
-      column: {
-        type: "string",
-        description: "Lane key; defaults to the board's start lane"
-      },
-      parent_id: { type: "string" },
-      priority: PRIORITY,
-      streams: STREAMS,
-      tags: { type: "string[]" },
-      type: { type: "string", enum: ["epic", "issue", "task"] },
-      assignees: ASSIGNEES
-    },
-    required: ["board_id", "title"],
-    run(args, { store }) {
-      const board = boardOf(store, args.board_id);
-      const checklist = args.checklist ?? [];
-      const streams = args.streams;
-      checkStreamPlan(streams, checklist);
-      let parentId = str2(args.parent_id);
-      if (parentId)
-        parentId = cardOf(store, board, parentId).id;
-      const item = store.createWorkItem(board.id, {
-        title: String(args.title),
-        body: str2(args.body),
-        categoryKey: str2(args.category),
-        checklist,
-        columnKey: str2(args.column) ?? startColumn(board),
-        parentId,
-        priority: str2(args.priority),
-        streams,
-        tags: args.tags,
-        type: str2(args.type)
-      });
-      return {
-        item,
-        next: "Offer to review the new card with the user here (review_card)."
-      };
-    }
+  list_reviews(args, { store }) {
+    const board = boardOf(store, args.board_id);
+    const order = columnOrder(board);
+    const taskId = str2(args.task_id)?.toUpperCase();
+    const cards = store.listWorkItems(board.id, {
+      column: str2(args.column),
+      category: str2(args.category),
+      priority: str2(args.priority),
+      tag: str2(args.tag),
+      includeDeleted: args.include_archived === true
+    }).filter((card) => !taskId || card.taskId === taskId).sort((a, b) => (order.get(a.columnKey)?.position ?? 999) - (order.get(b.columnKey)?.position ?? 999) || a.rank.localeCompare(b.rank) || a.id.localeCompare(b.id));
+    const limit = typeof args.limit === "number" ? args.limit : 50;
+    return {
+      total: cards.length,
+      items: cards.slice(0, limit),
+      truncated: cards.length > limit
+    };
   },
-  {
-    name: "update_review",
-    description: "Patch a card's title, body, priority, tags, assignees, category or streams. Omitted fields are left alone; `tags`, `assignees` and `streams` replace what is there (`streams: []` clears the plan). Streams are checked against the checklist: each needs a verify item tagged with its key (tag them in the same call with `checklist_streams`). Use set_status to move between lanes.",
-    readOnly: false,
-    properties: {
-      board_id: BOARD_ID,
-      card: CARD,
-      title: { type: "string" },
-      body: { type: "string" },
-      category: {
-        type: "string",
-        description: "Setting this on a card with no task id yet mints one"
-      },
-      priority: PRIORITY,
-      tags: { type: "string[]", description: "Replaces the card's tags" },
-      assignees: ASSIGNEES,
-      streams: STREAMS,
-      checklist_streams: {
-        type: "string-map",
-        description: 'Verify item key → stream key (null removes the tag), e.g. { "V3": "W1", "V4": null }'
-      },
-      expected_revision: {
-        type: "integer",
-        description: "Refuse unless the card is still at this revision"
-      }
-    },
-    required: ["board_id", "card"],
-    run(args, { store }) {
-      const board = boardOf(store, args.board_id);
-      const current = cardOf(store, board, args.card);
-      if (typeof args.expected_revision === "number" && args.expected_revision !== current.revision)
-        fail("conflict", `card is at revision ${current.revision}, not ${args.expected_revision}`);
-      const retag = args.checklist_streams;
-      let checklist;
-      if (retag && Object.keys(retag).length > 0) {
-        const keys = new Set(current.checklist.map((item) => item.key));
-        const unknown = Object.keys(retag).filter((key) => !keys.has(key));
-        if (unknown.length > 0)
-          fail("not_found", `checklist item ${unknown.join(", ")} not found`);
-        checklist = asInput(current.checklist).map((item) => item.key && (item.key in retag) ? { ...item, stream: retag[item.key] ?? null } : item);
-      }
-      const streams = args.streams;
-      if (streams)
-        checkStreamPlan(streams, checklist ?? asInput(current.checklist));
-      const item = store.updateWorkItem(current.id, {
-        title: str2(args.title),
-        body: str2(args.body),
-        categoryKey: str2(args.category),
-        priority: str2(args.priority),
-        tags: args.tags,
-        streams,
-        checklist
-      }, { project: board.id, ifRevision: current.revision });
-      return { item };
-    }
+  get_review(args, { store }) {
+    const board = boardOf(store, args.board_id);
+    const item = cardOf(store, board, args.card);
+    const { latest } = store.listCheckpoints(item.id, {
+      project: board.id
+    });
+    return { item, checkpoint: latest, dispatch: item.dispatch };
   },
-  {
-    name: "toggle_item",
-    description: "Tick or untick one checklist box on a card, and optionally leave a note under it, or tag a verify item with the stream it proves. `key` is the item's stable id, e.g. D1 or V3.",
-    readOnly: false,
-    properties: {
-      board_id: BOARD_ID,
-      card: CARD,
-      key: { type: "string", description: "Checklist item key, e.g. D1 or V3" },
-      checked: {
-        type: "boolean",
-        description: "Omit to leave the tick alone"
-      },
-      note: { type: "string", description: "Empty string clears it" },
-      stream: {
-        type: "nullable-string",
-        description: "Verify items only; null removes the tag"
-      },
-      text: {
-        type: "string",
-        description: "Reword the item, keeping its key and tick"
-      }
-    },
-    required: ["board_id", "card", "key"],
-    run(args, { store }) {
-      const board = boardOf(store, args.board_id);
-      const patch = {};
-      if (typeof args.checked === "boolean")
-        patch.checked = args.checked;
-      if (typeof args.note === "string")
-        patch.note = args.note;
-      if (typeof args.text === "string")
-        patch.text = args.text;
-      if (args.stream !== undefined)
-        patch.stream = args.stream;
-      const item = store.toggleChecklistItem(String(args.card), String(args.key), patch, { project: board.id });
-      return { item, ...decisionState(item.checklist) };
-    }
+  create_review(args, { store }) {
+    const board = boardOf(store, args.board_id);
+    const checklist = args.checklist ?? [];
+    const streams = args.streams;
+    checkStreamPlan(streams, checklist);
+    let parentId = str2(args.parent_id);
+    if (parentId)
+      parentId = cardOf(store, board, parentId).id;
+    const item = store.createWorkItem(board.id, {
+      title: String(args.title),
+      body: str2(args.body),
+      categoryKey: str2(args.category),
+      checklist,
+      columnKey: str2(args.column) ?? startColumn(board),
+      parentId,
+      priority: str2(args.priority),
+      streams,
+      tags: args.tags,
+      type: str2(args.type)
+    });
+    return {
+      item,
+      next: "Offer to review the new card with the user here (review_card)."
+    };
   },
-  {
-    name: "review_card",
-    description: "Write the user's review of a card's checklist in one call. ONLY with picks the user just made. Ticking one option of a pick-ONE group unticks the others; boxes not named are left as they are. Free text goes in `note`. Returns `ready: true` once every decision is settled; it does not move the card.",
-    readOnly: false,
-    properties: {
-      board_id: BOARD_ID,
-      card: CARD,
-      picks: {
-        type: "object[]",
-        minItems: 1,
-        properties: {
-          key: { type: "string" },
-          checked: { type: "boolean" },
-          note: { type: "string" }
-        },
-        required: ["key", "checked"]
-      },
-      revision: {
-        type: "integer",
-        description: "Refused if the card's revision changed since"
-      }
-    },
-    required: ["board_id", "card", "picks"],
-    run(args, { store }) {
-      const board = boardOf(store, args.board_id);
-      const current = cardOf(store, board, args.card);
-      const picks = args.picks;
-      const items = asInput(current.checklist);
-      const byKey = new Map(items.map((item) => [item.key, item]));
-      const missing = picks.filter((pick) => !byKey.has(pick.key));
-      if (missing.length > 0)
-        fail("not_found", `checklist item ${missing.map((pick) => pick.key).join(", ")} not found`);
-      const tickedGroups = new Map;
-      for (const pick of picks) {
-        const item = byKey.get(pick.key);
-        item.checked = pick.checked;
-        if (pick.note !== undefined)
-          item.note = pick.note || null;
-        if (pick.checked && item.group) {
-          const other = tickedGroups.get(item.group);
-          if (other)
-            fail("invalid", `${other} and ${pick.key} are options of the same pick-ONE group "${item.group}"; pick one`);
-          tickedGroups.set(item.group, pick.key);
-        }
-      }
-      for (const [group, key] of tickedGroups)
-        for (const item of items)
-          if (item.group === group && item.key !== key)
-            item.checked = false;
-      const item = store.updateWorkItem(current.id, { checklist: items }, {
-        project: board.id,
-        ifRevision: typeof args.revision === "number" ? args.revision : current.revision
-      });
-      const state = decisionState(item.checklist);
-      return {
-        ...state,
-        revision: item.revision,
-        checklist: item.checklist,
-        next: state.ready ? "Every decision is settled. Move the card with set_status when work starts." : "Some decisions are still open; work does not start until ready is true."
-      };
+  update_review(args, { store }) {
+    const board = boardOf(store, args.board_id);
+    const current = cardOf(store, board, args.card);
+    if (typeof args.expected_revision === "number" && args.expected_revision !== current.revision)
+      fail("conflict", `card is at revision ${current.revision}, not ${args.expected_revision}`);
+    const retag = args.checklist_streams;
+    let checklist;
+    if (retag && Object.keys(retag).length > 0) {
+      const keys = new Set(current.checklist.map((item) => item.key));
+      const unknown = Object.keys(retag).filter((key) => !keys.has(key));
+      if (unknown.length > 0)
+        fail("not_found", `checklist item ${unknown.join(", ")} not found`);
+      checklist = asInput(current.checklist).map((item) => item.key && (item.key in retag) ? { ...item, stream: retag[item.key] ?? null } : item);
     }
+    const streams = args.streams;
+    if (streams)
+      checkStreamPlan(streams, checklist ?? asInput(current.checklist));
+    const item = store.updateWorkItem(current.id, {
+      title: str2(args.title),
+      body: str2(args.body),
+      categoryKey: str2(args.category),
+      priority: str2(args.priority),
+      tags: args.tags,
+      streams,
+      checklist
+    }, { project: board.id, ifRevision: current.revision });
+    return { item };
   },
-  {
-    name: "set_status",
-    description: "Move a card to another lane, the board's status columns. Finished, verified work goes to the review lane, not done. Moving it to a done or archive lane clears its checkpoints.",
-    readOnly: false,
-    properties: {
-      board_id: BOARD_ID,
-      card: CARD,
-      status: {
-        type: "string",
-        description: "Lane key, e.g. todo | processing | review | done"
-      },
-      reason: {
-        type: "string",
-        description: "What to change when sending a card back from review. Accepted and not stored on a local board, which keeps no history."
-      }
-    },
-    required: ["board_id", "card", "status"],
-    run(args, { store }) {
-      const board = boardOf(store, args.board_id);
-      const item = store.setStatus(String(args.card), String(args.status), {
-        project: board.id
-      });
-      return { item: brief(item) };
-    }
+  toggle_item(args, { store }) {
+    const board = boardOf(store, args.board_id);
+    const patch = {};
+    if (typeof args.checked === "boolean")
+      patch.checked = args.checked;
+    if (typeof args.note === "string")
+      patch.note = args.note;
+    if (typeof args.text === "string")
+      patch.text = args.text;
+    if (args.stream !== undefined)
+      patch.stream = args.stream;
+    const item = store.toggleChecklistItem(String(args.card), String(args.key), patch, { project: board.id });
+    return { item, ...decisionState(item.checklist) };
   },
-  {
-    name: "delete_review",
-    description: "Take a card off the board. This ARCHIVES it: the card and its history stay in the database and can be restored. Nothing here deletes rows.",
-    readOnly: false,
-    properties: { board_id: BOARD_ID, card: CARD },
-    required: ["board_id", "card"],
-    run(args, { store }) {
-      const board = boardOf(store, args.board_id);
-      const item = store.deleteWorkItem(String(args.card), {
-        project: board.id
-      });
-      return { archived: item.id, item: brief(item) };
-    }
-  },
-  {
-    name: "checkpoint",
-    description: "Record where you stopped on a card so another agent can resume it. Call after each checklist item you finish, and before you stop mid-task. `get_review` returns the latest checkpoint. Summarise; never paste transcripts, secrets, tokens or .env values. Refused on a finished or archived card.",
-    readOnly: false,
-    properties: {
-      board_id: BOARD_ID,
-      card: CARD,
-      summary: { type: "string" },
-      request: { type: "string" },
-      next_step: { type: "string" },
-      files: { type: "string[]" },
-      commands: {
-        type: "object[]",
-        properties: {
-          command: { type: "string" },
-          ok: { type: "boolean" }
-        },
-        required: ["command"]
-      },
-      git: {
-        type: "object",
-        properties: {
-          branch: { type: "string" },
-          head: { type: "string" },
-          wip_ref: { type: "string" },
-          wip_sha: { type: "string" }
-        }
+  review_card(args, { store }) {
+    const board = boardOf(store, args.board_id);
+    const current = cardOf(store, board, args.card);
+    const picks = args.picks;
+    const items = asInput(current.checklist);
+    const byKey = new Map(items.map((item) => [item.key, item]));
+    const missing = picks.filter((pick) => !byKey.has(pick.key));
+    if (missing.length > 0)
+      fail("not_found", `checklist item ${missing.map((pick) => pick.key).join(", ")} not found`);
+    const tickedGroups = new Map;
+    for (const pick of picks) {
+      const item = byKey.get(pick.key);
+      item.checked = pick.checked;
+      if (pick.note !== undefined)
+        item.note = pick.note || null;
+      if (pick.checked && item.group) {
+        const other = tickedGroups.get(item.group);
+        if (other)
+          fail("invalid", `${other} and ${pick.key} are options of the same pick-ONE group "${item.group}"; pick one`);
+        tickedGroups.set(item.group, pick.key);
       }
-    },
-    required: ["board_id", "card", "summary"],
-    run(args, { store, agent, host }) {
-      const board = boardOf(store, args.board_id);
-      const git = args.git;
-      const request = {
-        summary: String(args.summary),
-        request: str2(args.request) ?? null,
-        nextStep: str2(args.next_step) ?? null,
-        files: args.files,
-        commands: args.commands,
-        host,
-        git: git ? {
-          branch: git.branch ?? null,
-          head: git.head ?? null,
-          wipRef: git.wip_ref ?? null,
-          wipSha: git.wip_sha ?? null
-        } : null
-      };
-      const checkpoint = store.addCheckpoint(String(args.card), request, {
-        project: board.id,
-        agent
-      });
-      return { checkpoint };
     }
+    for (const [group, key] of tickedGroups)
+      for (const item of items)
+        if (item.group === group && item.key !== key)
+          item.checked = false;
+    const item = store.updateWorkItem(current.id, { checklist: items }, {
+      project: board.id,
+      ifRevision: typeof args.revision === "number" ? args.revision : current.revision
+    });
+    const state = decisionState(item.checklist);
+    return {
+      ...state,
+      revision: item.revision,
+      checklist: item.checklist,
+      next: state.ready ? "Every decision is settled. Move the card with set_status when work starts." : "Some decisions are still open; work does not start until ready is true."
+    };
   },
-  {
-    name: "lifecycle_status",
-    description: "What the board is waiting on: cards whose decisions are not all ticked (waiting), cards cleared to start (ready), cards being worked (in flight), and cards waiting for a human to review (review).",
-    readOnly: true,
-    properties: { board_id: BOARD_ID },
-    required: ["board_id"],
-    run(args, { store }) {
-      const board = boardOf(store, args.board_id);
-      const order = columnOrder(board);
-      const waiting = [];
-      const ready = [];
-      const inFlight = [];
-      const review = [];
-      for (const card of store.listWorkItems(board.id)) {
-        const role = order.get(card.columnKey)?.role ?? null;
-        if (role === "done" || role === "archive")
-          continue;
-        if (role === "review") {
-          review.push(brief(card));
-          continue;
-        }
-        const detail = store.getWorkItem(card.id);
-        const state = decisionState(detail.checklist);
-        if (role === "active") {
-          const verify = detail.checklist.filter((item) => item.section === "verify");
-          inFlight.push({
-            ...brief(detail),
-            verified: `${verify.filter((item) => item.checked).length}/${verify.length}`
-          });
-        } else if (state.ready)
-          ready.push(brief(detail));
-        else
-          waiting.push({ ...brief(detail), pending: state.pending });
-      }
-      return { waiting, ready, inFlight, review };
-    }
+  set_status(args, { store }) {
+    const board = boardOf(store, args.board_id);
+    const item = store.setStatus(String(args.card), String(args.status), {
+      project: board.id
+    });
+    return { item: brief(item) };
   },
-  {
-    name: "search_sessions",
-    description: "Search this machine's Claude Code, Codex and OpenCode conversations for a phrase in what was said (prompts, answers, tool calls and output), newest first. Returns each session's harness, id, title, last write and up to 3 matching snippets.",
-    readOnly: true,
-    properties: {
-      query: { type: "string", description: "A literal phrase, not a regex" },
-      limit: {
-        type: "integer",
-        minimum: 1,
-        maximum: SESSION_LIMIT_MAX,
-        description: `Sessions returned; default ${SESSION_LIMIT}`
-      },
-      folder: {
-        type: "string",
-        description: "Only sessions run in this folder (an absolute path, e.g. the repo's root); every folder's when omitted"
+  delete_review(args, { store }) {
+    const board = boardOf(store, args.board_id);
+    const item = store.deleteWorkItem(String(args.card), {
+      project: board.id
+    });
+    return { archived: item.id, item: brief(item) };
+  },
+  checkpoint(args, { store, agent, host }) {
+    const board = boardOf(store, args.board_id);
+    const git = args.git;
+    const request = {
+      summary: String(args.summary),
+      request: str2(args.request) ?? null,
+      nextStep: str2(args.next_step) ?? null,
+      files: args.files,
+      commands: args.commands,
+      host,
+      git: git ? {
+        branch: git.branch ?? null,
+        head: git.head ?? null,
+        wipRef: git.wip_ref ?? null,
+        wipSha: git.wip_sha ?? null
+      } : null
+    };
+    const checkpoint = store.addCheckpoint(String(args.card), request, {
+      project: board.id,
+      agent
+    });
+    return { checkpoint };
+  },
+  lifecycle_status(args, { store }) {
+    const board = boardOf(store, args.board_id);
+    const order = columnOrder(board);
+    const out = {
+      waiting: [],
+      ready: [],
+      inFlight: [],
+      review: []
+    };
+    const { waiting, ready, inFlight, review } = out;
+    for (const card of store.listWorkItems(board.id)) {
+      const role = order.get(card.columnKey)?.role ?? null;
+      if (role === "done" || role === "archive")
+        continue;
+      if (role === "review") {
+        review.push(brief(card));
+        continue;
       }
-    },
-    required: ["query"],
-    async run(args) {
-      const query = String(args.query).trim();
-      if (!query)
-        fail("invalid", "query is empty");
-      const folder = str2(args.folder);
-      const sessions = await searchSessions(query, {
-        limit: typeof args.limit === "number" ? args.limit : undefined,
-        folders: folder ? [folder] : undefined
-      });
-      return { sessions };
+      const detail = store.getWorkItem(card.id);
+      const state = decisionState(detail.checklist);
+      if (role === "active") {
+        const verify = detail.checklist.filter((item) => item.section === "verify");
+        inFlight.push({
+          ...brief(detail),
+          verified: `${verify.filter((item) => item.checked).length}/${verify.length}`
+        });
+      } else if (state.ready)
+        ready.push(brief(detail));
+      else
+        waiting.push({ ...brief(detail), pending: state.pending });
     }
+    return out;
   }
-];
+};
+var TOOLS = BOARD_TOOLS.map((contract) => ({
+  ...contract,
+  run: RUNS[contract.name]
+}));
 
 // apps/desktop/electron/mcp-local/server.ts
 var SERVER_NAME = "lanework";
@@ -6820,7 +2951,7 @@ function toolList() {
   return TOOLS.map((tool) => ({
     name: tool.name,
     description: tool.description,
-    inputSchema: shapeSchema(tool),
+    inputSchema: toolInputSchema(tool),
     annotations: {
       readOnlyHint: tool.readOnly,
       destructiveHint: tool.name === "delete_review",
@@ -6828,7 +2959,7 @@ function toolList() {
     }
   }));
 }
-function text2(value, isError = false) {
+function text(value, isError = false) {
   return {
     content: [{ type: "text", text: JSON.stringify(value) }],
     ...isError ? { isError: true } : {}
@@ -6838,7 +2969,7 @@ function text2(value, isError = false) {
 class LocalMcpSession {
   store;
   #agent = "agent";
-  #host = import_node_os6.hostname();
+  #host = import_node_os3.hostname();
   constructor(store) {
     this.store = store;
   }
@@ -6904,19 +3035,19 @@ class LocalMcpSession {
     };
     const failed = (error) => {
       if (error instanceof LocalStoreError)
-        return text2({ error: error.code, message: error.message }, true);
+        return text({ error: error.code, message: error.message }, true);
       if (error instanceof InvalidParams)
-        return text2({ error: "invalid", message: error.message }, true);
+        return text({ error: "invalid", message: error.message }, true);
       const message = error instanceof Error ? error.message : String(error);
       process.stderr.write(`lanework mcp: ${tool.name} failed: ${message}
 `);
-      return text2({ error: "internal", message }, true);
+      return text({ error: "internal", message }, true);
     };
     try {
       const result = tool.run(checkShape(tool, params.arguments), ctx);
       if (result instanceof Promise)
-        return result.then((value) => text2(value), failed);
-      return text2(result);
+        return result.then((value) => text(value), failed);
+      return text(result);
     } catch (error) {
       return failed(error);
     }
@@ -7027,16 +3158,15 @@ function runLocalMcpServer(options = {}) {
   });
 }
 // apps/desktop/electron/hook/credential.ts
-init_src();
-var import_node_child_process5 = require("node:child_process");
+var import_node_child_process2 = require("node:child_process");
 var import_node_crypto3 = require("node:crypto");
-var import_node_fs3 = require("node:fs");
-var import_node_os7 = require("node:os");
-var import_node_path10 = require("node:path");
+var import_node_fs2 = require("node:fs");
+var import_node_os4 = require("node:os");
+var import_node_path6 = require("node:path");
 var KEYCHAIN_SERVICE = "dev.lanework.checkpoint-hook";
 var SECURITY = "/usr/bin/security";
 function configDir() {
-  return import_node_path10.join(process.env.XDG_CONFIG_HOME || import_node_path10.join(import_node_os7.homedir(), ".config"), "lanework");
+  return import_node_path6.join(process.env.XDG_CONFIG_HOME || import_node_path6.join(import_node_os4.homedir(), ".config"), "lanework");
 }
 function originOf(api) {
   try {
@@ -7052,9 +3182,9 @@ function secretFile(api) {
     return null;
   const origin = originOf(api);
   if (origin === DEFAULT_API_ORIGIN)
-    return import_node_path10.join(configDir(), "credential");
+    return import_node_path6.join(configDir(), "credential");
   const key = import_node_crypto3.createHash("sha256").update(origin).digest("hex").slice(0, 16);
-  return import_node_path10.join(configDir(), `credential-${key}`);
+  return import_node_path6.join(configDir(), `credential-${key}`);
 }
 function credentialLocation(api) {
   return secretFile(api) ?? `macOS Keychain (${KEYCHAIN_SERVICE})`;
@@ -7075,13 +3205,13 @@ function readSecret(api) {
   const file = secretFile(api);
   if (file) {
     try {
-      return import_node_fs3.readFileSync(file, "utf8").trim() || null;
+      return import_node_fs2.readFileSync(file, "utf8").trim() || null;
     } catch {
       return null;
     }
   }
   try {
-    return import_node_child_process5.execFileSync(SECURITY, ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", api, "-w"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
+    return import_node_child_process2.execFileSync(SECURITY, ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", api, "-w"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
   } catch {
     return null;
   }
@@ -7090,14 +3220,14 @@ function writeSecret(api, secret) {
   assertSafe("credential", secret);
   const file = secretFile(api);
   if (file) {
-    import_node_fs3.mkdirSync(import_node_path10.dirname(file), { recursive: true, mode: 448 });
-    import_node_fs3.writeFileSync(file, `${secret}
+    import_node_fs2.mkdirSync(import_node_path6.dirname(file), { recursive: true, mode: 448 });
+    import_node_fs2.writeFileSync(file, `${secret}
 `, { mode: 384 });
-    import_node_fs3.chmodSync(file, 384);
+    import_node_fs2.chmodSync(file, 384);
     return;
   }
   assertSafe("API address", api);
-  import_node_child_process5.execFileSync(SECURITY, ["-i"], {
+  import_node_child_process2.execFileSync(SECURITY, ["-i"], {
     input: `add-generic-password -U -s "${KEYCHAIN_SERVICE}" -a "${api}" -w "${secret}"
 `,
     stdio: ["pipe", "ignore", "inherit"]
@@ -7106,19 +3236,19 @@ function writeSecret(api, secret) {
 function deleteSecret(api) {
   const file = secretFile(api);
   if (file) {
-    import_node_fs3.rmSync(file, { force: true });
+    import_node_fs2.rmSync(file, { force: true });
     return;
   }
   try {
-    import_node_child_process5.execFileSync(SECURITY, ["delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", api], { stdio: "ignore" });
+    import_node_child_process2.execFileSync(SECURITY, ["delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", api], { stdio: "ignore" });
   } catch {}
 }
 
 // apps/desktop/electron/hook/cli.ts
-var pluginConfigPath = () => import_node_path11.join(configDir(), "hook.json");
+var pluginConfigPath = () => import_node_path7.join(configDir(), "hook.json");
 function readConfig() {
   try {
-    return JSON.parse(import_node_fs4.readFileSync(pluginConfigPath(), "utf8"));
+    return JSON.parse(import_node_fs3.readFileSync(pluginConfigPath(), "utf8"));
   } catch {
     return {};
   }
@@ -7128,7 +3258,7 @@ function openBrowser(url) {
   if (!opener)
     return false;
   try {
-    import_node_child_process6.spawn(opener, [url], { stdio: "ignore", detached: true }).unref();
+    import_node_child_process3.spawn(opener, [url], { stdio: "ignore", detached: true }).unref();
     return true;
   } catch {
     return false;
@@ -7171,8 +3301,8 @@ ${outcome()}`;
 async function startDeviceLogin(api, stateDir) {
   const { verifier, challenge } = pkcePair();
   const started = await startDevice(api, { challenge, facts: machineFacts() });
-  import_node_fs4.mkdirSync(stateDir, { recursive: true, mode: 448 });
-  const file = import_node_path11.join(stateDir, `device-${process.pid}-${Date.now()}.json`);
+  import_node_fs3.mkdirSync(stateDir, { recursive: true, mode: 448 });
+  const file = import_node_path7.join(stateDir, `device-${process.pid}-${Date.now()}.json`);
   const pending = {
     api,
     deviceCode: started.deviceCode,
@@ -7180,8 +3310,8 @@ async function startDeviceLogin(api, stateDir) {
     interval: started.interval,
     deadline: Date.now() + DEVICE_TTL_MS
   };
-  import_node_fs4.writeFileSync(file, JSON.stringify(pending), { mode: 384 });
-  import_node_child_process6.spawn(process.execPath, [process.argv[1] ?? "", "--plugin", "login-wait", file], { detached: true, stdio: "ignore" }).unref();
+  import_node_fs3.writeFileSync(file, JSON.stringify(pending), { mode: 384 });
+  import_node_child_process3.spawn(process.execPath, [process.argv[1] ?? "", "--plugin", "login-wait", file], { detached: true, stdio: "ignore" }).unref();
   console.log([
     `On any device, open ${started.verificationUri} and enter the code:`,
     "",
@@ -7195,16 +3325,16 @@ async function startDeviceLogin(api, stateDir) {
 async function waitForDeviceLogin(file, stateDir) {
   const note = (line) => {
     try {
-      import_node_fs4.mkdirSync(stateDir, { recursive: true, mode: 448 });
-      import_node_fs4.appendFileSync(import_node_path11.join(stateDir, "hook.log"), `${new Date().toISOString()} device sign-in: ${line}
+      import_node_fs3.mkdirSync(stateDir, { recursive: true, mode: 448 });
+      import_node_fs3.appendFileSync(import_node_path7.join(stateDir, "hook.log"), `${new Date().toISOString()} device sign-in: ${line}
 `, { mode: 384 });
     } catch {}
   };
   let pending;
   try {
-    pending = JSON.parse(import_node_fs4.readFileSync(file, "utf8"));
+    pending = JSON.parse(import_node_fs3.readFileSync(file, "utf8"));
   } finally {
-    import_node_fs4.rmSync(file, { force: true });
+    import_node_fs3.rmSync(file, { force: true });
   }
   let interval = pending.interval;
   while (Date.now() < pending.deadline) {
@@ -7265,10 +3395,10 @@ async function status(api, stateDir, desktopHook) {
   let last = "none yet";
   try {
     let best = null;
-    for (const name of import_node_fs4.readdirSync(stateDir)) {
+    for (const name of import_node_fs3.readdirSync(stateDir)) {
       if (!name.startsWith("session-"))
         continue;
-      const s = JSON.parse(import_node_fs4.readFileSync(import_node_path11.join(stateDir, name), "utf8"));
+      const s = JSON.parse(import_node_fs3.readFileSync(import_node_path7.join(stateDir, name), "utf8"));
       if (typeof s.at === "number" && s.taskId && (!best || s.at > best.at))
         best = { at: s.at, taskId: s.taskId };
     }
@@ -7285,7 +3415,7 @@ async function status(api, stateDir, desktopHook) {
     ...desktopHook ? [
       "Desktop app:      its hook is installed, so this plugin's hook stays quiet (one checkpoint per turn)"
     ] : [],
-    `Log:              ${import_node_path11.join(stateDir, "hook.log")}`
+    `Log:              ${import_node_path7.join(stateDir, "hook.log")}`
   ].join(`
 `));
 }
@@ -7310,8 +3440,8 @@ function config(key, value) {
     return;
   }
   const next = { ...readConfig(), [entry.field]: value === "on" };
-  import_node_fs4.mkdirSync(configDir(), { recursive: true, mode: 448 });
-  import_node_fs4.writeFileSync(pluginConfigPath(), `${JSON.stringify(next, null, 2)}
+  import_node_fs3.mkdirSync(configDir(), { recursive: true, mode: 448 });
+  import_node_fs3.writeFileSync(pluginConfigPath(), `${JSON.stringify(next, null, 2)}
 `, {
     mode: 384
   });
@@ -7320,11 +3450,11 @@ function config(key, value) {
 Nothing is pushed until \`lanework config push-wip on\`.` : said);
 }
 function desktopHookInstalled() {
-  const settings = import_node_path11.join(process.env.CLAUDE_CONFIG_DIR || import_node_path11.join(import_node_os8.homedir(), ".claude"), "settings.json");
-  if (!import_node_fs4.existsSync(settings))
+  const settings = import_node_path7.join(process.env.CLAUDE_CONFIG_DIR || import_node_path7.join(import_node_os5.homedir(), ".claude"), "settings.json");
+  if (!import_node_fs3.existsSync(settings))
     return false;
   try {
-    return import_node_fs4.readFileSync(settings, "utf8").includes("lanework-checkpoint");
+    return import_node_fs3.readFileSync(settings, "utf8").includes("lanework-checkpoint");
   } catch {
     return false;
   }
@@ -7335,8 +3465,8 @@ function mcp() {
 
 // apps/desktop/electron/hook/compaction.ts
 var import_node_crypto4 = require("node:crypto");
-var import_node_fs5 = require("node:fs");
-var import_node_path12 = require("node:path");
+var import_node_fs4 = require("node:fs");
+var import_node_path8 = require("node:path");
 var COMPACT_WINDOW_MS = 15 * 60 * 1000;
 var REMINDABLE_ID = /^[A-Z][A-Z0-9]{0,9}-\d{1,6}$/;
 function isRemindableTaskId(taskId) {
@@ -7355,20 +3485,20 @@ function sessionStartOutput(context) {
 }
 function markerFile(stateDir, sessionId) {
   const id = import_node_crypto4.createHash("sha256").update(sessionId).digest("hex");
-  return import_node_path12.join(stateDir, `compact-${id}.json`);
+  return import_node_path8.join(stateDir, `compact-${id}.json`);
 }
 function writeMarker(file, marker) {
-  import_node_fs5.writeFileSync(file, JSON.stringify(marker), { mode: 384 });
+  import_node_fs4.writeFileSync(file, JSON.stringify(marker), { mode: 384 });
 }
 function markCompaction(stateDir, sessionId) {
-  import_node_fs5.mkdirSync(stateDir, { recursive: true, mode: 448 });
+  import_node_fs4.mkdirSync(stateDir, { recursive: true, mode: 448 });
   writeMarker(markerFile(stateDir, sessionId), { at: Date.now() });
 }
 function noteCompactionCard(stateDir, sessionId, taskId) {
   const file = markerFile(stateDir, sessionId);
   let marker;
   try {
-    marker = JSON.parse(import_node_fs5.readFileSync(file, "utf8"));
+    marker = JSON.parse(import_node_fs4.readFileSync(file, "utf8"));
   } catch {
     return;
   }
@@ -7378,12 +3508,12 @@ function takeCompactionMarker(stateDir, sessionId) {
   const file = markerFile(stateDir, sessionId);
   const taken = `${file}.${process.pid}.taken`;
   try {
-    import_node_fs5.renameSync(file, taken);
+    import_node_fs4.renameSync(file, taken);
   } catch {
     return null;
   }
   try {
-    const marker = JSON.parse(import_node_fs5.readFileSync(taken, "utf8"));
+    const marker = JSON.parse(import_node_fs4.readFileSync(taken, "utf8"));
     if (typeof marker.at !== "number")
       return null;
     if (Date.now() - marker.at > COMPACT_WINDOW_MS)
@@ -7392,15 +3522,14 @@ function takeCompactionMarker(stateDir, sessionId) {
   } catch {
     return null;
   } finally {
-    import_node_fs5.rmSync(taken, { force: true });
+    import_node_fs4.rmSync(taken, { force: true });
   }
 }
 
 // apps/desktop/electron/hook/local-board.ts
-init_local_store();
-var import_node_fs6 = require("node:fs");
+var import_node_fs5 = require("node:fs");
 function localBoardFor(remote, path = localStorePath()) {
-  if (!import_node_fs6.existsSync(path))
+  if (!import_node_fs5.existsSync(path))
     return null;
   const store = openLocalStore({ path });
   try {
@@ -7522,7 +3651,7 @@ function hookConfig() {
   if (!file)
     return {};
   try {
-    return JSON.parse(import_node_fs7.readFileSync(file, "utf8"));
+    return JSON.parse(import_node_fs6.readFileSync(file, "utf8"));
   } catch {
     return {};
   }
@@ -7532,22 +3661,22 @@ var PUSH_WIP = ARGS.flags.has("push-wip") || HOOK_CONFIG.pushWip === true;
 var PUSH_WIP_UNTRACKED = ARGS.flags.has("push-wip-untracked") || HOOK_CONFIG.pushWipUntracked === true;
 var AGENT = ARGS.flags.get("agent") === "codex" ? "codex" : ARGS.flags.get("agent") === "opencode" ? "opencode" : "claude-code";
 var AGENT_NAME = AGENT === "codex" ? "Codex" : AGENT === "opencode" ? "OpenCode" : "Claude Code";
-var STATE_DIR = import_node_path13.join(import_node_os9.homedir(), ".cache", "lanework", "checkpoint");
-var LOG = import_node_path13.join(STATE_DIR, "hook.log");
+var STATE_DIR = import_node_path9.join(import_node_os6.homedir(), ".cache", "lanework", "checkpoint");
+var LOG = import_node_path9.join(STATE_DIR, "hook.log");
 var THIN_MS = 60000;
 var PUSH_TIMEOUT_MS = 30000;
 var HTTP_TIMEOUT_MS = 1e4;
 function log(message) {
   try {
-    import_node_fs7.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
-    if (import_node_fs7.existsSync(LOG)) {
-      const { size, mode } = import_node_fs7.statSync(LOG);
+    import_node_fs6.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
+    if (import_node_fs6.existsSync(LOG)) {
+      const { size, mode } = import_node_fs6.statSync(LOG);
       if (size > 512 * 1024)
-        import_node_fs7.rmSync(LOG);
+        import_node_fs6.rmSync(LOG);
       else if (mode & 63)
-        import_node_fs7.chmodSync(LOG, 384);
+        import_node_fs6.chmodSync(LOG, 384);
     }
-    import_node_fs7.appendFileSync(LOG, `${new Date().toISOString()} ${redact(message)}
+    import_node_fs6.appendFileSync(LOG, `${new Date().toISOString()} ${redact(message)}
 `, {
       mode: 384
     });
@@ -7555,7 +3684,7 @@ function log(message) {
 }
 function git(cwd, args, env) {
   const safe = args[0] === "diff" ? ["diff", "--no-ext-diff", "--no-textconv", ...args.slice(1)] : args;
-  return import_node_child_process7.execFileSync("git", [...READ_FLAGS, ...safe], {
+  return import_node_child_process4.execFileSync("git", [...READ_FLAGS, ...safe], {
     cwd,
     env: { ...process.env, ...env },
     encoding: "utf8",
@@ -7576,21 +3705,21 @@ function clip2(s, max) {
 }
 function readJson(file, fallback) {
   try {
-    return JSON.parse(import_node_fs7.readFileSync(file, "utf8"));
+    return JSON.parse(import_node_fs6.readFileSync(file, "utf8"));
   } catch {
     return fallback;
   }
 }
 function writeJson(file, value) {
-  import_node_fs7.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
-  import_node_fs7.writeFileSync(file, JSON.stringify(value), { mode: 384 });
+  import_node_fs6.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
+  import_node_fs6.writeFileSync(file, JSON.stringify(value), { mode: 384 });
 }
 function repoPath(path, root) {
   const trimmed = path.trim();
   if (!trimmed)
     return null;
-  const rel = import_node_path13.isAbsolute(trimmed) ? import_node_path13.relative(root, trimmed) : trimmed;
-  if (!rel || import_node_path13.isAbsolute(rel) || rel.startsWith("..") || rel.startsWith("~"))
+  const rel = import_node_path9.isAbsolute(trimmed) ? import_node_path9.relative(root, trimmed) : trimmed;
+  if (!rel || import_node_path9.isAbsolute(rel) || rel.startsWith("..") || rel.startsWith("~"))
     return null;
   return rel;
 }
@@ -7725,24 +3854,24 @@ function unquote(literal) {
 function findCodexRollout(sessionId) {
   if (!sessionId)
     return null;
-  const base = import_node_path13.join(process.env.CODEX_HOME || import_node_path13.join(import_node_os9.homedir(), ".codex"), "sessions");
+  const base = import_node_path9.join(process.env.CODEX_HOME || import_node_path9.join(import_node_os6.homedir(), ".codex"), "sessions");
   const ls = (dir) => {
     try {
-      return import_node_fs7.readdirSync(dir).sort().reverse();
+      return import_node_fs6.readdirSync(dir).sort().reverse();
     } catch {
       return [];
     }
   };
   let days = 0;
   for (const year of ls(base))
-    for (const month of ls(import_node_path13.join(base, year)))
-      for (const day of ls(import_node_path13.join(base, year, month))) {
+    for (const month of ls(import_node_path9.join(base, year)))
+      for (const day of ls(import_node_path9.join(base, year, month))) {
         if (++days > 3)
           return null;
-        const dir = import_node_path13.join(base, year, month, day);
+        const dir = import_node_path9.join(base, year, month, day);
         const hit = ls(dir).find((name) => name.endsWith(`${sessionId}.jsonl`));
         if (hit)
-          return import_node_path13.join(dir, hit);
+          return import_node_path9.join(dir, hit);
       }
   return null;
 }
@@ -7869,12 +3998,12 @@ ${source}`;
     commands: (structured ? commands : scriptCommands).slice(-15)
   };
 }
-function opencodeDataDir2() {
+function opencodeDataDir() {
   if (process.env.OPENCODE_DATA_DIR)
     return process.env.OPENCODE_DATA_DIR;
   if (process.env.XDG_DATA_HOME)
-    return import_node_path13.join(process.env.XDG_DATA_HOME, "opencode");
-  return import_node_path13.join(import_node_os9.homedir(), ".local", "share", "opencode");
+    return import_node_path9.join(process.env.XDG_DATA_HOME, "opencode");
+  return import_node_path9.join(import_node_os6.homedir(), ".local", "share", "opencode");
 }
 var asObject = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
 function parseData(raw) {
@@ -7964,8 +4093,8 @@ function opencodeV1Messages(db, sessionId) {
   }
   return messages;
 }
-function readOpencodeSession(sessionId, file = import_node_path13.join(opencodeDataDir2(), "opencode.db")) {
-  if (!import_node_fs7.existsSync(file))
+function readOpencodeSession(sessionId, file = import_node_path9.join(opencodeDataDir(), "opencode.db")) {
+  if (!import_node_fs6.existsSync(file))
     return null;
   const sqlite = process.getBuiltinModule?.("node:sqlite");
   if (!sqlite) {
@@ -8083,7 +4212,7 @@ async function http(path, init = {}) {
   });
 }
 var BOARD_TTL_MS = 60 * 60 * 1000;
-var BOARDS_FILE = import_node_path13.join(STATE_DIR, "boards.json");
+var BOARDS_FILE = import_node_path9.join(STATE_DIR, "boards.json");
 function boardKey(remote, secret) {
   return [API, sha256(secret).slice(0, 12), remote].join(" ");
 }
@@ -8139,7 +4268,7 @@ var SECRET_FILES = [
   /^(?:\.envrc|\.npmrc|\.pypirc|\.netrc|_netrc|\.git-credentials|\.htpasswd|\.pgpass|\.dockercfg|\.s3cfg|\.boto)$/
 ];
 function isSecretFile(path) {
-  const name = import_node_path13.basename(path).toLowerCase();
+  const name = import_node_path9.basename(path).toLowerCase();
   return SECRET_FILES.some((pattern) => pattern.test(name));
 }
 function refusal(root, env) {
@@ -8147,7 +4276,7 @@ function refusal(root, env) {
   const file = changed.find(isSecretFile);
   if (file)
     return `${file} looks like a secrets file`;
-  const patch = import_node_child_process7.execFileSync("git", [
+  const patch = import_node_child_process4.execFileSync("git", [
     "diff",
     "--cached",
     "-U0",
@@ -8175,7 +4304,7 @@ function refusal(root, env) {
   return null;
 }
 function snapshot(root, taskId, untracked = PUSH_WIP_UNTRACKED) {
-  const index = import_node_path13.resolve(root, git(root, ["rev-parse", "--git-path", `lanework-wip-${process.pid}.index`]));
+  const index = import_node_path9.resolve(root, git(root, ["rev-parse", "--git-path", `lanework-wip-${process.pid}.index`]));
   try {
     const env = { GIT_INDEX_FILE: index };
     git(root, ["read-tree", "HEAD"], env);
@@ -8216,7 +4345,7 @@ function snapshot(root, taskId, untracked = PUSH_WIP_UNTRACKED) {
       return { wipRef: null, wipSha: sha };
     }
   } finally {
-    import_node_fs7.rmSync(index, { force: true });
+    import_node_fs6.rmSync(index, { force: true });
   }
 }
 var compactionOf = (input) => input.hook_event_name !== "PreCompact" ? null : input.trigger === "manual" || input.trigger === "auto" ? input.trigger : "unknown";
@@ -8241,7 +4370,7 @@ ${body}` : body;
 }
 async function work(inputFile) {
   const input = readJson(inputFile, {});
-  import_node_fs7.rmSync(inputFile, { force: true });
+  import_node_fs6.rmSync(inputFile, { force: true });
   if (AGENT === "opencode")
     return workOpencode(input);
   if (!input.cwd)
@@ -8254,7 +4383,7 @@ async function work(inputFile) {
   if (!root || !origin)
     return;
   const remote = stripUserinfo(origin);
-  const transcript = import_node_fs7.readFileSync(transcriptPath, "utf8");
+  const transcript = import_node_fs6.readFileSync(transcriptPath, "utf8");
   const d = AGENT === "codex" ? digestCodex(transcript, root, input.last_assistant_message ?? null) : digest(transcript, root);
   const compaction = compactionOf(input);
   if (compaction && input.session_id)
@@ -8324,7 +4453,7 @@ async function checkpointTo(local, d, input, root, remote, options = {}) {
   const status = tryGit(root, ["status", "--porcelain"]) ?? "";
   const diff = tryGit(root, ["diff", "HEAD"]) ?? "";
   const code = sha256([d.taskId, head, status, sha256(diff)].join("\x00"));
-  const stateFile = import_node_path13.join(STATE_DIR, `session-${sha256(input.session_id ?? "")}.json`);
+  const stateFile = import_node_path9.join(STATE_DIR, `session-${sha256(input.session_id ?? "")}.json`);
   const last = readJson(stateFile, null);
   if (!options.compaction && last && last.code === code && Date.now() - last.at < THIN_MS)
     return;
@@ -8334,7 +4463,7 @@ async function checkpointTo(local, d, input, root, remote, options = {}) {
   const pushed = last?.pushedCode === code ? last.wip : null;
   const wip = PUSH_WIP ? pushed ?? snapshot(root, d.taskId) : { wipRef: null, wipSha: null };
   const body = buildBody(d, {
-    host: import_node_os9.hostname(),
+    host: import_node_os6.hostname(),
     session: input.session_id ?? null,
     git: {
       branch: tryGit(root, ["rev-parse", "--abbrev-ref", "HEAD"]),
@@ -8385,7 +4514,7 @@ function boundTaskId(input) {
   const root = tryGit(input.cwd, ["rev-parse", "--show-toplevel"]);
   if (!root || !tryGit(root, ["remote", "get-url", "origin"]))
     return null;
-  const transcript = import_node_fs7.readFileSync(transcriptPath, "utf8");
+  const transcript = import_node_fs6.readFileSync(transcriptPath, "utf8");
   return (AGENT === "codex" ? digestCodex(transcript, root, null) : digest(transcript, root)).taskId;
 }
 function remindAfterCompaction(input) {
@@ -8414,10 +4543,10 @@ async function setup(token) {
     method: "POST",
     body: JSON.stringify({
       token,
-      name: `${import_node_os9.hostname()} (checkpoint hook)`,
-      hostname: import_node_os9.hostname(),
-      os: import_node_os9.platform(),
-      arch: import_node_os9.arch()
+      name: `${import_node_os6.hostname()} (checkpoint hook)`,
+      hostname: import_node_os6.hostname(),
+      os: import_node_os6.platform(),
+      arch: import_node_os6.arch()
     })
   });
   if (!res.ok) {
@@ -8484,7 +4613,7 @@ async function main() {
   if (ARGS.flags.has("plugin") && desktopHookInstalled())
     return;
   try {
-    const stdin = import_node_fs7.readFileSync(0, "utf8");
+    const stdin = import_node_fs6.readFileSync(0, "utf8");
     let input = {};
     try {
       input = JSON.parse(stdin);
@@ -8495,11 +4624,11 @@ async function main() {
     }
     if (input.hook_event_name === "PreCompact" && input.session_id)
       markCompaction(STATE_DIR, input.session_id);
-    import_node_fs7.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
-    const file = import_node_path13.join(STATE_DIR, `input-${process.pid}-${Date.now()}.json`);
-    import_node_fs7.writeFileSync(file, stdin, { mode: 384 });
+    import_node_fs6.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
+    const file = import_node_path9.join(STATE_DIR, `input-${process.pid}-${Date.now()}.json`);
+    import_node_fs6.writeFileSync(file, stdin, { mode: 384 });
     const flags = process.argv.slice(2).filter((a) => !ARGS.positional.includes(a));
-    import_node_child_process7.spawn(process.execPath, [SELF, ...flags, "worker", file], {
+    import_node_child_process4.spawn(process.execPath, [SELF, ...flags, "worker", file], {
       detached: true,
       stdio: "ignore"
     }).unref();
@@ -8507,5 +4636,5 @@ async function main() {
     log(`hook failed: ${String(error)}`);
   }
 }
-if (import_node_path13.basename(SELF).startsWith("lanework-checkpoint"))
+if (import_node_path9.basename(SELF).startsWith("lanework-checkpoint"))
   main();

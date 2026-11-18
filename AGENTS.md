@@ -169,6 +169,11 @@ worktree with `dispatch.briefs[key]` verbatim, merges and checks them, and
 alone writes to the card. Sub-agents never call the Lanework MCP or commit.
 Steps: [docs/agents/streams.md](docs/agents/streams.md).
 
+## Code search (FE-152)
+
+With the desktop app, `lanework-kit` (MCP) and `lwk` find files, code shapes
+and past chats fast: [docs/agents/lanework-kit.md](docs/agents/lanework-kit.md).
+
 ## Reusable scripts
 
 Before writing a one-off script for a mechanical task (CSV/JSON conversion,

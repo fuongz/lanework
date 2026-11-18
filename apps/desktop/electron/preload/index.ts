@@ -507,6 +507,9 @@ const agentConfig: DesktopAgentConfigApi = {
 /** A project's agent setup: read-only, a slug and an id, never a path. */
 const agentSetup: DesktopAgentSetupApi = {
   read: (slug) => ipcRenderer.invoke(agentSetupChannels.read, slug),
+  kitMcp: () => ipcRenderer.invoke(agentSetupChannels.kitMcp),
+  setKitMcp: (agent, on) =>
+    ipcRenderer.invoke(agentSetupChannels.setKitMcp, agent, on),
   readGlobal: () => ipcRenderer.invoke(agentSetupChannels.readGlobal),
   open: (slug, id) => ipcRenderer.invoke(agentSetupChannels.open, slug, id),
   reveal: (slug, id) => ipcRenderer.invoke(agentSetupChannels.reveal, slug, id),

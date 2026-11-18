@@ -14,13 +14,14 @@
 // NOTE: stdout is the protocol channel. Nothing else may be written to it;
 // logs go to stderr.
 import { hostname } from "node:os";
+import { toolInputSchema } from "@lanework/protocol";
 import {
   type LocalStore,
   LocalStoreError,
   type OpenOptions,
   openLocalStore,
 } from "../local-store/index";
-import { checkShape, InvalidParams, shapeSchema } from "./schema";
+import { checkShape, InvalidParams } from "./schema";
 import { TOOLS, type ToolContext } from "./tools";
 
 export const SERVER_NAME = "lanework";
@@ -78,7 +79,7 @@ function toolList() {
   return TOOLS.map((tool) => ({
     name: tool.name,
     description: tool.description,
-    inputSchema: shapeSchema(tool),
+    inputSchema: toolInputSchema(tool),
     annotations: {
       readOnlyHint: tool.readOnly,
       destructiveHint: tool.name === "delete_review",
@@ -110,9 +111,10 @@ export class LocalMcpSession {
   /**
    * The answer to one message, or null for a notification.
    *
-   * NOTE: The board tools answer at once. A tool that reads the disk
-   * (`search_sessions`, FE-149) answers later, as a promise; such a reply may
-   * overtake an earlier one, which JSON-RPC allows (ids pair them).
+   * NOTE: The board tools answer at once. A tool whose `run` returns a
+   * promise answers later; such a reply may overtake an earlier one, which
+   * JSON-RPC allows (ids pair them). None does since `search_sessions` moved
+   * to lanework-kit (FE-152); the path stays for one that reads the disk.
    */
   handle(message: unknown): JsonRpcResponse | Promise<JsonRpcResponse> | null {
     if (
