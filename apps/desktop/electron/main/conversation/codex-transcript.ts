@@ -16,6 +16,7 @@ import {
   type Attachment,
   CONVERSATION_READ_MAX,
   type Conversation,
+  spanMs,
   type ToolCall,
   type Turn,
   type UserTurn,
@@ -98,7 +99,14 @@ function toolOf(
   fallback: string,
 ): ToolCall | null {
   const id = str(item.id) ?? fallback;
-  const base = { id, error: false, filePath: null, subagent: null };
+  const base = {
+    id,
+    error: false,
+    filePath: null,
+    subagent: null,
+    startedAt: null,
+    durationMs: null,
+  };
   switch (item.type) {
     case "CommandExecution": {
       const command = commandLine(item.command);
@@ -198,6 +206,53 @@ function toolOf(
   }
 }
 
+/** An item's own `duration` (`{ secs, nanos }`) in ms, when it has one. */
+function itemMs(item: Record<string, unknown>): number | null {
+  const duration = record(item.duration);
+  const secs = duration.secs;
+  const nanos = duration.nanos;
+  if (typeof secs !== "number" || !Number.isFinite(secs)) return null;
+  const ms = secs * 1000 + (typeof nanos === "number" ? nanos / 1e6 : 0);
+  // A span past what a `Date` holds is no duration at all.
+  return ms >= 0 && ms <= 8.64e15 ? Math.round(ms) : null;
+}
+
+/** A model's tool call not yet answered: when it was issued, in ms. */
+interface OpenCall {
+  at: number;
+  /** When the last item finished inside it, items running one by one. */
+  lastItemAt: number | null;
+}
+
+/**
+ * When a finished item started, and how long it took.
+ *
+ * Codex writes only the finished item, at `at`. A command or MCP call
+ * carries its own `duration`: it started that long before. Any other item
+ * (a patch, an image, a search) ran inside the model's newest tool call
+ * still unanswered: it started with that call, or with the item before it
+ * there. With neither, its time is unknown.
+ */
+function timingOf(
+  item: Record<string, unknown>,
+  at: string,
+  open: Map<string, OpenCall>,
+): Pick<ToolCall, "startedAt" | "durationMs"> {
+  const end = Date.parse(at);
+  if (!Number.isFinite(end)) return { startedAt: null, durationMs: null };
+  const own = itemMs(item);
+  const call = [...open.values()].at(-1);
+  const from = call ? Math.max(call.at, call.lastItemAt ?? call.at) : null;
+  if (call) call.lastItemAt = end;
+  if (own !== null)
+    return { startedAt: new Date(end - own).toISOString(), durationMs: own };
+  if (from === null) return { startedAt: null, durationMs: null };
+  return {
+    startedAt: new Date(from).toISOString(),
+    durationMs: spanMs(from, end),
+  };
+}
+
 /** A `UserMessage` item's text and attached images. */
 function promptOf(item: Record<string, unknown>): {
   text: string;
@@ -243,6 +298,8 @@ function buildCodexTurns(rows: readonly Line[], folder: string): Turn[] {
   let usage = { input: 0, output: 0, cached: 0, seen: false };
   let promptAt: number | null = null;
   let model: string | null = null;
+  // The model's tool calls not yet answered, by call id, oldest first.
+  const calls = new Map<string, OpenCall>();
 
   const close = () => {
     if (!building) return;
@@ -307,6 +364,23 @@ function buildCodexTurns(rows: readonly Line[], folder: string): Turn[] {
       if (building) (building as AssistantTurn).model ??= model;
       continue;
     }
+    if (line.type === "response_item") {
+      const callId = str(payload.call_id);
+      if (!callId) continue;
+      if (
+        payload.type === "custom_tool_call" ||
+        payload.type === "function_call"
+      ) {
+        const issued = Date.parse(at);
+        if (Number.isFinite(issued))
+          calls.set(callId, { at: issued, lastItemAt: null });
+      } else if (
+        payload.type === "custom_tool_call_output" ||
+        payload.type === "function_call_output"
+      )
+        calls.delete(callId);
+      continue;
+    }
     if (line.type !== "event_msg") continue;
     switch (payload.type) {
       case "item_completed": {
@@ -320,6 +394,7 @@ function buildCodexTurns(rows: readonly Line[], folder: string): Turn[] {
         else {
           const call = toolOf(item, folder, id);
           if (!call) break;
+          Object.assign(call, timingOf(item, at, calls));
           const turn = open(id, at);
           const last = turn.blocks.at(-1);
           if (last?.type === "tools") last.calls.push(call);
@@ -354,6 +429,8 @@ function buildCodexTurns(rows: readonly Line[], folder: string): Turn[] {
       }
       case "task_complete":
       case "turn_aborted":
+        // A call the turn left unanswered times nothing after it.
+        calls.clear();
         if (building) (building as AssistantTurn).endedAt = at;
         break;
     }

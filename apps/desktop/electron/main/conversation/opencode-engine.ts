@@ -677,10 +677,20 @@ export class OpenCodeEngine implements ConversationEngine {
               : type === "session.tool.failed"
                 ? "error"
                 : "running";
+        // NOTE: The events tell no time of their own: a call is timed as
+        // its events arrive here, the stored part's times replacing these
+        // once the conversation is read again.
+        const now = Date.now();
+        const time = record(before.time);
         const part: Json = {
           type: "tool",
           id,
           name: str(data.name) ?? str(before.name) ?? "tool",
+          time: {
+            created: typeof time.created === "number" ? time.created : now,
+            completed:
+              status === "completed" || status === "error" ? now : undefined,
+          },
           state: {
             status,
             input: data.input ?? state.input ?? {},

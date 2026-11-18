@@ -13,7 +13,14 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
-import { type MouseEvent, memo, useContext, useEffect, useState } from "react";
+import {
+  type MouseEvent,
+  memo,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import type {
   ConversationAgent,
   ToolCall,
@@ -34,10 +41,12 @@ import {
 import { commandProgram, commandText } from "#/lib/command-label";
 import {
   baseName,
+  formatDuration,
   groupTitle,
   isImagePath,
   mcpName,
 } from "#/lib/conversation-format";
+import { type JsonTokenKind, jsonTokens, prettyJson } from "#/lib/json-tokens";
 import { cn } from "#/lib/utils";
 
 const KIND_ICONS: Record<ToolKind, IconSvgElement> = {
@@ -69,6 +78,107 @@ const PANEL = `h-(--collapsible-panel-height) overflow-hidden transition-[height
 const PANEL_AT_ONCE = "overflow-hidden";
 
 /**
+ * The clock, re-read about once a second while `active`; idle (no timer at
+ * all) otherwise. The interval is cleared on unmount or when `active` ends.
+ */
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
+}
+
+/** A duration, muted and tabular, that never takes room from the label. */
+function Elapsed({ ms, className }: { ms: number; className?: string }) {
+  return (
+    <span
+      className={cn(
+        "text-muted-foreground shrink-0 text-xs tabular-nums",
+        className,
+      )}
+    >
+      {formatDuration(ms)}
+    </span>
+  );
+}
+
+/**
+ * A group's wall time: the earliest start to the latest end (now, while a
+ * call still runs), else the sum of the durations known; null when unknown.
+ */
+function groupElapsed(
+  calls: ToolCall[],
+  now: number,
+  live: boolean,
+): number | null {
+  let first = Number.POSITIVE_INFINITY;
+  let last = Number.NEGATIVE_INFINITY;
+  let sum = 0;
+  let known = false;
+  for (const call of calls) {
+    const start = call.startedAt ? Date.parse(call.startedAt) : Number.NaN;
+    if (!Number.isNaN(start)) first = Math.min(first, start);
+    if (call.output === null) {
+      // Unanswered: running only while the group is live; else it never ends
+      // (an aborted turn) and is left out.
+      if (live && !Number.isNaN(start)) last = Math.max(last, now);
+    } else if (call.durationMs !== null) {
+      sum += call.durationMs;
+      known = true;
+      if (!Number.isNaN(start)) last = Math.max(last, start + call.durationMs);
+    }
+  }
+  if (Number.isFinite(first) && Number.isFinite(last) && last >= first)
+    return last - first;
+  return known ? sum : null;
+}
+
+/** Each token kind's colour, light and dark. Punctuation stays muted. */
+const JSON_TONE: Record<JsonTokenKind, string | undefined> = {
+  key: "text-sky-600 dark:text-sky-300",
+  string: "text-emerald-600 dark:text-emerald-300",
+  number: "text-amber-600 dark:text-amber-300",
+  literal: "text-violet-600 dark:text-violet-300",
+  punctuation: "text-muted-foreground",
+  plain: undefined,
+};
+
+/** JSON, coloured by token; any other text comes through as it is. */
+function JsonCode({ text }: { text: string }) {
+  const tokens = useMemo(() => jsonTokens(text), [text]);
+  return (
+    <code>
+      {tokens.map((token, index) => (
+        <span
+          // biome-ignore lint/suspicious/noArrayIndexKey: tokens of one fixed text, never reordered.
+          key={index}
+          className={JSON_TONE[token.kind]}
+        >
+          {token.text}
+        </span>
+      ))}
+    </code>
+  );
+}
+
+/**
+ * A call's output: pretty and coloured when it is JSON, as it came
+ * otherwise. A failure keeps its plain red text.
+ */
+function OutputCode({ text, error }: { text: string; error: boolean }) {
+  const pretty = useMemo(
+    () => (error || !text ? null : prettyJson(text)),
+    [text, error],
+  );
+  if (pretty) return <JsonCode text={pretty} />;
+  return <code>{text || "(no output)"}</code>;
+}
+
+/**
  * The image a call made, else null: Codex's `image_gen` saves one and names
  * it in `filePath`. A read or an edit of an image is not one.
  */
@@ -90,7 +200,7 @@ function FileChip({ path }: { path: string }) {
   const chip = (
     <span
       title={path}
-      className="bg-foreground/[0.05] inline-flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 font-mono text-[12px]"
+      className="text-foreground/80 inline-flex min-w-0 items-center gap-1.5 font-mono text-[12px]"
     >
       <FileTypeIcon path={path} className="size-3.5 shrink-0" />
       <span className="truncate">{path}</span>
@@ -159,7 +269,11 @@ function CallLine({ call }: { call: ToolCall }) {
       ? mcpName(call.tool)
       : call.kind === "agent"
         ? "Agent"
-        : call.tool;
+        : call.kind === "search"
+          ? "Searched"
+          : call.kind === "fetch"
+            ? "Fetched"
+            : call.tool;
   return (
     <span className="flex min-w-0 items-center gap-2">
       <span className="shrink-0">{name}</span>
@@ -182,15 +296,24 @@ function CallRow({
   slug,
   conversation,
   atOnce,
+  live,
 }: {
   call: ToolCall;
   slug: string;
   conversation: string;
   /** The turn streams: open and close without easing the height. */
   atOnce: boolean;
+  /** The group is the one still running: only then may an unanswered call tick. */
+  live: boolean;
 }) {
   const running = call.output === null;
   const image = madeImage(call);
+  const now = useNow(live && running && call.startedAt !== null);
+  const elapsed = running
+    ? live && call.startedAt
+      ? now - Date.parse(call.startedAt)
+      : null
+    : call.durationMs;
   return (
     <Collapsible.Root
       render={<li />}
@@ -199,7 +322,7 @@ function CallRow({
       {/* The tree's elbow into this row. */}
       <span
         aria-hidden="true"
-        className="border-foreground/15 absolute top-0 -left-3 h-3.5 w-2.5 rounded-bl-md border-b border-l"
+        className="border-foreground/15 absolute top-0 -left-3 h-3 w-2.5 rounded-bl-md border-b border-l"
       />
       <div className="flex min-w-0 items-center gap-1">
         <Collapsible.Trigger
@@ -209,7 +332,7 @@ function CallRow({
               : call.summary || call.tool
           }
           className={cn(
-            "hover:bg-foreground/[0.04] flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left text-[13px] transition-colors",
+            "hover:bg-foreground/[0.04] flex h-6 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left text-[13px] transition-colors",
             call.error ? "text-destructive" : "text-muted-foreground",
             // Breathes, not shimmers: several calls may run at once.
             running && "text-breathe",
@@ -224,6 +347,9 @@ function CallRow({
           <CallLine call={call} />
           {call.filePath && call.kind !== "read" && call.kind !== "edit" && (
             <span className="shrink-0 text-xs">{baseName(call.filePath)}</span>
+          )}
+          {elapsed !== null && Number.isFinite(elapsed) && (
+            <Elapsed ms={elapsed} className="ms-auto" />
           )}
         </Collapsible.Trigger>
         {call.kind === "agent" && call.subagent && (
@@ -241,13 +367,13 @@ function CallRow({
         {/* Wide output scrolls inside its own box; the page never scrolls sideways. */}
         <div className="bg-foreground/[0.04] my-1 ms-6 flex max-h-96 flex-col gap-2 overflow-auto rounded-lg p-3 font-mono text-[11px] leading-relaxed">
           <pre className="whitespace-pre-wrap break-all">
-            <code>
-              {call.kind === "command" &&
-              call.input &&
-              !call.input.startsWith("{")
-                ? commandText(call.input)
-                : call.input || "{}"}
-            </code>
+            {call.kind === "command" &&
+            call.input &&
+            !call.input.startsWith("{") ? (
+              <code>{commandText(call.input)}</code>
+            ) : (
+              <JsonCode text={call.input || "{}"} />
+            )}
           </pre>
           {call.output !== null && (
             <>
@@ -258,7 +384,7 @@ function CallRow({
                   call.error && "text-destructive",
                 )}
               >
-                <code>{call.output || "(no output)"}</code>
+                <OutputCode text={call.output} error={call.error} />
               </pre>
             </>
           )}
@@ -317,6 +443,9 @@ export const ToolGroup = memo(function ToolGroup({
   }, [running]);
   const atOnce = running || !clicked;
   const failed = calls.some((call) => call.error);
+  const live = running && calls.some((call) => call.output === null);
+  const now = useNow(live);
+  const total = groupElapsed(calls, now, live);
   // The images the group made stay in sight while it is folded; open, each
   // one sits in its own call's output instead.
   const images = calls.flatMap((call) => {
@@ -372,6 +501,7 @@ export const ToolGroup = memo(function ToolGroup({
           </span>
         </span>
         <span className="min-w-0 truncate">{groupTitle(calls)}</span>
+        {total !== null && <Elapsed ms={total} />}
         {failed && (
           <span className="text-destructive shrink-0 text-xs">failed</span>
         )}
@@ -398,6 +528,7 @@ export const ToolGroup = memo(function ToolGroup({
               slug={slug}
               conversation={conversation}
               atOnce={running}
+              live={running}
             />
           ))}
         </ul>

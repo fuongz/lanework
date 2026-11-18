@@ -499,6 +499,31 @@ export interface ToolCall {
   filePath: string | null;
   /** The sub-agent this call spawned, if any; it opens the sub-agent view. */
   subagent: string | null;
+  /**
+   * When the call was issued, as an ISO time; null when its source tells no
+   * time for it.
+   */
+  startedAt: string | null;
+  /**
+   * How long it took: its result's time minus {@link startedAt}, in ms, never
+   * below 0. Null while it runs, or when either time is unknown.
+   */
+  durationMs: number | null;
+}
+
+/**
+ * `end - start` in ms, clamped at 0, for {@link ToolCall.durationMs}; null
+ * when either is missing or not a time.
+ */
+export function spanMs(
+  start: string | number | null | undefined,
+  end: string | number | null | undefined,
+): number | null {
+  const from = typeof start === "string" ? Date.parse(start) : start;
+  const to = typeof end === "string" ? Date.parse(end) : end;
+  if (typeof from !== "number" || typeof to !== "number") return null;
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return null;
+  return Math.max(0, to - from);
 }
 
 /** The most of one tool call's input or output sent to the page, in chars. */

@@ -19,15 +19,16 @@
 import { stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import type {
-  AssistantTurn,
-  Attachment,
-  Block,
-  Conversation,
-  ToolCall,
-  ToolKind,
-  Turn,
-  TurnUsage,
+import {
+  type AssistantTurn,
+  type Attachment,
+  type Block,
+  type Conversation,
+  spanMs,
+  type ToolCall,
+  type ToolKind,
+  type Turn,
+  type TurnUsage,
 } from "../../../shared/conversation";
 import { isAgentSessionIdOf } from "../../../shared/terminal";
 import { tidy } from "../transcripts/jsonl";
@@ -117,8 +118,13 @@ function errorText(value: unknown): string {
 /**
  * One tool call of an assistant step, as the chat draws it.
  *
- * `part` is OpenCode's: `{ id, name, state: { status, input, content,
- * metadata, error } }`. A call still running has no output yet.
+ * `part` is OpenCode's: `{ id, name, time, state: { status, input,
+ * content, metadata, error, time } }`. A call still running has no output
+ * yet.
+ *
+ * Its times, epoch ms: v2 keeps them on the part (`time.created` when the
+ * model issued it, `time.ran`, `time.completed`), older stores on its state
+ * (`state.time.start` / `.end`).
  */
 export function opencodeToolCall(part: Json, folder: string): ToolCall {
   const tool = str(part.name) ?? str(part.tool) ?? "tool";
@@ -157,6 +163,11 @@ export function opencodeToolCall(part: Json, folder: string): ToolCall {
       str(state.output) ||
       ""
     : null;
+  const time = record(part.time);
+  const legacy = record(state.time);
+  const start =
+    stampMs(time.created) ?? stampMs(time.ran) ?? stampMs(legacy.start);
+  const end = done ? (stampMs(time.completed) ?? stampMs(legacy.end)) : null;
   return {
     id: str(part.id) ?? str(part.callID) ?? "",
     tool,
@@ -167,8 +178,14 @@ export function opencodeToolCall(part: Json, folder: string): ToolCall {
     error: failed,
     filePath,
     subagent: null,
+    startedAt: start === null ? null : new Date(start).toISOString(),
+    durationMs: spanMs(start, end),
   };
 }
+
+/** `value` as epoch ms, when it is one a `Date` can hold. */
+const stampMs = (value: unknown): number | null =>
+  typeof value === "number" && value > 0 && value <= 8.64e15 ? value : null;
 
 /** One step's token counts, as OpenCode keeps them. */
 export interface StepTokens {

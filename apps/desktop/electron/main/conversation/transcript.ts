@@ -13,6 +13,7 @@ import {
   CONVERSATION_READ_MAX,
   type CompactionTurn,
   type Conversation,
+  spanMs,
   TOOL_TEXT_MAX,
   type ToolCall,
   type ToolKind,
@@ -682,6 +683,8 @@ export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
                   : null
               : null,
             subagent: null,
+            startedAt: at,
+            durationMs: null,
           };
           calls.set(call.id, call);
           const last = blocks.at(-1);
@@ -708,6 +711,7 @@ export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
           if (!call) continue;
           call.output = cut(resultText(part.content));
           call.error = part.is_error === true;
+          call.durationMs = spanMs(call.startedAt, at);
           if (call.kind === "agent" && isClaudeSubagentId(result.agentId))
             call.subagent = result.agentId;
         }

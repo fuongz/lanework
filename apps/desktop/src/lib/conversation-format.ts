@@ -152,6 +152,21 @@ export function groupTitle(calls: ToolCall[]): string {
     .join(", ");
 }
 
+/**
+ * A duration, compact: `0.4s`, `3.2s`, `12s`, `1m 05s`, `1h 02m`.
+ */
+export function formatDuration(ms: number): string {
+  const value = Math.max(0, ms);
+  if (value < 10_000) return `${(value / 1000).toFixed(1)}s`;
+  const seconds = Math.round(value / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (seconds < 3600)
+    return `${Math.floor(seconds / 60)}m ${pad(seconds % 60)}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${Math.floor(minutes / 60)}h ${pad(minutes % 60)}m`;
+}
+
 /** `mcp__lanework__get_review` → `get_review`. */
 export function mcpName(tool: string): string {
   const parts = tool.split("__");
