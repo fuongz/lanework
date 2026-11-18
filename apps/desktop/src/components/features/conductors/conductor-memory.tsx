@@ -216,7 +216,7 @@ export function ConductorMemory({
           {memory === undefined ? (
             <TextSkeleton
               label="Reading its notes"
-              className="block h-40 w-full rounded-md"
+              className="block h-72 w-full rounded-md"
             />
           ) : (
             <Textarea
@@ -229,7 +229,7 @@ export function ConductorMemory({
                 setNotes(event.target.value);
                 setSaved(false);
               }}
-              className="field-sizing-fixed min-h-40 resize-y font-mono"
+              className="field-sizing-fixed min-h-72 resize-y font-mono"
             />
           )}
           <div className="flex items-center gap-3">

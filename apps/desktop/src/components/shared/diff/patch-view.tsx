@@ -140,6 +140,12 @@ export function PatchView({
       // `gap: 0` so the files read as one list instead of a column of loose
       // cards; the hairline on each header does the separating.
       layout: { paddingTop: 0, paddingBottom: 8, gap: 0 },
+      // NOTE: The custom header's real height (`h-9` in `DiffFileHeader`),
+      // not the library's 44px default. CodeView lays out a collapsed file
+      // from this estimate: left at 44, three folded files reserve 24px more
+      // than they draw, and the sticky stack sits that far down from the top
+      // as a blank band. Change both together.
+      itemMetrics: { diffHeaderHeight: 36 },
       loadDiffFiles,
     }),
     [dark, diffStyle, loadDiffFiles],

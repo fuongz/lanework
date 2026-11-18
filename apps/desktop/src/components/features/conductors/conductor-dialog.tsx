@@ -24,7 +24,6 @@ import {
   PopoverTrigger,
 } from "#/components/ui/popover";
 import { ipcMessage } from "#/lib/ipc-error";
-import { leadIcon } from "#/lib/orchestration-prompt";
 import { cn } from "#/lib/utils";
 import { ConductorContext } from "./conductor-context";
 import {
@@ -178,21 +177,12 @@ export function ConductorDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="flex h-[min(560px,85vh)] gap-0 overflow-hidden p-0 sm:max-w-2xl">
+      <DialogContent className="flex h-[min(760px,88vh)] gap-0 overflow-hidden p-0 sm:max-w-4xl">
         <DialogTitle className="sr-only">{title}</DialogTitle>
         <nav
           aria-label="Conductor settings"
           className="bg-sidebar flex w-44 shrink-0 flex-col gap-0.5 border-r p-2.5"
         >
-          <div className="text-muted-foreground flex min-w-0 items-center gap-2 px-2 pt-1 pb-2 text-xs">
-            <HugeiconsIcon
-              icon={leadIcon(draft.input.icon)}
-              className="size-4 shrink-0"
-              strokeWidth={1.5}
-              aria-hidden="true"
-            />
-            <span className="truncate">{name || "New conductor"}</span>
-          </div>
           {pages.map((entry) => (
             <button
               key={entry.key}

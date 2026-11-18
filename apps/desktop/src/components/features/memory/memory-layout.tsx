@@ -72,7 +72,7 @@ export function MemoryLayout() {
         />
       </Framed>
     ) : (
-      <SplitSkeleton label="Reading memory" />
+      <SplitSkeleton label="Reading memory" side="sidebar" />
     );
   if (!list.folder || !list.dir)
     return (

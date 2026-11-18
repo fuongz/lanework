@@ -74,7 +74,7 @@ export function InstructionsLayout() {
         />
       </Framed>
     ) : (
-      <SplitSkeleton label="Reading instructions" />
+      <SplitSkeleton label="Reading instructions" side="sidebar" />
     );
   if (!list.folder)
     return (

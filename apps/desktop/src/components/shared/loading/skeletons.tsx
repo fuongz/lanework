@@ -123,17 +123,32 @@ export function DocumentSkeleton({
 /**
  * A Repository screen before its repository is read: the side list, its
  * search field and the pane beside it, at the widths Files draws them.
+ *
+ * Painted on the surfaces the real screen uses, so nothing changes colour
+ * when it arrives: `side` is the side list's (`background` for Files and
+ * Git, `sidebar` for Memory and Instructions).
  */
 export function SplitSkeleton({
   label,
   lines = 1,
+  side = "background",
 }: {
   label: string;
   lines?: 1 | 2;
+  side?: "background" | "sidebar";
 }) {
   return (
-    <div role="status" aria-label={label} className="flex min-h-0 flex-1">
-      <div className="bg-sidebar flex w-[280px] shrink-0 flex-col border-r">
+    <div
+      role="status"
+      aria-label={label}
+      className="bg-background flex min-h-0 flex-1"
+    >
+      <div
+        className={cn(
+          "flex w-[280px] shrink-0 flex-col border-r",
+          side === "sidebar" ? "bg-sidebar" : "bg-background",
+        )}
+      >
         <div className="px-2 pt-2 pb-1.5">
           <Skeleton className="h-8 w-full rounded-lg" />
         </div>
