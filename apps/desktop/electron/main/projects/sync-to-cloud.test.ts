@@ -77,8 +77,9 @@ before(async () => {
           return json(res, 409, { error: "taken" });
         plane.taken.add(body.slug);
         plane.created.push(body.slug);
+        // The wire key is still `workspace` (the API kept it through FE-107).
         return json(res, 201, {
-          project: {
+          workspace: {
             id: `ws-${body.slug}`,
             slug: body.slug,
             name: body.name,
