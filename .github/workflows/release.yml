@@ -155,9 +155,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+        # The notes are the committed .agents/release-notes/<date>-<tag>.md
+        # (Keep a Changelog, from v0.10.0); GitHub's generated list only
+        # when there is none.
         run: |
+          shopt -s nullglob
+          found=(../../../.agents/release-notes/*-"$TAG".md)
+          if [ "${#found[@]}" -eq 1 ]; then
+            notes=(--notes-file "${found[0]}")
+          else
+            notes=(--generate-notes)
+          fi
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
-            --title "$TAG" --generate-notes \
+            --title "$TAG" "${notes[@]}" \
             ./*.dmg ./*.dmg.sha256 \
             ./*-mac.zip ./*-mac.zip.blockmap ./latest-mac.yml
 
