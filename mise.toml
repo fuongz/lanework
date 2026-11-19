@@ -49,7 +49,7 @@ echo "Installed $dest ($version)"
 
 [tasks."release:bump"]
 description = "Next release version: package.json + commit + tag vX.Y.Z (no push). mise run release:bump patch"
-# INF-10, docs/agents/versioning.md. Dev builds (app:package, app:install)
+# INF-10, docs/releasing.md. Dev builds (app:package, app:install)
 # never touch package.json; only this does.
 dir = "apps/desktop"
 usage = 'arg "<part>" help="patch, minor or major"'

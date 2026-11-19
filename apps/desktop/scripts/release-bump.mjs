@@ -1,4 +1,4 @@
-// INF-10 (docs/agents/versioning.md): `mise run release:bump <patch|minor|major>`.
+// INF-10 (docs/releasing.md): `mise run release:bump <patch|minor|major>`.
 // Moves apps/desktop/package.json to the next release version, commits only
 // that file as `chore(release): vX.Y.Z` and tags it `vX.Y.Z`. It never
 // pushes: `git push origin main vX.Y.Z` is what starts the release workflow,

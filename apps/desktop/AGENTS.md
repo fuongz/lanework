@@ -53,8 +53,8 @@ Details: [process boundaries](../../docs/standards/process-boundaries.md),
 
 | Rule | Gate | Details |
 | --- | --- | --- |
-| Production is a static Start SPA over `app://lanework`; no server functions without a reviewed design. | Not gated | [README](../../README.md#runtime-boundaries) |
-| Dev uses port 5175; change Vite, Electron's origin check and the dev launcher together. | Not gated | [README](../../README.md#run) |
+| Production is a static Start SPA over `app://lanework`; no server functions without a reviewed design. | Not gated | [Development](../../docs/development.md#runtime-boundaries) |
+| Dev uses port 5175; change Vite, Electron's origin check and the dev launcher together. | Not gated | [Development](../../docs/development.md#run) |
 | TypeScript is strict (`tsconfig.base.json`); renderer and Electron typecheck separately. | `typecheck` | `tsconfig.json`, `tsconfig.node.json` |
 | The committed plugin bundle matches a fresh build on Bun 1.4.4. | `build-plugin.mjs --check` | Root AGENTS.md |
 | Never commit generated route trees, build output, test profiles or installers. | Not gated | — |
@@ -65,4 +65,4 @@ Details: [process boundaries](../../docs/standards/process-boundaries.md),
 | --- | --- | --- |
 | An Electron-free unit is a colocated `*.test.ts` (`node:test`), run by `bun run test:unit`; anything that boots the app is a `tests/*.spec.ts`, run by `bun run test` after `bun run build`. | Not gated (CI runs no tests) | [Tests](../../docs/standards/process-boundaries.md#tests) |
 | A spec that boots the app sets `LANEWORK_HOME`; `LANEWORK_TEST_USER_DATA` moves only Electron's `userData`. | Not gated | [Tests](../../docs/standards/process-boundaries.md#tests) |
-| Watcher/HMR changes run `bun run test:dev`, without another dev server. | Not gated | [README](../../README.md#commands) |
+| Watcher/HMR changes run `bun run test:dev`, without another dev server. | Not gated | [Development](../../docs/development.md#commands) |

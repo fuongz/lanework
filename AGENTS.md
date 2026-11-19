@@ -47,7 +47,10 @@ does this file. When an id's card does not match, look it up in
 ## Where artifacts go
 
 Agent working files (test results, scratch output) live under `.agents/`. Use
-**`YYYY-MM-DD`** for every dated filename (it sorts chronologically). The plan
+**`YYYY-MM-DD`** for every dated filename (it sorts chronologically). Only
+`release-notes/` (`YYYY-MM-DD-vX.Y.Z.md`, Keep a Changelog from v0.10.0)
+and the comment-style check are committed; everything else, such as
+`scratch/`, `artifacts/` and `research/`, is git-ignored. The plan
 lives in the agent's own session plan/todo tool, **not** a shared
 `.agents/todo.md`: one mutable file every session appends to loses a plan to
 last-writer-wins as soon as two agents run at once. For **read-only requests**
@@ -93,7 +96,7 @@ recur.
 Release `X.Y.Z` lives in `apps/desktop/package.json` and only
 `mise run release:bump <patch|minor|major>` changes it. `app:package` and
 `app:install` stamp `X.Y.Z-preview-YYYYMMDDHHmm` into the bundle and never
-write package.json. Details: [docs/agents/versioning.md](docs/agents/versioning.md).
+write package.json. Details: [docs/releasing.md](docs/releasing.md).
 
 ## Git commits
 

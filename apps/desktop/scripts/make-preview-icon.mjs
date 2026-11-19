@@ -1,5 +1,5 @@
-// Regenerates the Preview build's icon from the release icon (docs/agents/
-// versioning.md, "Preview builds"): build/icon.png -> build/icon-preview.png
+// Regenerates the Preview build's icon from the release icon
+// (docs/releasing.md, "Preview builds"): build/icon.png -> build/icon-preview.png
 // and build/icon-preview.icns. Run it after build/icon.png changes:
 //
 //   node scripts/make-preview-icon.mjs

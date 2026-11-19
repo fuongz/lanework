@@ -6,19 +6,19 @@ release/
 *.tsbuildinfo
 .DS_Store
 apps/desktop/src/routeTree.gen.ts
-.agents/artifacts/
-# Local agent verification logs may contain machine paths or runtime secrets.
-.agents/**/*.log
-# Agent scratch the app never runs: dated run profiles (a temp home, Claude
-# and OpenCode config), drafts and art.
-.agents/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*/
-.agents/banner-art/
-.agents/x-posts/
-.agents/research/
-.agents/scratch/
+# Agent working files (AGENTS.md: "Where artifacts go"). Only what is listed
+# below is committed; everything else under .agents/ stays on this machine:
+# scratch/ (dated runs, logs, probes), artifacts/, research/, art and drafts.
+# Logs and run profiles may hold machine paths or runtime secrets.
+.agents/*
+!.agents/release-notes/
+!.agents/comment-check.mjs
+!.agents/comment-style.md
 
 # Personal Claude Code settings for this checkout
 .claude/settings.local.json
+# Claude Code's own worktrees (EnterWorktree)
+.claude/worktrees/
 
 # Machine-local mise settings: code signing and notarization for app:dmg.
 mise.local.toml

@@ -19,7 +19,7 @@
 //   left in the environment would send each local package to Apple.
 //
 // - `--dev` (package only, so `mise run app:install` too; INF-10,
-//   docs/agents/versioning.md): stamps a dev version into the bundle,
+//   docs/releasing.md): stamps a dev version into the bundle,
 //   `X.Y.Z-preview-YYYYMMDDHHmm` from package.json `X.Y.Z`, so every local
 //   install carries a newer version than the last and none looks like a
 //   release. package.json is never written. Release builds (`dist`) take the

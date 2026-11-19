@@ -26,7 +26,7 @@ bun run dev
 ```
 
 `bun run dev` opens Electron and starts Vite on `http://127.0.0.1:5175`. See
-[README.md](README.md) for the rest of the commands and the folder layout.
+[docs/development.md](docs/development.md) for the rest of the commands and the folder layout.
 
 By default the app signs in against `https://api.lanework.dev`. To point it at
 another control plane (a local stub, a `wrangler dev`, your own deployment),

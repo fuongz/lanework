@@ -1,4 +1,4 @@
-# Version names (INF-10)
+# Releasing and version names (INF-10)
 
 The desktop app has two kinds of version: **releases**, which ship, and
 **dev builds**, which a maintainer installs locally. You can tell which one is
@@ -15,6 +15,10 @@ running from the version alone.
 - **`apps/desktop/package.json` holds the last release version**, and plain
   `X.Y.Z` only: no `-dev`, `-beta` or other suffix. The release workflow
   refuses a tag that does not match it.
+- **Release notes first.** Write `.agents/release-notes/YYYY-MM-DD-vX.Y.Z.md`
+  (Keep a Changelog 1.1.0) and commit it before the bump: the release job
+  puts that file on the draft release, and GitHub's generated list only when
+  there is none.
 - **Only `mise run release:bump <patch|minor|major>` changes it.** It writes
   the new version, commits that file alone as `chore(release): vX.Y.Z` and
   tags `vX.Y.Z`. It does not push; `git push origin HEAD vX.Y.Z` starts the

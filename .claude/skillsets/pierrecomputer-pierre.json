@@ -1,0 +1,19 @@
+{
+  "slug": "pierrecomputer-pierre",
+  "name": "pierrecomputer/pierre",
+  "description": "The skill for @pierre/trees, the file tree the diff view is built on.",
+  "repo": "pierrecomputer/pierre",
+  "ref": "main",
+  "subpath": "skills",
+  "license": null,
+  "author": "pierrecomputer",
+  "importedAt": "2026-09-23T10:07:14.000Z",
+  "skills": [
+    {
+      "name": "trees",
+      "upstreamPath": "skills/trees",
+      "commit": null,
+      "lockHash": "7132a04dc1cb869f53db7fc01f34805d7c78a1089608d9df9b4839647e34b13a"
+    }
+  ]
+}
