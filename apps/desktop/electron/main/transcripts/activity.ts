@@ -514,6 +514,97 @@ export async function transcriptCompleted(
 }
 
 /**
+ * Transcripts whose last turn was cut off with the process writing it (a
+ * crash, a kill after an unanswered Stop), by file: its size when it ended.
+ *
+ * NOTE: A CLI that dies mid-turn never writes the turn's end, and every read
+ * of "working" walks back to that open turn. Only what was written AFTER the
+ * cut decides instead, so the record covers the cut turn alone: the next
+ * prompt lands after it and reads as working again. In memory only: the
+ * engines that cut turns off end with the app, and after a restart the
+ * {@link STALE_MS} rule takes over as before.
+ */
+const cuts = new Map<string, number>();
+
+/** The most cut-off transcripts remembered; the oldest go first. */
+const CUTS_MAX = 256;
+
+/** Told each time a transcript's turn is recorded as cut off. */
+const cutListeners = new Set<(file: string) => void>();
+
+/**
+ * Where `file`'s last turn was cut off, if it was and `size` is past it.
+ *
+ * @returns The byte the cut was at, or null. A file now shorter was
+ *   rewritten: its record goes.
+ */
+export function cutOffAt(file: string, size: number): number | null {
+  const at = cuts.get(file);
+  if (at === undefined) return null;
+  if (size < at) {
+    cuts.delete(file);
+    return null;
+  }
+  return at;
+}
+
+/**
+ * The end of `file` that says whether its agent works: its last
+ * {@link CHUNK}, from no earlier than a cut-off turn (see {@link cutOffAt}).
+ */
+export async function turnTail(file: string, size: number): Promise<Line[]> {
+  const cut = cutOffAt(file, size);
+  const start = Math.max(0, size - CHUNK, cut ?? 0);
+  return lines(await readRange(file, start, CHUNK), {
+    head: start === 0 || start === cut,
+  });
+}
+
+/**
+ * Record that `file`'s turn ended with its process, if its transcript still
+ * reads as working, and tell the watchers so.
+ *
+ * Called on every exit of an engine's process: a turn that ended properly
+ * reads idle and records nothing.
+ *
+ * @returns Whether a cut was recorded.
+ */
+export async function markTurnCut(
+  file: string,
+  agent: "claude" | "codex",
+): Promise<boolean> {
+  try {
+    const { size } = await stat(file);
+    const tail = await turnTail(file, size);
+    if (!(agent === "codex" ? codexWorking(tail) : claudeWorking(tail)))
+      return false;
+    cuts.delete(file);
+    cuts.set(file, size);
+    if (cuts.size > CUTS_MAX) cuts.delete(cuts.keys().next().value as string);
+  } catch {
+    return false;
+  }
+  for (const listener of cutListeners) {
+    try {
+      listener(file);
+    } catch {
+      // One listener's failure never keeps the others from hearing.
+    }
+  }
+  return true;
+}
+
+/**
+ * Hear each transcript whose turn {@link markTurnCut} records as cut off.
+ *
+ * @returns The function that stops listening.
+ */
+export function onTurnCut(listener: (file: string) => void): () => void {
+  cutListeners.add(listener);
+  return () => cutListeners.delete(listener);
+}
+
+/**
  * Whether the agent behind `file` is working now, from its transcript's end.
  *
  * @param subagent `file` is one of a conversation's sub-agents, not the
@@ -529,10 +620,7 @@ export async function transcriptWorking(
     if (agent === "claude" && subagent) return await claudeSubagentGoing(file);
     const info = await stat(file);
     if (Date.now() - info.mtimeMs > STALE_MS) return false;
-    const start = Math.max(0, info.size - CHUNK);
-    const tail = lines(await readRange(file, start, CHUNK), {
-      head: start === 0,
-    });
+    const tail = await turnTail(file, info.size);
     return agent === "codex" ? codexWorking(tail) : claudeWorking(tail);
   } catch {
     return false;

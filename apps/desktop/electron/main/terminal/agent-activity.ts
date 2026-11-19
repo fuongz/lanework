@@ -9,7 +9,7 @@
 // against a fake home folder.
 import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import {
   type AgentCard,
   isAgentSessionId,
@@ -19,6 +19,7 @@ import {
 } from "../../../shared/terminal";
 import type { SessionStore } from "../../session-store";
 import { type IngestSource, ingestOne } from "../sessions";
+import { onTurnCut } from "../transcripts/activity";
 import { type Watch, watchPath } from "../watch";
 import {
   CLAUDE_SUBAGENT_FILE,
@@ -525,8 +526,19 @@ export function watchAgentActivity(
   // Null: no OpenCode on this machine.
   if (opencode) watchers.push(opencode);
 
+  // A turn cut off with its process wrote no end, so no write will bring
+  // the news: its conversation is read again now, as if written.
+  const offCut = onTurnCut((file) => {
+    if (stopped) return;
+    if (dirname(file) === claudeDir) {
+      const id = basename(file, ".jsonl");
+      if (isAgentSessionId(id)) report("claude", id, file);
+    } else if (file.startsWith(`${codexRoot}${sep}`)) seen(file);
+  });
+
   return () => {
     stopped = true;
+    offCut();
     if (opencodeTimer) clearTimeout(opencodeTimer);
     if (opencodePoll) clearTimeout(opencodePoll);
     for (const timer of pending.values()) clearTimeout(timer);

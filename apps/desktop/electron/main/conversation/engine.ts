@@ -118,6 +118,16 @@ interface EngineDeps {
   codexInstructions?: () => Promise<boolean>;
   /** How long a control request is waited on. */
   controlTimeoutMs?: number;
+  /**
+   * A Claude or Codex process of `conversation` ended, however it ended: main
+   * records a turn it left open in its transcript as cut off.
+   */
+  processEnded?: (
+    agent: "claude" | "codex",
+    project: string,
+    folder: string,
+    conversation: string,
+  ) => void;
 }
 
 /**
@@ -536,6 +546,15 @@ class Engine implements ConversationEngine {
       this.posted = false;
       this.busy = false;
       this.rows = [];
+      // A turn the CLI died in wrote no end: recorded as cut off.
+      safely(() =>
+        this.deps.processEnded?.(
+          "claude",
+          this.project,
+          this.folder,
+          this.conversation,
+        ),
+      );
       if (!this.quiet) this.emitState();
       done();
     };
@@ -1111,6 +1130,12 @@ const SETTLE_MS = 2500;
 /** Longer after Stop: a tool being torn down may take a moment to answer. */
 const STOP_SETTLE_MS = 5000;
 
+/**
+ * How long a close waits for a running turn to end on Stop before it ends
+ * the process anyway: a beat past Claude's own {@link STOP_SETTLE_MS}.
+ */
+const CLOSE_STOP_MS = STOP_SETTLE_MS + 500;
+
 /** The idle limit when no setting gives one (FE-125). */
 const IDLE_REAP_MS = 30 * 60_000;
 
@@ -1221,6 +1246,7 @@ export function createEngines(input: EngineDeps) {
     board: deps.board,
     codexLanework: deps.codexLanework,
     codexInstructions: deps.codexInstructions,
+    processEnded: deps.processEnded,
   });
   const opencodeDeps = (): OpenCodeEngineDeps => ({
     service:
@@ -1609,12 +1635,24 @@ export function createEngines(input: EngineDeps) {
      * Stop the engine outright: the rail's Stop.
      *
      * Whatever turn runs is cut off, the queue dropped, and the process ended.
+     *
+     * NOTE: A running turn is stopped as Stop stops it before the process
+     * ends, so the CLI writes the turn's end itself. Every other surface (the
+     * chat's Working line, the rail's row, the tab) reads "working" from the
+     * transcript: a CLI killed mid-turn leaves its last turn open there, and
+     * they kept spinning for `STALE_MS` after the engine said idle.
      */
     async close(project: string, conversation: string): Promise<void> {
       const key = keyOf(project, conversation);
       const engine = engines.get(key);
       if (!engine) return;
       engine.held.clear();
+      if (engine.busy && engine.alive()) {
+        await engine.stop().catch(() => {});
+        const until = Date.now() + CLOSE_STOP_MS;
+        while (engine.busy && engine.alive() && Date.now() < until)
+          await new Promise((resolve) => setTimeout(resolve, 50));
+      }
       await engine.halt();
       engines.delete(key);
       kept.delete(key);

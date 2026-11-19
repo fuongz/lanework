@@ -536,6 +536,8 @@ export interface Attachment {
   mediaType: string;
   /** A local path main can read back, when the CLI kept one; else null. */
   path: string | null;
+  /** Its size in bytes, when known: an image block's, from its data. */
+  size?: number;
 }
 
 /**

@@ -28,6 +28,33 @@ function RemoveCorner({
   );
 }
 
+/** An attached image shown large, over the page. */
+export function AttachmentPreview({
+  name,
+  src,
+  open,
+  onOpenChange,
+}: {
+  name: string;
+  /** An object or data URL of the image. */
+  src: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="w-auto max-w-[min(90vw,1100px)] gap-2 p-2 sm:max-w-[min(90vw,1100px)]">
+        <DialogTitle className="sr-only">{name}</DialogTitle>
+        <img
+          src={src}
+          alt={name}
+          className="max-h-[80vh] max-w-full rounded-lg object-contain"
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /**
  * One attachment above the prompt.
  *
@@ -66,16 +93,12 @@ export function AttachmentTile({
           />
         </button>
         <RemoveCorner name={file.name} onRemove={onRemove} />
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogContent className="w-auto max-w-[min(90vw,1100px)] gap-2 p-2 sm:max-w-[min(90vw,1100px)]">
-            <DialogTitle className="sr-only">{file.name}</DialogTitle>
-            <img
-              src={preview}
-              alt={file.name}
-              className="max-h-[80vh] max-w-full rounded-lg object-contain"
-            />
-          </DialogContent>
-        </Dialog>
+        <AttachmentPreview
+          name={file.name}
+          src={preview}
+          open={open}
+          onOpenChange={setOpen}
+        />
       </span>
     );
   return (

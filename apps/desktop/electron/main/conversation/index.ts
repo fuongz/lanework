@@ -79,6 +79,7 @@ import {
   opencodeServiceUsage,
 } from "../terminal/opencode-usage";
 import { agentHomeDir } from "../test-seams";
+import { markTurnCut } from "../transcripts/activity";
 import { awaitingNotice, createAwaitingLedger } from "./awaiting";
 import { createAgentCli, createClaudeCli } from "./claude-cli";
 import { createClaudeModels } from "./claude-models";
@@ -732,6 +733,18 @@ export function registerConversation(
     board: boardFor,
     codexLanework: codexHasLaneworkTable,
     codexInstructions: codexHasDeveloperInstructions,
+    // A turn the CLI died in (a crash, a kill after an unanswered Stop) left
+    // its transcript open: recorded as cut off, so every "working" read lets
+    // it go; the watchers hear it, and the chat reads again at once.
+    processEnded: (agent, project, folder, conversation) =>
+      void (async () => {
+        const file =
+          agent === "codex"
+            ? await codexRolloutPath(agentHome(), folder, conversation)
+            : transcriptPath(agentHome(), folder, conversation);
+        if (file && (await markTurnCut(file, agent)))
+          tell({ type: "moved", project, conversation });
+      })().catch(() => {}),
   });
 
   sessions = new ConductorSessions({

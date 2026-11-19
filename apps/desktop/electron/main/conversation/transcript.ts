@@ -37,6 +37,7 @@ import {
   tidy,
 } from "../terminal/agent-sessions";
 import { claudeStepSummary } from "../terminal/subagent-transcript";
+import { cutOffAt, turnTail } from "../transcripts/activity";
 
 /**
  * Where Claude keeps conversation `id` of `folder`.
@@ -181,6 +182,12 @@ function localOutput(line: Line): boolean {
  */
 const IMAGE_SOURCE = /^\[Image: source: (.+)\]$/;
 
+/** The bytes a base64 string holds, without decoding it. */
+function base64Size(data: string): number {
+  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((data.length * 3) / 4) - padding);
+}
+
 /** The MIME type of each extension a dropped file may have. */
 const MEDIA_BY_EXT: Record<string, string> = {
   png: "image/png",
@@ -269,10 +276,12 @@ function promptOf(
             ? "image/png"
             : "application/pdf";
       images++;
+      const data = typeof source.data === "string" ? source.data : "";
       attachments.push({
         name: part.type === "image" ? `Image #${images}` : `Document`,
         mediaType,
         path: null,
+        ...(data ? { size: base64Size(data) } : {}),
       });
     }
   }
@@ -755,10 +764,17 @@ function conversationOf(
     folder,
     fresh,
     truncated,
-  }: { folder: string; fresh: boolean; truncated: boolean },
+    since = null,
+  }: {
+    folder: string;
+    fresh: boolean;
+    truncated: boolean;
+    /** The lines since a cut-off turn (`cutOffAt`): they alone decide. */
+    since?: Line[] | null;
+  },
 ): Conversation {
   const turns = buildTurns(rows, folder);
-  const working = fresh && claudeWorking(rows as Line[]);
+  const working = fresh && claudeWorking(since ?? (rows as Line[]));
   const last = turns.at(-1);
   if (last?.role === "assistant") {
     last.open = working;
@@ -814,7 +830,10 @@ export async function readConversation(
   const rows = lines(await readRange(file, start, info.size - start), {
     head: !truncated,
   });
-  return conversationOf(id, rows, { folder, fresh, truncated });
+  // A turn cut off with its process is not working (`cutOffAt`).
+  const since =
+    cutOffAt(file, info.size) === null ? null : await turnTail(file, info.size);
+  return conversationOf(id, rows, { folder, fresh, truncated, since });
 }
 
 /** Re-exported for the engine's live turns. */

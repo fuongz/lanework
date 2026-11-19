@@ -83,6 +83,13 @@ interface CodexEngineDeps {
   codexInstructions?: () => Promise<boolean>;
   /** How long a request to the app-server is waited on. */
   requestTimeoutMs?: number;
+  /** See `EngineDeps.processEnded`. */
+  processEnded?: (
+    agent: "codex",
+    project: string,
+    folder: string,
+    conversation: string,
+  ) => void;
 }
 
 type CodexOutgoing = Outgoing;
@@ -529,6 +536,17 @@ export class CodexEngine implements ConversationEngine {
         this.refuse(new Error(this.error ?? "Codex did not start."));
       this.endTurn();
       this.stopping = false;
+      // A turn Codex died in wrote no end: recorded as cut off.
+      const conversation = this.conversation;
+      if (conversation)
+        safely(() =>
+          this.deps.processEnded?.(
+            "codex",
+            this.project,
+            this.folder,
+            conversation,
+          ),
+        );
       this.emitState();
       done();
     };

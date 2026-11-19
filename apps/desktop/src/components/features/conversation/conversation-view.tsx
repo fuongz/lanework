@@ -649,7 +649,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   const send = async (
     typed: string,
     attachments: OutgoingAttachment[],
-    names: { name: string; image: boolean }[],
+    names: { name: string; image: boolean; size?: number }[],
   ): Promise<boolean> => {
     const surface = window.desktop?.conversation;
     if (!project || !surface || !settings) return false;
@@ -691,6 +691,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
           name: entry.name,
           mediaType: entry.image ? "image/*" : "text/plain",
           path: null,
+          ...(entry.size === undefined ? {} : { size: entry.size }),
         })),
         expect:
           previous.filter((e) => e.expect !== null && !landed(e)).length + 1,

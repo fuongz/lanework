@@ -25,6 +25,8 @@ import type {
 } from "#/../shared/conversation";
 import type { LeadIcon } from "#/../shared/orchestration";
 import {
+  FileOpenerContext,
+  ImageViewerContext,
   LinkedText,
   MarkdownBody,
 } from "#/components/shared/common/markdown-body";
@@ -34,6 +36,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "#/components/ui/tooltip";
+import { sentAttachment } from "#/lib/attachment-previews";
 import {
   clock,
   downloadMarkdown,
@@ -42,10 +45,12 @@ import {
   textLines,
   turnText,
 } from "#/lib/conversation-format";
+import { fileSize } from "#/lib/file-size";
 import { leadIcon } from "#/lib/orchestration-prompt";
 import { splitQuotes } from "#/lib/quote";
 import { cn } from "#/lib/utils";
 import { answerSources } from "#/lib/web-sources";
+import { AttachmentPreview } from "./composer.attachments";
 import { useKnown } from "./composer.known";
 import { AssistantActions, UserActions } from "./turn-view.actions";
 import { CompactionDivider } from "./turn-view.compaction";
@@ -247,40 +252,261 @@ function PromptToken({ token }: { token: string }) {
 const PROMPT_CODE =
   /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[ \t]*$|(?![\s\S]))|`[^`\n]+`/gm;
 
-/** The composer's tokens of a prompt, without the ones inside its code. */
-function promptTokens(text: string): RegExpExecArray[] {
+/** `pattern`'s matches in a prompt, without the ones inside its code. */
+function outsideCode(text: string, pattern: RegExp): RegExpExecArray[] {
   const code = [...text.matchAll(PROMPT_CODE)].map(
     (m) => [m.index ?? 0, (m.index ?? 0) + m[0].length] as const,
   );
-  return [...text.matchAll(PROMPT_TOKEN)].filter((m) => {
+  return [...text.matchAll(pattern)].filter((m) => {
     const at = m.index ?? 0;
     return !code.some(([from, to]) => at >= from && at < to);
   });
 }
 
-function PromptText({ text }: { text: string }) {
-  const parts: React.ReactNode[] = [];
-  let last = 0;
-  for (const match of promptTokens(text)) {
+/** The composer's tokens of a prompt, without the ones inside its code. */
+function promptTokens(text: string): RegExpExecArray[] {
+  return outsideCode(text, PROMPT_TOKEN);
+}
+
+/** An attachment drawn where the composer's chip for it was. */
+interface Placed {
+  name: string;
+  path: string | null;
+  image: boolean;
+  folder: boolean;
+  size?: number;
+}
+
+/** Where a prompt's attachments are, by the offset of each `[name]`. */
+interface Placement {
+  at: Map<number, { length: number; file: Placed }>;
+  /** The offsets of the `@path` mentions an inline chip already shows. */
+  skip: Set<number>;
+  /** The attachments shown inline, by index: not shown above again. */
+  used: Set<number>;
+}
+
+/** `[name]`, never a markdown link's text. */
+const PLACED_NAME = /\[([^\]\n]{1,200})\](?!\()/g;
+const IMAGE_NAME = /\.(?:png|jpe?g|gif|webp)$/i;
+const NO_PLACEMENT: Placement = {
+  at: new Map(),
+  skip: new Set(),
+  used: new Set(),
+};
+
+/**
+ * Where a prompt names its attachments: the composer sends each one's chip
+ * as `[name]`, and its files and images in the order of those chips.
+ *
+ * - With an `@…/name` mention (main adds one after the text for each file):
+ *   that file, and the mention is not drawn again.
+ * - With an attachment of that name (a message still being sent): that one.
+ * - The name of an image: the next image the message carries.
+ *
+ * Any other `[…]` stays as written.
+ */
+function placeAttachments(
+  text: string,
+  attachments: readonly Attachment[],
+): Placement {
+  const names = outsideCode(text, PLACED_NAME);
+  if (!names.length) return NO_PLACEMENT;
+  const placement: Placement = {
+    at: new Map(),
+    skip: new Set(),
+    used: new Set(),
+  };
+  const mentions = promptTokens(text)
+    .filter((match) => match[0].startsWith("@"))
+    .map((match) => ({ at: match.index ?? 0, path: mentionOf(match[0]) }));
+  const unused = (test: (file: Attachment) => boolean) =>
+    attachments.findIndex(
+      (file, index) => !placement.used.has(index) && test(file),
+    );
+  for (const match of names) {
+    const name = match[1] ?? "";
     const at = match.index ?? 0;
-    const token = match[0];
-    if (at > last)
-      parts.push(
-        <LinkedText
-          key={`t${at}`}
-          source={text.slice(last, at)}
-          link={chatLink}
-        />,
-      );
-    parts.push(<PromptToken key={`c${at}`} token={token} />);
-    last = at + token.length;
+    const length = match[0].length;
+    const mention = mentions.find(
+      (entry) => !placement.skip.has(entry.at) && fileName(entry.path) === name,
+    );
+    if (mention) {
+      placement.skip.add(mention.at);
+      const named = unused((file) => file.path === mention.path);
+      if (named !== -1) placement.used.add(named);
+      placement.at.set(at, {
+        length,
+        file: {
+          name,
+          path: mention.path,
+          image: IMAGE_NAME.test(name),
+          folder: mention.path.endsWith("/"),
+          size: attachments[named]?.size,
+        },
+      });
+      continue;
+    }
+    let index = unused((file) => file.name === name);
+    if (index === -1 && IMAGE_NAME.test(name))
+      index = unused((file) => file.mediaType.startsWith("image/"));
+    const file = attachments[index];
+    if (!file) continue;
+    placement.used.add(index);
+    placement.at.set(at, {
+      length,
+      file: {
+        name,
+        path: file.path,
+        image: file.mediaType.startsWith("image/"),
+        folder: false,
+        size: file.size,
+      },
+    });
+  }
+  return placement;
+}
+
+/**
+ * An attachment in a prompt, as the composer's chip drew it: the image's
+ * thumbnail (when this app sent it) or its type's icon, its name, its size.
+ *
+ * A click shows an image large: the one sent from here, else the file at
+ * its path. A file with a path opens in Repository › Files.
+ */
+function PlacedChip({ file }: { file: Placed }) {
+  const sent = sentAttachment(file.name, file.size);
+  const size = file.size ?? sent?.size;
+  const preview = file.image ? sent?.preview : undefined;
+  const openFile = useContext(FileOpenerContext);
+  const viewImage = useContext(ImageViewerContext);
+  const [showing, setShowing] = useState(false);
+  const path = file.path;
+  const click = preview
+    ? () => setShowing(true)
+    : path && file.image && viewImage
+      ? () => viewImage(path)
+      : path && !file.folder && openFile
+        ? () => openFile(path)
+        : null;
+  const className =
+    "text-primary mx-px inline-flex items-baseline gap-1 align-baseline font-medium";
+  const body = (
+    <>
+      {preview ? (
+        <img
+          src={preview}
+          alt=""
+          draggable={false}
+          className="ring-border mt-[0.3em] size-3.5 shrink-0 self-start rounded-[3px] object-cover ring-1"
+        />
+      ) : file.folder ? (
+        <HugeiconsIcon
+          icon={Folder01Icon}
+          className="mt-[0.3em] size-3.5 shrink-0 self-start"
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
+      ) : (
+        <FileTypeIcon
+          path={file.name}
+          inherit
+          className="mt-[0.3em] size-3.5 shrink-0 self-start"
+        />
+      )}
+      {file.name}
+      {size !== undefined && (
+        <span className="text-muted-foreground text-[11px] font-normal tabular-nums">
+          {fileSize(size)}
+        </span>
+      )}
+    </>
+  );
+  if (!click)
+    return (
+      <span title={path ?? file.name} className={className}>
+        {body}
+      </span>
+    );
+  return (
+    <>
+      <button
+        type="button"
+        title={
+          file.image ? `Preview ${file.name}` : `Open ${path ?? file.name}`
+        }
+        onClick={click}
+        className={cn(
+          className,
+          "focus-visible:ring-ring/40 cursor-pointer rounded-sm text-left outline-none hover:underline focus-visible:ring-2",
+        )}
+      >
+        {body}
+      </button>
+      {preview && (
+        <AttachmentPreview
+          name={file.name}
+          src={preview}
+          open={showing}
+          onOpenChange={setShowing}
+        />
+      )}
+    </>
+  );
+}
+
+function PromptText({
+  text,
+  placement = NO_PLACEMENT,
+}: {
+  text: string;
+  placement?: Placement;
+}) {
+  const found = [
+    ...promptTokens(text).map((match) => ({
+      at: match.index ?? 0,
+      length: match[0].length,
+      node: placement.skip.has(match.index ?? 0) ? null : (
+        <PromptToken key={`c${match.index}`} token={match[0]} />
+      ),
+    })),
+    ...[...placement.at].map(([at, { length, file }]) => ({
+      at,
+      length,
+      node: <PlacedChip key={`a${at}`} file={file} />,
+    })),
+  ].sort((a, b) => a.at - b.at);
+  const parts: { text?: string; node?: React.ReactNode }[] = [];
+  let last = 0;
+  for (const { at, length, node } of found) {
+    if (at < last) continue;
+    if (at > last) parts.push({ text: text.slice(last, at) });
+    if (node) parts.push({ node });
+    last = at + length;
   }
   if (last === 0) return <LinkedText source={text} link={chatLink} />;
-  if (last < text.length)
-    parts.push(
-      <LinkedText key="tail" source={text.slice(last)} link={chatLink} />,
-    );
-  return <>{parts}</>;
+  if (last < text.length) parts.push({ text: text.slice(last) });
+  // The mentions not drawn again closed the text: the space before them goes.
+  while (parts.length && parts[parts.length - 1]?.text?.trim() === "")
+    parts.pop();
+  const tail = parts[parts.length - 1];
+  if (tail?.text !== undefined) tail.text = tail.text.trimEnd();
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.text === undefined ? (
+          part.node
+        ) : (
+          <LinkedText
+            // biome-ignore lint/suspicious/noArrayIndexKey: the parts of one text, in order.
+            key={`t${index}`}
+            source={part.text}
+            link={chatLink}
+          />
+        ),
+      )}
+    </>
+  );
 }
 
 /**
@@ -315,6 +541,12 @@ export function UserBubble({
   pending?: string;
 }) {
   const { quotes, rest } = splitQuotes(text);
+  const body = rest.trim();
+  const placement = useMemo(
+    () => placeAttachments(body, attachments),
+    [body, attachments],
+  );
+  const above = attachments.filter((_, index) => !placement.used.has(index));
   return (
     <div className="group/turn flex flex-col items-end">
       {/* The bubble and, on its top edge, a tab with what it replies to or
@@ -355,9 +587,9 @@ export function UserBubble({
           </div>
         )}
         <div className="bg-muted flex min-w-0 flex-col gap-2 rounded-2xl px-3.5 py-2.5 dark:bg-foreground/[0.07]">
-          {attachments.length > 0 && (
+          {above.length > 0 && (
             <div className="flex flex-wrap justify-end gap-1.5">
-              {attachments.map((attachment, index) => (
+              {above.map((attachment, index) => (
                 <AttachmentChip
                   // biome-ignore lint/suspicious/noArrayIndexKey: attachments are positional and never reorder.
                   key={index}
@@ -366,12 +598,12 @@ export function UserBubble({
               ))}
             </div>
           )}
-          {rest.trim() &&
-            (looksLikeMarkdown(rest) ? (
+          {body &&
+            (placement.at.size === 0 && looksLikeMarkdown(body) ? (
               // Code blocks, lists, headings, emphasis: drawn as a reply is.
               <div className="min-w-0 [overflow-wrap:anywhere]">
                 <MarkdownBody
-                  source={rest.trim()}
+                  source={body}
                   link={chatLink}
                   variant="chat"
                   empty=""
@@ -379,7 +611,7 @@ export function UserBubble({
               </div>
             ) : (
               <p className="font-content text-[14px] leading-[1.6] whitespace-pre-wrap [overflow-wrap:anywhere]">
-                <PromptText text={rest.trim()} />
+                <PromptText text={body} placement={placement} />
               </p>
             ))}
         </div>

@@ -25,11 +25,20 @@ import { cn } from "#/lib/utils";
 // draft restored, a chip typed or deleted) or the browser left markup of its
 // own (`<br>`, `<div>`). Never during an IME composition.
 
+/**
+ * What an attachment placed in the text is there: its key between two
+ * U+FFFC (the object replacement character), a mark no one types. It is
+ * drawn as the attachment's chip and never sent as is.
+ */
+export const ATTACHMENT_MARK = "\uFFFC";
+
 /** How one chip looks. */
 export interface ChipSpec {
   /** What it stands for in the text: `/better-ui`, `@src/cli.ts`. */
   value: string;
   label: string;
+  /** Quieter words after the label: an attachment's size. */
+  detail?: string;
   /** The hover text: its full path, or its description. */
   title: string;
   icon: ReactNode;
@@ -46,20 +55,22 @@ type Segment = { text: string } | { chip: ChipSpec };
 /**
  * `text` as plain runs and chips.
  *
- * A token is a `/…` at the very start, or an `@…` after a space or the
- * start, running to the next space or the end.
+ * A token is a `/…` at the very start, an `@…` after a space or the start,
+ * running to the next space or the end, or an attachment's mark anywhere.
  */
 function segment(
   text: string,
   chipFor: (token: string) => ChipSpec | null,
 ): Segment[] {
   const out: Segment[] = [];
-  const token = /[/@]\S+/g;
+  const token = /\uFFFC[^\uFFFC\s]+\uFFFC|[/@][^\s\uFFFC]+/g;
   let last = 0;
   for (let match = token.exec(text); match; match = token.exec(text)) {
     const at = match.index;
-    if (at > 0 && !/\s/.test(text.charAt(at - 1))) continue;
-    if (match[0].startsWith("/") && at !== 0) continue;
+    if (!match[0].startsWith(ATTACHMENT_MARK)) {
+      if (at > 0 && !/\s/.test(text.charAt(at - 1))) continue;
+      if (match[0].startsWith("/") && at !== 0) continue;
+    }
     const chip = chipFor(match[0]);
     if (!chip) continue;
     if (at > last) out.push({ text: text.slice(last, at) });
@@ -354,6 +365,11 @@ export const ChipEditor = forwardRef<
               {spec.icon}
             </span>
             <span>{spec.label}</span>
+            {spec.detail && (
+              <span className="text-muted-foreground text-[11px] font-normal tabular-nums">
+                {spec.detail}
+              </span>
+            )}
           </>,
           node,
           String(key),

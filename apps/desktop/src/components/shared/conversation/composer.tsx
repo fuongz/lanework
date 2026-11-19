@@ -41,6 +41,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "#/components/ui/tooltip";
+import { rememberSent } from "#/lib/attachment-previews";
+import { fileSize } from "#/lib/file-size";
 import {
   LEAD_SOURCE_LABELS,
   leadIcon,
@@ -61,6 +63,7 @@ import {
   useDictation,
 } from "./composer.dictation";
 import {
+  ATTACHMENT_MARK,
   ChipEditor,
   type ChipEditorHandle,
   type ChipSpec,
@@ -139,6 +142,79 @@ function trigger(
 }
 
 let keys = 0;
+
+/** An attachment's place in the text (see {@link ATTACHMENT_MARK}). */
+const markOf = (key: string) => `${ATTACHMENT_MARK}${key}${ATTACHMENT_MARK}`;
+/** Every attachment mark in a text, its key in group 1. */
+const MARKS = /\uFFFC([^\uFFFC\s]+)\uFFFC/g;
+
+/**
+ * `text` as it is sent: each attachment's mark becomes its name in brackets,
+ * `[image.png]`, beside the files and images that go with the message. A
+ * mark whose attachment is gone goes with its space.
+ */
+function withoutMarks(text: string, files: readonly Pending[]): string {
+  const names = new Map(files.map((file) => [file.key, `[${file.name}]`]));
+  return replaceMarks(text, (key) => names.get(key) ?? false);
+}
+
+/**
+ * Each attachment mark in `text` as `put` says: kept (`true`), written as a
+ * string, or gone with the space after it (`false`).
+ */
+function replaceMarks(
+  text: string,
+  put: (key: string) => string | boolean,
+): string {
+  return text.replace(new RegExp(`${MARKS.source}( ?)`, "g"), (whole, key) => {
+    const to = put(key);
+    if (to === true) return whole;
+    if (to === false) return "";
+    return `${to}${whole.slice(markOf(key).length)}`;
+  });
+}
+
+/** `files` with the ones placed in `text` first, in the order they are. */
+function inTextOrder(text: string, files: readonly Pending[]): Pending[] {
+  const order = [...text.matchAll(MARKS)].map((match) => match[1]);
+  const rank = (file: Pending) => {
+    const at = order.indexOf(file.key);
+    return at === -1 ? order.length : at;
+  };
+  return [...files].sort((a, b) => rank(a) - rank(b));
+}
+
+/**
+ * An attachment placed in the text as a chip: the image's own thumbnail or
+ * its type's icon, its name, and its size when known.
+ */
+function attachmentChip(file: Pending, preview: string | undefined): ChipSpec {
+  const path = file.out.kind === "path" ? file.out.path : file.name;
+  return {
+    value: markOf(file.key),
+    label: file.name,
+    detail: file.size === undefined ? undefined : fileSize(file.size),
+    title: path,
+    icon: preview ? (
+      <img
+        src={preview}
+        alt=""
+        draggable={false}
+        className="ring-border size-full rounded-[3px] object-cover ring-1"
+      />
+    ) : file.folder ? (
+      <HugeiconsIcon
+        icon={Folder01Icon}
+        className="size-3.5 shrink-0"
+        strokeWidth={1.8}
+        aria-hidden="true"
+      />
+    ) : (
+      <FileTypeIcon path={file.name} className="size-3.5 shrink-0" />
+    ),
+    tone: "primary",
+  };
+}
 
 /** `/orchestrate`, offered among the `/` commands when the page takes it. */
 const ORCHESTRATE: Suggestion = {
@@ -379,7 +455,7 @@ export const Composer = forwardRef<
     onSend: (
       text: string,
       attachments: OutgoingAttachment[],
-      names: { name: string; image: boolean }[],
+      names: { name: string; image: boolean; size?: number }[],
     ) => Promise<boolean>;
     onStop: () => void;
     /** ↑ in an empty composer: the last queued message, back to edit. */
@@ -393,7 +469,7 @@ export const Composer = forwardRef<
     onOrchestrate?: (
       request: string,
       attachments: OutgoingAttachment[],
-      names: { name: string; image: boolean }[],
+      names: { name: string; image: boolean; size?: number }[],
       teamLead: TeamLead | null,
     ) => Promise<boolean>;
     /**
@@ -475,8 +551,15 @@ export const Composer = forwardRef<
   const latest = useRef(text);
   latest.current = text;
 
-  // The `/command` that starts the message and each `@path` in it, drawn as
-  // chips (FE-92, FE-93). The text kept and sent stays the whole message.
+  /**
+   * The images attached in this sitting, by attachment key, to draw them as
+   * thumbnails and open them large. An image restored with a draft has
+   * none, and shows as a chip.
+   */
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+  // The `/command` that starts the message, each `@path` in it and each
+  // attachment placed in it, drawn as chips (FE-92, FE-93). The text kept
+  // stays the whole message; what is sent names the attachments.
   const [chipsVersion, learned] = useState(0);
   /** The lead an `@` names as `/orchestrate`'s first word (FE-88), if any. */
   const leadFor = (token: string): TeamLead | null => {
@@ -488,6 +571,10 @@ export const Composer = forwardRef<
     );
   };
   const chipFor = (token: string): ChipSpec | null => {
+    if (token.startsWith(ATTACHMENT_MARK)) {
+      const file = attachments.find((entry) => markOf(entry.key) === token);
+      return file ? attachmentChip(file, previews[file.key]) : null;
+    }
     const lead = leadFor(token);
     if (lead) return leadChip(lead);
     const item =
@@ -556,6 +643,8 @@ export const Composer = forwardRef<
     onError: setError,
   });
   const dictating = dictation.status !== "idle";
+  const dictatingRef = useRef(dictating);
+  dictatingRef.current = dictating;
   const startDictation = () => {
     anchor.current = field.current?.selection() ?? {
       start: text.length,
@@ -778,12 +867,43 @@ export const Composer = forwardRef<
     asked.current++;
   };
 
+  /** Where the caret was when the field last had it. */
+  const lastCaret = useRef<number | null>(null);
   /**
-   * The images attached in this sitting, by attachment key, to draw them as
-   * thumbnails and open them large. An image restored with a draft has
-   * none, and shows as a chip.
+   * The attachments `added` placed in the text as chips, where the caret is
+   * or was last, a space either side.
    */
-  const [previews, setPreviews] = useState<Record<string, string>>({});
+  const placeInline = (added: readonly string[]) => {
+    const current = latest.current;
+    const at = Math.min(
+      field.current?.selection()?.start ?? lastCaret.current ?? current.length,
+      current.length,
+    );
+    const before = current.slice(0, at);
+    const after = current.slice(at);
+    const lead = before && !/\s$/.test(before) ? " " : "";
+    const marks = added.map(markOf).join(" ");
+    const next = `${before}${lead}${marks}${after.startsWith(" ") ? "" : " "}${after}`;
+    caret.current = before.length + lead.length + marks.length + 1;
+    setText(next);
+  };
+
+  // The text and the attachments kept in step: a chip deleted from the text
+  // takes its attachment with it, and an attachment removed by its × (or
+  // lost with a reload, its mark kept in the draft) takes its chip.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: run when either side changes.
+  useEffect(() => {
+    if (dictating) return;
+    const placed = new Set([...text.matchAll(MARKS)].map((match) => match[1]));
+    if (attachments.some((file) => file.inline && !placed.has(file.key)))
+      setAttachments((previous) =>
+        previous.filter((file) => !file.inline || placed.has(file.key)),
+      );
+    const held = new Set(attachments.map((file) => file.key));
+    if ([...placed].some((key) => !held.has(key)))
+      setText((current) => replaceMarks(current, (key) => held.has(key)));
+  }, [text, attachments]);
+
   const addFiles = async (
     files: File[],
     pasted: boolean,
@@ -804,11 +924,14 @@ export const Composer = forwardRef<
       if (path) {
         const key = `a${++keys}`;
         if (image) seen[key] = URL.createObjectURL(file);
+        const folder = folders.has(file);
         added.push({
           key,
           name: file.name,
           image,
-          folder: folders.has(file),
+          folder,
+          ...(folder ? {} : { size: file.size }),
+          inline: true,
           out: { kind: "path", path },
         });
         continue;
@@ -828,6 +951,8 @@ export const Composer = forwardRef<
           key,
           name: file.name || "image.png",
           image,
+          size: file.size,
+          inline: true,
           out: {
             kind: "data",
             name: file.name || "image.png",
@@ -841,7 +966,14 @@ export const Composer = forwardRef<
     }
     if (Object.keys(seen).length)
       setPreviews((previous) => ({ ...previous, ...seen }));
-    if (added.length) setAttachments((previous) => [...previous, ...added]);
+    if (!added.length) return;
+    // While dictating the words heard go where the caret was: the chips
+    // would move them. The attachments show above the field only.
+    const placed = dictatingRef.current
+      ? added.map((file) => ({ ...file, inline: false }))
+      : added;
+    setAttachments((previous) => [...previous, ...placed]);
+    if (!dictatingRef.current) placeInline(added.map((file) => file.key));
   };
 
   const empty = !text.trim() && attachments.length === 0;
@@ -888,7 +1020,10 @@ export const Composer = forwardRef<
       onClear();
       return;
     }
-    const raw = onOrchestrate ? orchestrateRequest(text) : null;
+    // What is sent names each attachment where its chip is; the draft kept
+    // to restore on a failure keeps the chips.
+    const plain = withoutMarks(text, attachments);
+    const raw = onOrchestrate ? orchestrateRequest(plain) : null;
     const split = raw === null ? null : splitLead(raw);
     if (split && !split.request) {
       setError(
@@ -916,7 +1051,16 @@ export const Composer = forwardRef<
     // The reply goes with a plain message, ahead of it as a quote; an
     // `/orchestrate` plans what was typed, and the reply waits for the next.
     const quoted = request === null ? quoteBlock(quotes) : "";
-    const files = attachments;
+    // In the order their chips are in the text, then the rest: the chat
+    // matches the n-th image named in the text to the n-th image sent.
+    const files = inTextOrder(text, attachments);
+    rememberSent(
+      files.map((file) => ({
+        name: file.name,
+        size: file.size,
+        preview: previews[file.key],
+      })),
+    );
     setText("");
     setAttachments([]);
     setSuggest(null);
@@ -926,11 +1070,12 @@ export const Composer = forwardRef<
       const names = files.map((file) => ({
         name: file.name,
         image: file.image,
+        ...(file.size === undefined ? {} : { size: file.size }),
       }));
       ok =
         request !== null && onOrchestrate
           ? await onOrchestrate(request, outgoing, names, teamLead)
-          : await onSend(`${quoted}${sent.trim()}`, outgoing, names);
+          : await onSend(`${quoted}${plain.trim()}`, outgoing, names);
     } catch {
       setError("Could not send. Your message has been restored.");
     }
@@ -1274,11 +1419,16 @@ export const Composer = forwardRef<
                     : "Ask, build, / for commands, @ for references…"
               }
               onChange={(next, at) => {
+                lastCaret.current = at;
                 setText(next);
                 lookup(next, at);
               }}
               onKeyDown={onKeyDown}
-              onBlur={() => setSuggest(null)}
+              onBlur={() => {
+                lastCaret.current =
+                  field.current?.selection()?.start ?? lastCaret.current;
+                setSuggest(null);
+              }}
               onPaste={(event) => {
                 const files = [...event.clipboardData.files];
                 if (!files.length) return;

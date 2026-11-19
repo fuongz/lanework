@@ -34,6 +34,7 @@ import {
   STALE_MS,
   tidy,
 } from "../terminal/agent-sessions";
+import { cutOffAt, turnTail } from "../transcripts/activity";
 import { cut, inputText } from "./transcript";
 
 const record = (value: unknown): Record<string, unknown> =>
@@ -447,10 +448,17 @@ function codexConversationOf(
     folder,
     fresh,
     truncated,
-  }: { folder: string; fresh: boolean; truncated: boolean },
+    since = null,
+  }: {
+    folder: string;
+    fresh: boolean;
+    truncated: boolean;
+    /** The lines since a cut-off turn (`cutOffAt`): they alone decide. */
+    since?: Line[] | null;
+  },
 ): Conversation {
   const turns = buildCodexTurns(rows, folder);
-  const working = fresh && codexWorking(rows as Line[]);
+  const working = fresh && codexWorking(since ?? (rows as Line[]));
   const last = turns.at(-1);
   if (last?.role === "assistant") {
     last.open = working;
@@ -545,5 +553,8 @@ export async function readCodexConversation(
     const meta = head.find((line) => line.type === "session_meta");
     if (meta) rows = [meta, ...rows];
   }
-  return codexConversationOf(id, rows, { folder, fresh, truncated });
+  // A turn cut off with its process is not working (`cutOffAt`).
+  const since =
+    cutOffAt(file, info.size) === null ? null : await turnTail(file, info.size);
+  return codexConversationOf(id, rows, { folder, fresh, truncated, since });
 }

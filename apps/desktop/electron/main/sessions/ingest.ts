@@ -43,9 +43,11 @@ import {
   claudeSubagentGoing,
   claudeWorking,
   codexWorking,
+  cutOffAt,
   lastActivity,
   STALE_MS,
   SUBAGENT_STALE_MS,
+  turnTail,
 } from "../transcripts/activity";
 import {
   CHUNK,
@@ -490,7 +492,14 @@ export async function ingestClaude(
   // Nothing was ever asked in it: a CLI opened and closed, nothing to resume.
   if (!title) return SKIP;
   const tail = await tailOf(file, state.size);
-  const working = now - state.mtimeMs <= STALE_MS && claudeWorking(tail);
+  // A turn cut off with its process reads from the cut on (`cutOffAt`).
+  const working =
+    now - state.mtimeMs <= STALE_MS &&
+    claudeWorking(
+      cutOffAt(file, state.size) === null
+        ? tail
+        : await turnTail(file, state.size),
+    );
   next.updatedAt =
     lastActivity(tail, "claude") ??
     next.updatedAt ??
@@ -769,7 +778,12 @@ export async function ingestCodex(
   if (!title) return SKIP;
   const size = Math.max(info.size, end);
   const tail = await tailOf(file, size);
-  const working = now - info.mtimeMs <= STALE_MS && codexWorking(tail);
+  // A turn cut off with its process reads from the cut on (`cutOffAt`).
+  const working =
+    now - info.mtimeMs <= STALE_MS &&
+    codexWorking(
+      cutOffAt(file, size) === null ? tail : await turnTail(file, size),
+    );
   next.updatedAt =
     lastActivity(tail, "codex") ?? next.updatedAt ?? info.mtime.toISOString();
   next.live = working;

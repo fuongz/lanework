@@ -33,6 +33,13 @@ export interface PendingAttachment {
   image: boolean;
   /** A dropped folder: its path goes like a file's, its chip says folder. */
   folder?: boolean;
+  /** Its size in bytes, when the composer read it from the file. */
+  size?: number;
+  /**
+   * Placed in the text as a chip where the caret was: deleting the chip
+   * removes it, as its × does. A queued message's comes back without.
+   */
+  inline?: boolean;
   out: OutgoingAttachment;
 }
 

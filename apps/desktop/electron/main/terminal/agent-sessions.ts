@@ -20,9 +20,11 @@ import {
 import {
   claudeSubagentGoing,
   claudeWorking,
+  cutOffAt,
   lastActivity,
   STALE_MS,
   SUBAGENT_STALE_MS,
+  turnTail,
 } from "../transcripts/activity";
 import {
   CHUNK,
@@ -441,9 +443,16 @@ export async function claudeSession(
     : (prompt ?? head.map(claudeCommand).find(Boolean) ?? images);
   // Nothing was ever asked in it: a CLI opened and closed, nothing to resume.
   if (!title) return null;
+  // A turn cut off with its process reads from the cut on (`cutOffAt`).
   const working =
     Date.now() - info.mtimeMs <= STALE_MS &&
-    claudeWorking(info.size > CHUNK ? tail : head);
+    claudeWorking(
+      cutOffAt(file, info.size) !== null
+        ? await turnTail(file, info.size)
+        : info.size > CHUNK
+          ? tail
+          : head,
+    );
   return {
     id,
     agent: "claude",
