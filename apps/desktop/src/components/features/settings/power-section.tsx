@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import {
+  LWK_MODES,
+  type LwkMode,
   POWER_MINUTES,
   type PowerMinutes,
   type PowerSettings,
 } from "#/../shared/conversation";
+import logo from "#/components/shared/common/lanework-logo.png";
 import { SettingsPage } from "#/components/shared/settings/settings-page";
 import {
   Select,
@@ -19,6 +22,19 @@ const MINUTE_LABELS: Record<PowerMinutes, string> = {
   30: "30 minutes",
   60: "1 hour",
   120: "2 hours",
+};
+
+const LWK_MODE_LABELS: Record<LwkMode, string> = {
+  always: "Always running",
+  "on-demand": "On demand",
+  "per-call": "Per search",
+};
+
+/** One line per mode: what it costs and what it saves (FE-158). */
+const LWK_MODE_DESCRIPTIONS: Record<LwkMode, string> = {
+  always: "Fastest searches, but lwk keeps its memory while the app runs.",
+  "on-demand": "lwk starts on the first search and stops after 5 idle minutes.",
+  "per-call": "lwk starts for each search; nothing is kept in memory.",
 };
 
 /**
@@ -102,6 +118,49 @@ export function PowerSection() {
                     {POWER_MINUTES.map((minutes) => (
                       <SelectItem key={minutes} value={minutes}>
                         {MINUTE_LABELS[minutes]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ),
+            },
+          ],
+        },
+        {
+          title: "Search",
+          rows: [
+            {
+              label: "Search engine (lwk)",
+              description: LWK_MODE_DESCRIPTIONS[settings?.lwkMode ?? "always"],
+              byline: (
+                <>
+                  <img
+                    src={logo}
+                    alt=""
+                    className="size-3.5 shrink-0 rounded-[3px]"
+                  />
+                  Powered by Lanework
+                </>
+              ),
+              keywords:
+                "lwk lanework-kit search engine kit find grep files code serve process resident memory ram always on demand per search idle powered by lanework",
+              control: (
+                <Select
+                  value={settings?.lwkMode ?? null}
+                  disabled={settings === null}
+                  onValueChange={(next) => change({ lwkMode: next as LwkMode })}
+                >
+                  <SelectTrigger aria-label="Search engine (lwk)">
+                    <SelectValue>
+                      {(current: LwkMode | null) =>
+                        current ? LWK_MODE_LABELS[current] : ""
+                      }
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LWK_MODES.map((mode) => (
+                      <SelectItem key={mode} value={mode}>
+                        {LWK_MODE_LABELS[mode]}
                       </SelectItem>
                     ))}
                   </SelectContent>

@@ -53,6 +53,7 @@ import { LEAD_REF_PATTERN } from "../../../shared/orchestration";
 import { isAgentSessionId, isAgentSessionIdOf } from "../../../shared/terminal";
 import { controlCliPath } from "../../control/install";
 import { broadcast, handle } from "../ipc";
+import { setLwkMode } from "../lwk-serve";
 import { notify } from "../notifications";
 import {
   controlEndpoint,
@@ -1111,7 +1112,10 @@ export function registerConversation(
     devUrl,
     async (args): Promise<PowerSettings> => {
       if (args.length !== 1) throw new Error("The settings are required");
-      return writePowerSettings(args[0]);
+      const saved = await writePowerSettings(args[0]);
+      // FE-158: the search engine's mode applies at once, no restart.
+      setLwkMode(saved.lwkMode);
+      return saved;
     },
   );
 

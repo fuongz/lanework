@@ -64,6 +64,9 @@ import {
   controlMcpFor,
   isConductorTurn,
   joinHints,
+  KIT_HINT,
+  type KitMcp,
+  kitMcpFor,
 } from "./mcp-args";
 import { OpenCodeEngine, type OpenCodeEngineDeps } from "./opencode-engine";
 import { Held, type Outgoing, sameSettings } from "./queue";
@@ -142,6 +145,7 @@ export function engineArgs(
   hint: string | null = null,
   guarded = false,
   controlMcp: string | null = null,
+  kitMcp: KitMcp | null = null,
 ): string[] {
   const settings = checkSettings(value);
   if (!settings || !isAgentSessionId(id)) throw new Error("Unknown settings");
@@ -172,7 +176,8 @@ export function engineArgs(
   if (!trusted) args.push("--setting-sources", "user");
   // FE-121/D9: this conversation's board is on this machine.
   // FE-155: plus the control tools, for a process holding a control token.
-  args.push(...claudeMcpArgs(localMcp, controlMcp));
+  // FE-158: this build's lwk for the kit, unless its backend is ts.
+  args.push(...claudeMcpArgs(localMcp, controlMcp, kitMcp));
   // BE-01: what this process may ask of the app, fixed for its life.
   if (hint) args.push("--append-system-prompt", hint);
   if (guarded) args.push("--disallowedTools", [...WRITE_TOOLS].join(","));
@@ -463,6 +468,8 @@ class Engine implements ConversationEngine {
     if (conductor && env[SESSIONS_ENV.token])
       env[CONTROL_ROLE_ENV] = "conductor";
     const guarded = leadGuarded(target);
+    // FE-158: this build's lwk for the kit, unless its backend is ts.
+    const kit = kitMcpFor();
     const child = spawn(
       cli.file,
       engineArgs(
@@ -474,9 +481,11 @@ class Engine implements ConversationEngine {
         joinHints(
           env[SESSIONS_ENV.token] ? CREATE_CONDUCTOR_HINT : null,
           board && env[SESSIONS_ENV.token] ? boardHint(board) : null,
+          kit ? KIT_HINT : null,
         ),
         guarded,
         controlMcpFor(env),
+        kit,
       ),
       { cwd: this.folder, env, stdio: ["pipe", "pipe", "pipe"] },
     );

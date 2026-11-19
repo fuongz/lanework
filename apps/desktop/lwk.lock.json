@@ -1,0 +1,24 @@
+{
+  "lwk": "0.3.0",
+  "contract": "1.2.0",
+  "repo": "lanework-dev/kit",
+  "tag": "v0.3.0",
+  "targets": {
+    "aarch64-apple-darwin": {
+      "asset": "lanework-kit-aarch64-apple-darwin.tar.xz",
+      "sha256": "fb3d31e788f74d8bbe4c81ab2c757c5fbb04f4559630f96ae78937e0750a16b0"
+    },
+    "x86_64-apple-darwin": {
+      "asset": "lanework-kit-x86_64-apple-darwin.tar.xz",
+      "sha256": "9a1d323569e30d778628e877eb15e1ebb76578cf54fcd5900898ac6dd1889929"
+    },
+    "aarch64-unknown-linux-musl": {
+      "asset": "lanework-kit-aarch64-unknown-linux-musl.tar.xz",
+      "sha256": "444f67f3c9d33885fe7155cc388284ae779d8e2f71cd79d45bd7823c302bbcfe"
+    },
+    "x86_64-unknown-linux-musl": {
+      "asset": "lanework-kit-x86_64-unknown-linux-musl.tar.xz",
+      "sha256": "0e531b99dbb423f735618bb0b79551ebb6cad09c3a4b6b7c04afd8b6787918cb"
+    }
+  }
+}

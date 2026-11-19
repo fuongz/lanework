@@ -3,10 +3,11 @@
 //
 // Which conversations need them is `mcp-binding.ts`.
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SESSIONS_ENV } from "../../../shared/conductor-sessions";
 import { CONTROL_ENV } from "../../../shared/orchestration";
+import { lwkBinaryPath } from "../agent-setup/lwk-install";
 import { appHomeDir } from "../paths";
 
 /** The MCP server name of the control tools (FE-155). */
@@ -61,6 +62,66 @@ export function controlMcpFor(
   return existsSync(shim) ? shim : null;
 }
 
+/** The kit's MCP server name, the same as the user-config entry it overrides. */
+export const KIT_SERVER = "lanework-kit";
+
+/** How a process reaches the kit: this build's `lwk mcp`, on this app's home. */
+export interface KitMcp {
+  command: string;
+  home: string;
+}
+
+/**
+ * This build's `lwk mcp` for an agent process, or null (FE-158).
+ *
+ * The `lanework-kit` entry in the agents' user config runs the INSTALLED
+ * app's shim, so a conversation started by the Preview (or any build but the
+ * one the shim points at) would search through another app's kit.sock.
+ * Unless the kit backend is `ts`, the app overrides that entry for the
+ * processes it starts with its own lwk, whose socket is this app's home. The
+ * backend is read as `kit-socket.ts` reads it: `LANEWORK_KIT_BACKEND`, else
+ * `backend` in `<app home>/kit.json`, else `lwk-shadow` (FE-161).
+ */
+export function kitMcpFor(
+  home = appHomeDir(),
+  command = lwkBinaryPath(),
+): KitMcp | null {
+  let backend: unknown = process.env.LANEWORK_KIT_BACKEND;
+  if (!backend) {
+    try {
+      backend = (
+        JSON.parse(readFileSync(join(home, "kit.json"), "utf8")) as {
+          backend?: unknown;
+        }
+      ).backend;
+    } catch {
+      backend = undefined;
+    }
+  }
+  // FE-161: every backend but `ts` answers from lwk or compares it.
+  if (backend === "ts") return null;
+  return existsSync(command) ? { command, home } : null;
+}
+
+/**
+ * What a process told to use the kit is told (FE-158), given with the other
+ * hints when {@link kitMcpFor} attaches this build's lwk. Agents reach for
+ * the shell by habit (`grep -r … | head`, `cat`, `sed -n`), and Claude Code
+ * loads MCP tools on demand, so without this the kit goes unused.
+ *
+ * NOTE: Input names are the kit contract's (`lanework-kit` contract/kit.json).
+ */
+export const KIT_HINT = [
+  "Lanework: the `lanework-kit` MCP server is this project's search. It respects .gitignore, skips binaries, stays inside the project and caps its answers. Search with it, not with the shell:",
+  "- A file by (part of) its name, typos allowed: `find_files` (`query`), not find, fd, ls -R or `git ls-files | grep`.",
+  "- Text in files: `search_text` (`query` is literal; `regex: true` for a pattern; `case_sensitive`; `globs` such as `*.ts` or `!*.test.ts`; `path` for one folder or one file), not grep -r, rg or git grep.",
+  "- Code by its shape (definitions, calls, imports, JSX): `search_structural` with an ast-grep `pattern` and `lang`, e.g. `useEffect($A, [])` (tsx), `def $F($$$ARGS): $$$BODY` (python), `fn $F($$$ARGS) -> $R { $$$BODY }` (rust), not a regex grep.",
+  "- The files under a folder: `list_files` (`path`), not ls -R or `find . -type f`.",
+  "- What an earlier agent conversation in this project said or did: `search_sessions` (`query`), not grep over ~/.claude or ~/.codex.",
+  "An empty answer is complete: nothing in the project's searchable files matches, so do not search again with grep or find to double-check. Use the shell only for what the kit leaves out on purpose (files .gitignore excludes, such as node_modules, dist or .env, and git history), and only when the question is about those.",
+  "Answers are already capped (`limit`, `max_lines`), so never pipe them through head. Once a search has given you the file and line, read just that part with your file-reading tool (an offset and a limit), not cat, head or sed -n. Keep the shell for running things: git, builds, package scripts. If your tools load on demand, load lanework-kit's before your first search.",
+].join("\n");
+
 /**
  * Claude Code's single `--mcp-config`: `lanework` (the local board shim) and/or
  * `lanework_control` (the control shim). Claude takes one flag, so both go in
@@ -72,10 +133,19 @@ export function controlMcpFor(
 export function claudeMcpArgs(
   shim: string | null,
   control: string | null = null,
+  kit: KitMcp | null = null,
 ): string[] {
-  if (!shim && !control) return [];
+  if (!shim && !control && !kit) return [];
   const mcpServers: Record<string, unknown> = {};
   if (shim) mcpServers.lanework = { type: "stdio", command: shim, args: [] };
+  // A server named as the user's entry replaces it for this process.
+  if (kit)
+    mcpServers[KIT_SERVER] = {
+      type: "stdio",
+      command: kit.command,
+      args: ["mcp"],
+      env: { LANEWORK_HOME: kit.home },
+    };
   if (control)
     mcpServers[CONTROL_SERVER] = {
       type: "stdio",
@@ -94,6 +164,17 @@ export function codexControlArgs(control: string): string[] {
   return [
     "-c",
     `mcp_servers.${CONTROL_SERVER}={command=${JSON.stringify(control)},args=[],env_vars=${JSON.stringify([...CONTROL_FORWARD])}}`,
+  ];
+}
+
+/**
+ * Codex's `-c` override for the kit (FE-158): the whole `lanework-kit` table,
+ * so the user's entry is replaced for this process, not merged into.
+ */
+export function codexKitArgs(kit: KitMcp): string[] {
+  return [
+    "-c",
+    `mcp_servers.${KIT_SERVER}={command=${JSON.stringify(kit.command)},args=["mcp"],env={LANEWORK_HOME=${JSON.stringify(kit.home)}}}`,
   ];
 }
 

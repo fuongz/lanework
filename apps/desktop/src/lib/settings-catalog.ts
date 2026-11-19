@@ -82,7 +82,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         label: "Power saver",
         icon: BatteryEcoChargingIcon,
         keywords:
-          "power saver battery energy idle end stop chat agent engine keep running heat cpu memory",
+          "power saver battery energy idle end stop chat agent engine keep running heat cpu memory lwk search engine find grep serve on demand always per search",
       },
       {
         to: "/settings/storage",

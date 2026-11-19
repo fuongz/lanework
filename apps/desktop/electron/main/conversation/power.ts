@@ -1,12 +1,14 @@
 // Settings → Power saver (FE-126): whether, and after how long, an idle
-// chat's engine ends. Kept in `power.json` beside the app's other settings,
-// and read by the engines' idle sweep on every pass, so a change applies
-// within a minute.
+// chat's engine ends, and how `lwk` runs for searches (FE-158). Kept in
+// `power.json` beside the app's other settings. The engines' idle sweep reads
+// it on every pass, so a change applies within a minute; the lwk mode is
+// handed to `../lwk-serve.ts` when it is saved.
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { app } from "electron";
 import {
   checkPowerSettings,
+  type LwkMode,
   type PowerSettings,
 } from "../../../shared/conversation";
 
@@ -37,6 +39,11 @@ export function idleLimitMs(): number | null {
   const settings = cache ?? checkPowerSettings(null);
   if (!cache) void readPowerSettings();
   return settings.enabled ? settings.minutes * 60_000 : null;
+}
+
+/** How the app runs `lwk` (FE-158), as saved; for the main process's start. */
+export async function savedLwkMode(): Promise<LwkMode> {
+  return (await readPowerSettings()).lwkMode;
 }
 
 /** Save `value`, checked, and answer what is now held. */

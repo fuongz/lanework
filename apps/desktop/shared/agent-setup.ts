@@ -173,6 +173,11 @@ export interface KitMcpEntry {
   installed: boolean;
   /** It runs this app's shim (or a stale one of ours), so the switch owns it. */
   ours: boolean;
+  /**
+   * Not ours, but another Lanework build's shim (in a `.lanew…` home): the
+   * installed app's, seen from the Preview or a dev run.
+   */
+  otherApp?: boolean;
   /** The user's choice in Settings; null when they never made one. */
   on: boolean | null;
   /** The config file, as main read it. */

@@ -58,6 +58,7 @@ import {
   previewConductorStop,
   stopConductor,
 } from "./conversation/conductor-stop";
+import { savedLwkMode } from "./conversation/power";
 import { registerDictation } from "./dictation";
 import { registerFileFinder } from "./file-finder";
 import { readLinkedOpenPulls, registerGit } from "./git";
@@ -67,6 +68,7 @@ import { registerInstructions } from "./instructions";
 import { broadcast, handle } from "./ipc";
 import { jevMain } from "./jev";
 import { type KitSocket, startKitSocket } from "./kit-socket";
+import { lwkServe, shutdownLwkServe } from "./lwk-serve";
 import { registerMemory } from "./memory";
 import { installMenu } from "./menu";
 import { installMenuBar } from "./menu-bar";
@@ -581,7 +583,16 @@ app
     registerStructuralSearch(devUrl);
     // FE-152: the kit's tools for `lwk` and the lanework-kit MCP server, on
     // a 0600 unix socket in the app home, with the warm fff index above.
-    startKitSocket({ rootsFor: linkedRootsFor })
+    // FE-158: the socket's `shadow` and `lwk` backends (LANEWORK_KIT_BACKEND
+    // or `kit.json`) go through the app's lwk client, which runs as Settings
+    // → Power saver says: the saved mode now, a change when it is saved
+    // (`conversation/index.ts`).
+    void savedLwkMode()
+      .then((mode) => lwkServe().setMode(mode))
+      .catch((error: unknown) =>
+        console.warn("Unable to apply the lwk mode", error),
+      );
+    startKitSocket({ rootsFor: linkedRootsFor, lwk: lwkServe() })
       .then((socket) => {
         kitSocket = socket;
       })
@@ -670,6 +681,7 @@ app.on("will-quit", () => {
   controlServer = null;
   void kitSocket?.close();
   kitSocket = null;
+  void shutdownLwkServe();
 });
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

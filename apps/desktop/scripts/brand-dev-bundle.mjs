@@ -57,13 +57,13 @@ export function brandDevBundle(electron) {
   // NOTE: Editing `Info.plist` breaks Electron's own signature, and macOS then
   // refuses the app's notifications (UNErrorDomain error 1, FE-70). An ad hoc
   // signature makes the bundle whole again under its new identifier.
-  execFileSync("/usr/bin/codesign", [
-    "--force",
-    "--deep",
-    "--sign",
-    "-",
-    bundle,
-  ]);
+  // Its output is kept off the terminal, where every line is the dev
+  // logger's (`stamp [who] text`); a failure still throws with its stderr.
+  execFileSync(
+    "/usr/bin/codesign",
+    ["--force", "--deep", "--sign", "-", bundle],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
   writeFileSync(ready, "");
   return binary;
 }

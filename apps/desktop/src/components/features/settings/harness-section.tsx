@@ -488,11 +488,13 @@ export function HarnessSection({ cli }: { cli?: HarnessAgent } = {}) {
         ? "Checking…"
         : entry?.unreadable
           ? `${entry.configPath} can't be read. Fix it and try again.`
-          : entry?.installed && !entry.ours
-            ? `${entry.configPath} already has another lanework server.`
-            : mcpStatus.want === "local"
-              ? `Gives ${NAMES[agent]} the board's tools, for your local projects.`
-              : `Gives ${NAMES[agent]} the board's tools.`,
+          : entry?.installed && !entry.ours && entry.otherApp
+            ? `Set up by the installed Lanework app in ${entry.configPath}.`
+            : entry?.installed && !entry.ours
+              ? `${entry.configPath} already has another lanework server.`
+              : mcpStatus.want === "local"
+                ? `Gives ${NAMES[agent]} the board's tools, for your local projects.`
+                : `Gives ${NAMES[agent]} the board's tools.`,
       keywords:
         "mcp server lanework board tools claude codex opencode stdio local",
       control: (
@@ -536,11 +538,13 @@ export function HarnessSection({ cli }: { cli?: HarnessAgent } = {}) {
         ? "Checking…"
         : entry?.unreadable
           ? `${entry.configPath} can't be read. Fix it and try again.`
-          : entry?.installed && !entry.ours
-            ? `${entry.configPath} already has another lanework-kit server.`
-            : refusal && !on
-              ? refusal
-              : `Lets ${NAMES[agent]} search files, code and past sessions in the folder it runs in.`,
+          : entry?.installed && !entry.ours && entry.otherApp
+            ? `Set up by the installed Lanework app in ${entry.configPath}.`
+            : entry?.installed && !entry.ours
+              ? `${entry.configPath} already has another lanework-kit server.`
+              : refusal && !on
+                ? refusal
+                : `Lets ${NAMES[agent]} search files, code and past sessions in the folder it runs in.`,
       keywords:
         "lanework-kit kit mcp search files text code structural ast-grep ripgrep sessions find stdio claude codex opencode",
       control: (

@@ -24,6 +24,8 @@ export const SETTINGS_BUTTON =
 export interface SettingsRowSpec {
   label: string;
   description?: string;
+  /** Quieter words beside the label: whose engine it is, with its mark. */
+  byline?: ReactNode;
   /** The control on the right: a switch, a button, or plain text. */
   control?: ReactNode;
   /** Drawn under the row, full width: what the control changes (a font). */
@@ -181,13 +183,20 @@ export function SettingsPage({
                           compact ? "gap-0.5" : "gap-1",
                         )}
                       >
-                        <span
-                          className={cn(
-                            "font-medium",
-                            compact ? "text-[13px]" : "text-sm",
-                          )}
-                        >
-                          {row.label}
+                        <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5">
+                          <span
+                            className={cn(
+                              "font-medium",
+                              compact ? "text-[13px]" : "text-sm",
+                            )}
+                          >
+                            {row.label}
+                          </span>
+                          {row.byline ? (
+                            <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                              {row.byline}
+                            </span>
+                          ) : null}
                         </span>
                         {row.description ? (
                           <span

@@ -1075,10 +1075,28 @@ export type PowerMinutes = (typeof POWER_MINUTES)[number];
 export interface PowerSettings {
   enabled: boolean;
   minutes: PowerMinutes;
+  /** How the app runs `lwk` for its searches (FE-158). */
+  lwkMode: LwkMode;
 }
 
-/** On, after 30 minutes (FE-126/D3). */
-const DEFAULT_POWER_SETTINGS: PowerSettings = { enabled: true, minutes: 30 };
+/**
+ * How the app runs `lwk` for its searches (FE-158/D1a).
+ *
+ * - `always` (the default, FE-161): one `lwk serve` kept running from app
+ *   start; fastest, but its memory stays taken.
+ * - `on-demand`: `lwk serve` starts on the first search and ends after 5
+ *   idle minutes.
+ * - `per-call`: one `lwk` run per search; nothing kept in memory.
+ */
+export const LWK_MODES = ["always", "on-demand", "per-call"] as const;
+export type LwkMode = (typeof LWK_MODES)[number];
+
+/** On, after 30 minutes (FE-126/D3); lwk always running (FE-161). */
+const DEFAULT_POWER_SETTINGS: PowerSettings = {
+  enabled: true,
+  minutes: 30,
+  lwkMode: "always",
+};
 
 /** Whatever was on disk or sent, with anything unknown at its default. */
 export function checkPowerSettings(value: unknown): PowerSettings {
@@ -1094,6 +1112,9 @@ export function checkPowerSettings(value: unknown): PowerSettings {
     minutes: POWER_MINUTES.includes(saved.minutes as PowerMinutes)
       ? (saved.minutes as PowerMinutes)
       : DEFAULT_POWER_SETTINGS.minutes,
+    lwkMode: LWK_MODES.includes(saved.lwkMode as LwkMode)
+      ? (saved.lwkMode as LwkMode)
+      : DEFAULT_POWER_SETTINGS.lwkMode,
   };
 }
 

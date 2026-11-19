@@ -55,10 +55,13 @@ import {
   CONTROL_ROLE_ENV,
   codexControlArgs,
   codexHintArgs,
+  codexKitArgs,
   codexMcpArgs,
   controlMcpFor,
   isConductorTurn,
   joinHints,
+  KIT_HINT,
+  kitMcpFor,
 } from "./mcp-args";
 import type { ContentBlock } from "./outgoing";
 import { Held, type Outgoing, sameSettings } from "./queue";
@@ -460,6 +463,9 @@ export class CodexEngine implements ConversationEngine {
     // FE-155: the control tools, for a process holding a control token.
     const control = controlMcpFor(env);
     if (control) overrides.push(...codexControlArgs(control));
+    // FE-158: this build's lwk for the kit, unless its backend is ts.
+    const kit = kitMcpFor();
+    if (kit) overrides.push(...codexKitArgs(kit));
     // BE-01: how to save a conductor, and which board this project is,
     // unless the user's config already gives Codex developer instructions
     // (an override would replace them).
@@ -468,6 +474,7 @@ export class CodexEngine implements ConversationEngine {
     const hint = joinHints(
       env[SESSIONS_ENV.token] ? CREATE_CONDUCTOR_HINT : null,
       board && env[SESSIONS_ENV.token] ? boardHint(board) : null,
+      kit ? KIT_HINT : null,
     );
     if (
       hint &&

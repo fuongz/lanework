@@ -42,6 +42,7 @@ import { type AgentHome, agentHome } from "../agent-home";
 import { updateConfigFile } from "../config-file";
 import { shellQuote } from "../handoff/claude-settings";
 import { appHomeDir } from "../paths";
+import { lwkBinaryPath } from "./lwk-install";
 import {
   notJsonc,
   opencodeConfigPath,
@@ -351,6 +352,25 @@ export function isStaleShim(command: unknown, shim: string): boolean {
   );
 }
 
+/**
+ * Whether `command` is shim `name` of another Lanework build: under a home
+ * folder named `.lanew…` (`~/.lanew`, `~/.lanew-preview`, `~/.lanew-dev`)
+ * and still there. The Preview and a dev run see the installed app's this
+ * way, and must not call it somebody else's server.
+ */
+export function isOtherAppShim(command: unknown, name: string): boolean {
+  if (typeof command !== "string") return false;
+  const parts = command.split(/[/\\]/);
+  const n = parts.length;
+  return (
+    n >= 3 &&
+    parts[n - 1] === name &&
+    parts[n - 2] === "bin" &&
+    parts[n - 3].startsWith(".lanew") &&
+    existsSync(command)
+  );
+}
+
 /** What a config without our entry reads as. */
 export const NO_ENTRY = {
   installed: false,
@@ -551,9 +571,20 @@ const configPathOf = (agent: LaneworkMcpAgent, home = resolveHome()) =>
 async function entryStatus(agent: LaneworkMcpAgent): Promise<LaneworkMcpEntry> {
   const configPath = configPathOf(agent);
   const text = await readOptional(configPath).catch(() => null);
+  const other = (
+    state: Omit<LaneworkMcpEntry, "configPath" | "unreadable">,
+    command: unknown,
+  ) => ({
+    ...state,
+    otherApp:
+      state.installed && !state.ours && isOtherAppShim(command, "lanework-mcp"),
+  });
   if (agent === "codex")
     return {
-      ...codexState(text ?? ""),
+      ...other(
+        codexState(text ?? ""),
+        codexValue(splitCodex(text ?? "").ours, "command"),
+      ),
       configPath,
       unreadable: false,
     };
@@ -563,9 +594,15 @@ async function entryStatus(agent: LaneworkMcpAgent): Promise<LaneworkMcpEntry> {
     if (!config || usesV1Layout(config))
       return { ...NO_ENTRY, configPath, unreadable: true };
     const shim = mcpShimPath();
+    const mcp = isObject(config.mcp) ? config.mcp : {};
+    const servers = isObject(mcp.servers) ? mcp.servers : {};
+    const entry = servers[MCP_NAME];
     return {
-      ...opencodeMcpState(config, shim, (command) =>
-        isStaleShim(command, shim),
+      ...other(
+        opencodeMcpState(config, shim, (command) => isStaleShim(command, shim)),
+        isObject(entry) && Array.isArray(entry.command)
+          ? entry.command[0]
+          : undefined,
       ),
       configPath,
       unreadable: false,
@@ -573,7 +610,13 @@ async function entryStatus(agent: LaneworkMcpAgent): Promise<LaneworkMcpEntry> {
   }
   const json = parseObject(text);
   if (!json) return { ...NO_ENTRY, configPath, unreadable: true };
-  return { ...claudeState(json), configPath, unreadable: false };
+  const servers = isObject(json.mcpServers) ? json.mcpServers : {};
+  const entry = servers[MCP_NAME];
+  return {
+    ...other(claudeState(json), isObject(entry) ? entry.command : undefined),
+    configPath,
+    unreadable: false,
+  };
 }
 
 /** What Settings → Agents shows for the `lanework` MCP entry. */
@@ -782,10 +825,10 @@ export async function setLaneworkMcpToolset(
 // (`dist/electron/mcp-kit/server.cjs`) through its own shim. It needs no
 // session and no board: the same entry whether the board's is local, cloud
 // or absent. Each agent's switch is a pref (`prefs.ts`):
-// - On: the entry is added, and on every launch put back if it went missing
-//   and repointed at this build's shim.
+// - On, or never chosen (on by default, FE-161): the entry is added, and on
+//   every launch put back if it went missing and repointed at this build's
+//   shim.
 // - Off: the entry is removed, and never added again.
-// - Never chosen: an entry of ours only gets its shim rewritten.
 
 /** The name of the kit's entry in every agent's MCP config. */
 export const KIT_MCP_NAME = "lanework-kit";
@@ -811,6 +854,10 @@ export function kitServerPath(mainDir: string = __dirname): string {
 /**
  * The kit's shim, rewritten on every launch like {@link buildMcpShim}'s.
  *
+ * It runs this build's `lwk mcp` (FE-161): the Rust kit, which asks this
+ * app's socket first and otherwise searches in-process. A build without lwk
+ * (`lwk` absent) runs the TS server bundle as before.
+ *
  * NOTE: No `cd`: the server's scope is the folder the agent starts it in.
  * `LANEWORK_HOME` is pinned so it finds this app's socket
  * (`<app home>/run/kit.sock`).
@@ -819,14 +866,20 @@ export function buildKitShim(options: {
   execPath: string;
   serverPath: string;
   home: string;
+  lwkPath?: string | null;
 }): string {
+  const run = options.lwkPath
+    ? [`exec ${shellQuote(options.lwkPath)} mcp "$@"`]
+    : [
+        "export ELECTRON_RUN_AS_NODE=1",
+        `exec ${shellQuote(options.execPath)} ${shellQuote(options.serverPath)} "$@"`,
+      ];
   return [
     "#!/bin/sh",
-    "# Lanework's lanework-kit MCP server (FE-152). The Lanework app rewrites",
-    "# this file on every launch; edits here are lost.",
-    "export ELECTRON_RUN_AS_NODE=1",
+    "# Lanework's lanework-kit MCP server (FE-152, FE-161). The Lanework app",
+    "# rewrites this file on every launch; edits here are lost.",
     `export LANEWORK_HOME=${shellQuote(options.home)}`,
-    `exec ${shellQuote(options.execPath)} ${shellQuote(options.serverPath)} "$@"`,
+    ...run,
     "",
   ].join("\n");
 }
@@ -842,6 +895,7 @@ async function writeKitShim(
   const refusal = currentShimRefusal();
   if (refusal) throw new Error(shimRefusalMessage(refusal));
   const path = kitShimPath();
+  const lwk = lwkBinaryPath();
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   await writeFile(
     path,
@@ -849,6 +903,7 @@ async function writeKitShim(
       execPath,
       serverPath: kitServerPath(),
       home: appHomeDir(),
+      lwkPath: existsSync(lwk) ? lwk : null,
     }),
     { mode: 0o700 },
   );
@@ -872,9 +927,11 @@ function isStaleKitShim(command: unknown, shim: string): boolean {
 
 /** What an entry's command says about it. */
 function kitState(installed: boolean, command: unknown, shim: string) {
+  const ours = installed && (command === shim || isStaleKitShim(command, shim));
   return {
     installed,
-    ours: installed && (command === shim || isStaleKitShim(command, shim)),
+    ours,
+    otherApp: installed && !ours && isOtherAppShim(command, "lanework-kit-mcp"),
     command: installed ? command : null,
   };
 }
@@ -1170,7 +1227,8 @@ export async function setKitMcp(
 /**
  * Bring the kit's entries in line on launch: the shim rewritten for this
  * build when an entry of ours runs it, an entry of ours that runs a stale
- * shim repointed, and one the user turned on put back when it is missing.
+ * shim repointed, and a missing one added unless the user turned it off (on
+ * by default, FE-161).
  *
  * NOTE: Nothing in the Preview, a dev build, or a copy that may not write
  * shims: the installed app does it on its next launch. Never touches a
@@ -1188,7 +1246,8 @@ export async function syncKitMcp(): Promise<void> {
     const status = statuses[index];
     if (!status || status.unreadable || status.on === false) continue;
     const repoint = status.ours && status.command !== shim;
-    const putBack = !status.installed && status.on === true;
+    // FE-161: on by default; only the user's own "off" keeps it out.
+    const putBack = !status.installed;
     if (repoint || putBack) await installKitMcp(agent).catch(() => undefined);
   }
 }

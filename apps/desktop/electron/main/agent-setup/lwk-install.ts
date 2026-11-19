@@ -1,12 +1,12 @@
 // Installs `lwk` (FE-152) at `~/.lanew/bin/lwk`: a symlink to this build's
-// `dist/electron/bin/lwk-<arch>`, the native client `scripts/build-lwk.mjs`
-// builds from `apps/desktop/lwk/` and `electron-builder.yml` unpacks from
-// the asar.
+// `dist/electron/bin/lwk-<arch>`, the released standalone Rust kit that
+// `scripts/fetch-lwk.mjs` fetches (pinned in `lwk.lock.json`) and
+// `electron-builder.yml` unpacks from the asar. lwk asks the app's
+// `kit.sock` first and otherwise runs its own engine, so it needs nothing
+// else from the app bundle.
 //
-// - A link, not a copy and not a shell shim: lwk finds the app beside its
-//   real path (its JS kit, `dist/electron/lwk/standalone.cjs`, and the app's
-//   executable to run it on), and a shim's `sh` would cost a passthrough
-//   (`lwk git status`) its start-up time.
+// - A link, not a copy and not a shell shim: a shim's `sh` would cost a
+//   passthrough (`lwk git status`) its start-up time.
 // - Replaced atomically (a new link, then a rename), so an agent running
 //   lwk meanwhile sees the old one or the new one, never none.
 //

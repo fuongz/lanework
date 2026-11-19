@@ -142,6 +142,11 @@ export interface LaneworkMcpEntry {
   installed: boolean;
   /** It points at our shim or our cloud host, so the app may switch it. */
   ours: boolean;
+  /**
+   * Not ours, but another Lanework build's shim (in a `.lanew…` home): the
+   * installed app's, seen from the Preview or a dev run.
+   */
+  otherApp?: boolean;
   /** Where it points, when it is ours. */
   mode: LaneworkMcpMode | null;
   transport: "stdio" | "http" | null;

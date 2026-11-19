@@ -32,6 +32,20 @@
 // - `error.code`: a `KitErrorCode` (`invalid`, `scope`, `not_found`,
 //   `unavailable`, `timeout`, `aborted`, `busy`, `internal`).
 //
+// - `note`: only from lwk (see Backends), when it changed the ask.
+//
+// Backends (FE-158, FE-161): once the scope is resolved, a call goes to the
+// TS kit (`ts`), to `lwk` through the app's lwk client (`lwk`, its answer
+// and errors served as they are), or to both: `shadow` serves the TS answer
+// and asks lwk in the background, `lwk-shadow` (the default) serves lwk's
+// and runs the TS kit in the background; the two are compared in
+// `./kit-shadow.ts`. lwk gets the tool's params plus `cwd` and
+// `roots` set to the resolved scope. The backend is not a user setting yet:
+// `LANEWORK_KIT_BACKEND`, else `backend` in `<app home>/kit.json`
+// (`{"backend": "shadow"}`), else {@link DEFAULT_KIT_BACKEND}; the file is
+// read again at most every {@link BACKEND_TTL_MS}. Without an lwk client it
+// is always `ts`.
+//
 // Limits: a request line over 1 MB closes the connection; more than
 // {@link INFLIGHT_PER_CONNECTION} calls on one connection, or
 // {@link INFLIGHT_MAX} in all, are answered `busy`. A client that
@@ -39,7 +53,7 @@
 //
 // NOTE: Nothing here imports Electron; `index.ts` starts it and closes it at
 // quit.
-import { chmod, lstat, mkdir, unlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { connect, createServer, type Server, type Socket } from "node:net";
 import { dirname, isAbsolute, join } from "node:path";
 import {
@@ -52,6 +66,15 @@ import {
   realRoots,
   toKitError,
 } from "../kit";
+import {
+  createKitShadow,
+  type KitShadow,
+  kitShadowLogPath,
+  timed,
+} from "./kit-shadow";
+// Types only: the lwk client is handed in, so this module (which the
+// lanework-kit MCP server bundles) never loads lwk-serve.
+import type { LwkAnswer, LwkMode, LwkToolMethod } from "./lwk-serve";
 import { appHomeDir } from "./paths";
 
 /** The longest request line taken, in bytes. */
@@ -69,6 +92,83 @@ const SOCKET_PATH_MAX = 103;
 /** How long a probe of an existing socket waits for it to answer. */
 const PROBE_MS = 500;
 
+/** The most the TS kit runs in the background of an lwk answer (FE-161). */
+const TS_SHADOW_MS = 15_000;
+
+/** How long a read of `kit.json`'s backend is reused. */
+const BACKEND_TTL_MS = 5_000;
+
+/** Where a call goes once its scope is resolved (FE-158). */
+export const KIT_BACKENDS = ["ts", "shadow", "lwk", "lwk-shadow"] as const;
+export type KitBackend = (typeof KIT_BACKENDS)[number];
+/** The backend with no env or `kit.json` saying otherwise (FE-161). */
+export const DEFAULT_KIT_BACKEND: KitBackend = "lwk-shadow";
+
+const isBackend = (value: unknown): value is KitBackend =>
+  (KIT_BACKENDS as readonly unknown[]).includes(value);
+
+/** The kit's internal flags: `<app home>/kit.json`. */
+export function kitFlagsPath(home = appHomeDir()): string {
+  return join(home, "kit.json");
+}
+
+/**
+ * The backend now in force: `LANEWORK_KIT_BACKEND`, else `kit.json`'s
+ * `backend`, else `ts`. An unknown value is `ts`, warned once.
+ */
+function backendReader(home: string | undefined): () => Promise<KitBackend> {
+  let cached: { value: KitBackend; at: number } | null = null;
+  const warned = new Set<string>();
+  const pick = (value: unknown, where: string): KitBackend | null => {
+    if (value === undefined || value === null || value === "") return null;
+    if (isBackend(value)) return value;
+    const key = `${where}=${String(value)}`;
+    if (!warned.has(key)) {
+      warned.add(key);
+      console.warn(`[kit-socket] unknown kit backend ${key}; using ts`);
+    }
+    return "ts";
+  };
+  return async () => {
+    const env = pick(process.env.LANEWORK_KIT_BACKEND, "LANEWORK_KIT_BACKEND");
+    if (env) return env;
+    if (cached && Date.now() - cached.at < BACKEND_TTL_MS) return cached.value;
+    const saved = await readFile(kitFlagsPath(home), "utf8")
+      .then((text) => (JSON.parse(text) as { backend?: unknown }).backend)
+      .catch(() => undefined);
+    cached = {
+      value: pick(saved, "kit.json backend") ?? DEFAULT_KIT_BACKEND,
+      at: Date.now(),
+    };
+    return cached.value;
+  };
+}
+
+/** lwk-serve's codes in the kit's; `cancelled` is the caller going away. */
+function lwkError(error: unknown): KitError {
+  const { code, message } = (error ?? {}) as {
+    code?: unknown;
+    message?: unknown;
+  };
+  const text = typeof message === "string" ? message : String(error);
+  if (code === "cancelled") return new KitError("aborted", text);
+  return toKitError(
+    typeof code === "string" &&
+      [
+        "invalid",
+        "scope",
+        "not_found",
+        "unavailable",
+        "timeout",
+        "aborted",
+        "busy",
+        "internal",
+      ].includes(code)
+      ? new KitError(code as KitError["code"], text)
+      : new KitError("internal", text),
+  );
+}
+
 /** The socket's path: `<app home>/run/kit.sock`. */
 export function kitSocketPath(home = appHomeDir()): string {
   return join(home, "run", "kit.sock");
@@ -84,6 +184,26 @@ export interface KitSocketOptions {
   rootsFor?: (cwd: string) => Promise<string[]>;
   /** The kit's natives; the app's own when unset. */
   natives?: KitNatives;
+  /**
+   * The app's lwk client (`lwk-serve.ts`), for the `shadow` and `lwk`
+   * backends; every call goes to the TS kit when unset.
+   */
+  lwk?: {
+    call: (
+      method: LwkToolMethod,
+      params: Record<string, unknown>,
+      signal?: AbortSignal,
+    ) => Promise<LwkAnswer>;
+    /** Its Power mode. */
+    mode?: () => LwkMode;
+  };
+  /**
+   * The app home `kit.json` and the shadow log are under; {@link appHomeDir}
+   * when unset.
+   */
+  home?: string;
+  /** The backend for each call; read from the env and `kit.json` when unset. */
+  backend?: () => KitBackend | Promise<KitBackend>;
 }
 
 export interface KitSocket {
@@ -162,14 +282,21 @@ function listen(server: Server, path: string): Promise<void> {
 }
 
 /** One answer, as its line. */
-function line(id: unknown, body: { result: unknown } | { error: KitError }) {
+function line(
+  id: unknown,
+  body: { result: unknown; note?: string } | { error: KitError },
+) {
   const safeId = typeof id === "string" || typeof id === "number" ? id : null;
   if ("error" in body)
     return `${JSON.stringify({
       id: safeId,
       error: { code: body.error.code, message: body.error.message },
     })}\n`;
-  return `${JSON.stringify({ id: safeId, result: body.result ?? null })}\n`;
+  return `${JSON.stringify(
+    typeof body.note === "string"
+      ? { id: safeId, result: body.result ?? null, note: body.note }
+      : { id: safeId, result: body.result ?? null },
+  )}\n`;
 }
 
 /**
@@ -233,6 +360,16 @@ export async function startKitSocket(
     console.warn("[kit-socket] another Lanework serves the kit already");
     return null;
   }
+
+  const lwk = options.lwk;
+  const backendOf = options.backend ?? backendReader(options.home);
+  let shadow: KitShadow | null = null;
+  const shadowLog = (): KitShadow => {
+    shadow ??= createKitShadow({
+      logFile: kitShadowLogPath(options.home),
+    });
+    return shadow;
+  };
 
   let inflight = 0;
   const connections = new Set<Socket>();
@@ -299,8 +436,77 @@ export async function startKitSocket(
           options,
           controller.signal,
         );
-        const result = await KIT_METHODS[method](rest, ctx);
-        send(line(id, { result }));
+        const backend: KitBackend = lwk
+          ? await Promise.resolve(backendOf()).catch(() => "ts" as const)
+          : "ts";
+        const lwkParams = {
+          ...rest,
+          // The TS kit's fff always ranks with git signals; lwk only when
+          // asked (BE-04), so ask, or the two orders differ.
+          ...(method === "find_files" && rest.git === undefined
+            ? { git: true }
+            : {}),
+          cwd: ctx.cwd,
+          roots: [...(ctx.roots ?? [ctx.cwd])],
+        };
+        if (lwk && backend === "lwk-shadow") {
+          // FE-161: lwk answers; the TS kit runs the same call in the
+          // background, bounded, and the two are compared and logged. When
+          // lwk cannot answer at all (no binary, crashed past its backoff)
+          // the TS answer is served instead.
+          const answered = lwk.call(method, lwkParams, controller.signal);
+          const background = {
+            ...ctx,
+            signal: AbortSignal.any([
+              controller.signal,
+              AbortSignal.timeout(TS_SHADOW_MS),
+            ]),
+          };
+          const tsRun = KIT_METHODS[method](rest, background);
+          tsRun.catch(() => {});
+          try {
+            shadowLog().compare(
+              method,
+              lwkParams,
+              timed(async () => ({ result: await tsRun })),
+              () => answered,
+              controller.signal,
+              "lwk",
+            );
+          } catch (error) {
+            console.warn("[kit-socket] shadow failed to start", error);
+          }
+          const answer = await answered.catch((error: unknown) => {
+            const kitError = lwkError(error);
+            if (kitError.code !== "unavailable") throw kitError;
+            return null;
+          });
+          send(line(id, answer ?? { result: await tsRun }));
+          return;
+        }
+        if (lwk && backend === "lwk") {
+          const answer = await lwk
+            .call(method, lwkParams, controller.signal)
+            .catch((error: unknown) => {
+              throw lwkError(error);
+            });
+          send(line(id, answer));
+          return;
+        }
+        const run = KIT_METHODS[method](rest, ctx);
+        if (lwk && backend === "shadow")
+          try {
+            shadowLog().compare(
+              method,
+              lwkParams,
+              timed(async () => ({ result: await run })),
+              (signal) => lwk.call(method, lwkParams, signal),
+              controller.signal,
+            );
+          } catch (error) {
+            console.warn("[kit-socket] shadow failed to start", error);
+          }
+        send(line(id, { result: await run }));
       } catch (error) {
         send(line(id, { error: toKitError(error, controller.signal) }));
       } finally {
@@ -365,6 +571,7 @@ export async function startKitSocket(
       closed = true;
       for (const socket of connections) socket.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));
+      await shadow?.flush();
       // Only ours: another instance may have taken the path since.
       const now = await lstat(path).catch(() => null);
       if (now?.isSocket() && now.ino === made.ino)

@@ -44,11 +44,13 @@ asarUnpack:
   - "dist/electron/mcp-control/**"
   # FE-87: the lead's control CLI, run the same way from ~/.lanew/bin/lanework-control.
   - "dist/electron/control/**"
-  # FE-152: lwk's JS kit, run the same way by the native lwk when the app is
-  # not up (`dist/electron/bin/lwk-<arch>`, below, is the native lwk).
+  # FE-152: the TS kit's standalone bundle. The released lwk
+  # (`dist/electron/bin/lwk-<arch>`, below) no longer needs it to run; kept
+  # until the TS kit is removed (FE-158, next card).
   - "dist/electron/lwk/**"
   # FE-69: the dictation helper is a native executable, spawned by path; so
-  # are ripgrep (FE-149) and lwk (FE-152, linked from ~/.lanew/bin/lwk).
+  # are ripgrep (FE-149) and the released lwk (FE-158, fetched by
+  # fetch-lwk.mjs, linked from ~/.lanew/bin/lwk).
   - "dist/electron/bin/**"
 # The pty binary is a prebuilt N-API module: it runs under Electron's Node as
 # is, and there is nothing here for electron-rebuild to compile.
@@ -56,7 +58,7 @@ npmRebuild: false
 # INF-05 (SW-01): Electron fuses, flipped in the binary at package time.
 electronFuses:
   # Stays on: the Stop hook, the statusline, the offline MCP server, the
-  # lanework-kit MCP server, lwk's JS kit, lanework-control and its MCP
+  # lanework-kit MCP server, the TS kit's bundle, lanework-control and its MCP
   # server all run as `ELECTRON_RUN_AS_NODE=1 <Lanework> <script>` from the
   # agents' configs.
   # Turning it off needs them moved off the app binary first (out of scope
