@@ -59,8 +59,14 @@ export function SettingsScope({
   allowAll = false,
   current,
   onChoose,
+  crumb = false,
   className,
 }: {
+  /**
+   * Drawn as the breadcrumb's last crumb (a project's page, FE-161): the
+   * project's tile, name and chevron, no "Applying settings for" and no box.
+   */
+  crumb?: boolean;
   /** Offer "All projects": Skills and MCP, not Archived. */
   allowAll?: boolean;
   /** The project shown, when the page knows it better than the store. */
@@ -108,9 +114,11 @@ export function SettingsScope({
     <div
       className={cn("flex min-w-0 items-center gap-2 text-[13px]", className)}
     >
-      <span className="text-muted-foreground shrink-0">
-        Applying settings for
-      </span>
+      {!crumb && (
+        <span className="text-muted-foreground shrink-0">
+          Applying settings for
+        </span>
+      )}
       <Popover
         open={open}
         onOpenChange={(next) => {
@@ -123,8 +131,16 @@ export function SettingsScope({
           render={
             <button
               type="button"
-              aria-label={`Applying settings for ${label}. Change`}
-              className="border-input hover:bg-foreground/[0.04] flex h-8 min-w-0 max-w-64 items-center gap-2 rounded-lg border px-2.5 text-left transition-colors duration-150"
+              aria-label={
+                crumb
+                  ? `${label}, switch project`
+                  : `Applying settings for ${label}. Change`
+              }
+              className={
+                crumb
+                  ? "hover:bg-foreground/[0.06] data-popup-open:bg-foreground/[0.06] -mx-1.5 flex min-w-0 max-w-72 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left text-[14px] leading-5 transition-colors"
+                  : "border-input hover:bg-foreground/[0.04] flex h-8 min-w-0 max-w-64 items-center gap-2 rounded-lg border px-2.5 text-left transition-colors duration-150"
+              }
             >
               {all ? (
                 <HugeiconsIcon
@@ -139,7 +155,15 @@ export function SettingsScope({
                   className="size-4 rounded-[4px] text-[9px]"
                 />
               )}
-              <span className="truncate font-medium">{label}</span>
+              <span
+                className={cn(
+                  "truncate",
+                  crumb ? "font-semibold" : "font-medium",
+                )}
+                aria-current={crumb ? "page" : undefined}
+              >
+                {label}
+              </span>
               <HugeiconsIcon
                 icon={UnfoldMoreIcon}
                 className="text-muted-foreground size-3.5 shrink-0"

@@ -27,7 +27,7 @@ import {
 } from "#/components/ui/empty";
 import { Switch } from "#/components/ui/switch";
 import { cn } from "#/lib/utils";
-import { usePreferences } from "#/stores/preferences";
+import { isModelOffered, usePreferences } from "#/stores/preferences";
 import { AddModelDialog } from "./models-section.add";
 
 /** One group's models: a CLI's, or one OpenCode provider's. */
@@ -224,12 +224,16 @@ function GroupList({
   titled: boolean;
 }) {
   const hidden = usePreferences((state) => state.hiddenModels);
-  const setModelsHidden = usePreferences((state) => state.setModelsHidden);
+  const optedIn = usePreferences((state) => state.shownModels);
+  const setModelsShown = usePreferences((state) => state.setModelsShown);
   const favorites = usePreferences((state) => state.favoriteModels);
   const setFavorite = usePreferences((state) => state.setModelFavorite);
   const custom = usePreferences((state) => state.modelOrder[group.key]);
   const setOrder = usePreferences((state) => state.setModelOrder);
   const hiddenSet = useMemo(() => new Set(hidden), [hidden]);
+  const optedSet = useMemo(() => new Set(optedIn), [optedIn]);
+  const offered = (entry: AgentModel) =>
+    isModelOffered(entry, hiddenSet, optedSet);
   const ids = group.entries.map((entry) => entry.id);
   const q = query.trim().toLowerCase();
   const shown = q
@@ -239,7 +243,7 @@ function GroupList({
           entry.id.toLowerCase().includes(q),
       )
     : group.entries;
-  const visible = ids.filter((id) => !hiddenSet.has(id)).length;
+  const visible = group.entries.filter(offered).length;
 
   const move = (id: string, step: -1 | 1) => {
     const at = ids.indexOf(id);
@@ -289,7 +293,9 @@ function GroupList({
           <Switch
             aria-label={`Show every ${group.title} model`}
             checked={visible === ids.length}
-            onCheckedChange={(checked) => setModelsHidden(ids, !checked)}
+            onCheckedChange={(checked) =>
+              setModelsShown(group.entries, checked)
+            }
           />
         </div>
       ) : (
@@ -311,12 +317,12 @@ function GroupList({
               last={entry.id === ids[ids.length - 1]}
               searching={Boolean(q)}
               favorite={favorites.includes(entry.id)}
-              shown={!hiddenSet.has(entry.id)}
+              shown={offered(entry)}
               onMove={(step) => move(entry.id, step)}
               onFavorite={() =>
                 setFavorite(entry.id, !favorites.includes(entry.id))
               }
-              onShown={(on) => setModelsHidden([entry.id], !on)}
+              onShown={(on) => setModelsShown([entry], on)}
             />
           ))}
         </Reorder.Group>
@@ -350,11 +356,14 @@ export function HarnessModels({ agent }: { agent: ConversationAgent }) {
   const [flipped, setFlipped] = useState<ReadonlySet<string>>(new Set());
   const count = groups.reduce((sum, group) => sum + group.entries.length, 0);
   const hidden = usePreferences((state) => state.hiddenModels);
-  const setModelsHidden = usePreferences((state) => state.setModelsHidden);
+  const optedIn = usePreferences((state) => state.shownModels);
+  const setModelsShown = usePreferences((state) => state.setModelsShown);
   const [adding, setAdding] = useState(false);
-  const allIds = groups.flatMap((group) => group.entries.map((e) => e.id));
+  const allEntries = groups.flatMap((group) => group.entries);
   // "Disable all" while any is offered; once every one is hidden, "Enable".
-  const noneHidden = allIds.some((id) => !hidden.includes(id));
+  const noneHidden = allEntries.some((entry) =>
+    isModelOffered(entry, hidden, optedIn),
+  );
   const titled = agent === "opencode";
   const q = query.trim().toLowerCase();
   const matching = groups.filter(
@@ -390,7 +399,7 @@ export function HarnessModels({ agent }: { agent: ConversationAgent }) {
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => setModelsHidden(allIds, noneHidden)}
+            onClick={() => setModelsShown(allEntries, !noneHidden)}
             className="text-muted-foreground h-7 shrink-0 rounded-lg px-2 text-[12px]"
           >
             {noneHidden ? "Disable all" : "Enable all"}

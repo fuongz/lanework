@@ -75,9 +75,15 @@ export function SettingsPage({
   compact = false,
   scope,
   actions,
+  notice,
 }: {
   title: string;
   description: string;
+  /**
+   * A line under the description about the whole page, not one of its
+   * settings (Harness's last checkpoint). Never hidden by a search.
+   */
+  notice?: ReactNode;
   sections: SettingsSectionSpec[];
   /**
    * What the page applies to (`SettingsScope`, FE-145), above everything
@@ -131,6 +137,16 @@ export function SettingsPage({
       >
         {description}
       </p>
+      {notice ? (
+        <p
+          className={cn(
+            "text-muted-foreground leading-relaxed",
+            compact ? "text-xs" : "text-[13px]",
+          )}
+        >
+          {notice}
+        </p>
+      ) : null}
 
       {visible.length === 0 ? (
         <Empty className="mt-6">

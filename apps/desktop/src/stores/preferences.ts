@@ -74,6 +74,23 @@ function readCorrections(value: unknown): DictationCorrection[] | null {
   );
 }
 
+/**
+ * Whether the composer's picker offers `entry`: not hidden, and, for a
+ * deprecated model, turned on by hand (off until then).
+ */
+export function isModelOffered(
+  entry: { id: string; legacy?: boolean },
+  hidden: ReadonlySet<string> | readonly string[],
+  shown: ReadonlySet<string> | readonly string[],
+): boolean {
+  const has = (list: ReadonlySet<string> | readonly string[], id: string) =>
+    Array.isArray(list)
+      ? list.includes(id)
+      : (list as ReadonlySet<string>).has(id);
+  if (has(hidden, entry.id)) return false;
+  return !entry.legacy || has(shown, entry.id);
+}
+
 /** The most model ids kept hidden: every CLI's list, with room to spare. */
 const HIDDEN_MAX = 2000;
 
@@ -196,6 +213,16 @@ interface Preferences {
   hiddenModels: string[];
   setModelsHidden: (ids: readonly string[], hidden: boolean) => void;
   /**
+   * The deprecated models turned on by hand: a deprecated one is off in the
+   * picker until it is here ({@link isModelOffered}).
+   */
+  shownModels: string[];
+  /** Offer `entries` in the picker or not, deprecated ones included. */
+  setModelsShown: (
+    entries: readonly { id: string; legacy?: boolean }[],
+    shown: boolean,
+  ) => void;
+  /**
    * The models starred in Settings → Harness or the picker (FE-146): the
    * picker's Favourites, and first in their CLI's tab.
    */
@@ -270,6 +297,25 @@ export const usePreferences = create<Preferences>()(
             else next.delete(id);
           return { hiddenModels: readHidden([...next]) };
         }),
+      shownModels: [],
+      setModelsShown: (entries, shown) =>
+        set((state) => {
+          const hidden = new Set(state.hiddenModels);
+          const opted = new Set(state.shownModels);
+          for (const { id, legacy } of entries) {
+            if (shown) {
+              hidden.delete(id);
+              if (legacy) opted.add(id);
+            } else {
+              hidden.add(id);
+              opted.delete(id);
+            }
+          }
+          return {
+            hiddenModels: readHidden([...hidden]),
+            shownModels: readHidden([...opted]),
+          };
+        }),
       favoriteModels: [],
       setModelFavorite: (id, favorite) =>
         set((state) => {
@@ -319,6 +365,7 @@ export const usePreferences = create<Preferences>()(
         dictationLocale,
         dictationCorrections,
         hiddenModels,
+        shownModels,
         favoriteModels,
         modelOrder,
         customModels,
@@ -334,6 +381,7 @@ export const usePreferences = create<Preferences>()(
         dictationLocale,
         dictationCorrections,
         hiddenModels,
+        shownModels,
         favoriteModels,
         modelOrder,
         customModels,
@@ -365,6 +413,7 @@ export const usePreferences = create<Preferences>()(
             : "vi_VN",
           dictationCorrections: readCorrections(saved?.dictationCorrections),
           hiddenModels: readHidden(saved?.hiddenModels),
+          shownModels: readHidden(saved?.shownModels),
           // Before FE-146 the picker kept its stars under a key of its own:
           // read once from there, so nobody loses theirs.
           favoriteModels:

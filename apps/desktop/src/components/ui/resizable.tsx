@@ -1,3 +1,8 @@
+import {
+  DragDropHorizontalIcon,
+  DragDropVerticalIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { cn } from "cn";
 import {
   Group,
@@ -48,10 +53,12 @@ function ResizablePanel({ className, ...props }: PanelProps) {
 }
 
 /**
- * The line between two panels.
+ * The line between two panels, and a grip in its middle.
  *
- * One pixel to look at, nine to hit. The `after:` pseudo-element widens the
- * grab target without taking layout space; people miss a one-pixel target
+ * The line keeps its quiet colour; hovering, dragging or focusing the
+ * separator shows a small grip at its centre instead of lighting the whole
+ * line. Nine pixels to hit: the `after:` pseudo-element widens the grab
+ * target without taking layout space, since people miss a one-pixel target
  * and conclude the panel does not resize at all.
  */
 function ResizableHandle({ className, ...props }: SeparatorProps) {
@@ -59,9 +66,7 @@ function ResizableHandle({ className, ...props }: SeparatorProps) {
     <Separator
       data-slot="resizable-handle"
       className={cn(
-        "bg-panel-rule relative shrink-0 transition-colors",
-        "hover:bg-accent-brand/60 active:bg-accent-brand",
-        "focus-visible:bg-accent-brand focus-visible:outline-none",
+        "group/handle bg-panel-rule relative shrink-0 focus-visible:outline-none",
         // The separator in a horizontal group is a vertical rule, and the
         // library states that on the element itself.
         "aria-[orientation=vertical]:w-px",
@@ -71,7 +76,30 @@ function ResizableHandle({ className, ...props }: SeparatorProps) {
         className,
       )}
       {...props}
-    />
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          "bg-popover border-border text-muted-foreground pointer-events-none absolute top-1/2 left-1/2 z-10 grid -translate-x-1/2 -translate-y-1/2 place-items-center rounded-md border shadow-sm",
+          // The library's own state (`data-separator`): hover, active while
+          // dragging, focus from the keyboard; a disabled one never shows.
+          "opacity-0 transition-opacity duration-150 group-data-[separator=active]/handle:opacity-100 group-data-[separator=focus]/handle:opacity-100 group-data-[separator=hover]/handle:opacity-100",
+          "group-aria-[orientation=vertical]/handle:h-6 group-aria-[orientation=vertical]/handle:w-3.5",
+          "group-aria-[orientation=horizontal]/handle:h-3.5 group-aria-[orientation=horizontal]/handle:w-6",
+        )}
+      >
+        <HugeiconsIcon
+          icon={DragDropVerticalIcon}
+          className="hidden size-3 group-aria-[orientation=vertical]/handle:block"
+          strokeWidth={2}
+        />
+        <HugeiconsIcon
+          icon={DragDropHorizontalIcon}
+          className="hidden size-3 group-aria-[orientation=horizontal]/handle:block"
+          strokeWidth={2}
+        />
+      </span>
+    </Separator>
   );
 }
 

@@ -7,16 +7,16 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useHarnessAccounts } from "#/components/shared/agents/harness-account";
 import { HARNESS_NAMES } from "#/components/shared/agents/harness-island";
 import logo from "#/components/shared/common/lanework-logo.png";
+import { PoweredBy } from "#/components/shared/settings/powered-by";
 import {
   SETTINGS_BUTTON,
   SettingsPage,
   type SettingsRowSpec,
   type SettingsSectionSpec,
-  SettingsValue,
 } from "#/components/shared/settings/settings-page";
 import { Alert, AlertDescription } from "#/components/ui/alert";
 import { Button } from "#/components/ui/button";
@@ -371,10 +371,13 @@ export function HarnessSection({ cli }: { cli?: HarnessAgent } = {}) {
         ]
       : [];
 
-  const authRow = (
+  // The cloud entry's sign-in (FE-161: one row with the entry): its state
+  // beside the row's label, what to do instead of the row's description
+  // when it needs the user, and its buttons before the switch.
+  const authParts = (
     agent: LaneworkMcpAgent,
     auth: McpAuthView | undefined,
-  ): SettingsRowSpec => {
+  ): { status: ReactNode; note: string | null; actions: ReactNode } => {
     const cli = MCP_CLI[agent];
     const name = NAMES[agent];
     const waiting = !auth || auth === "checking" || auth === "login";
@@ -396,24 +399,31 @@ export function HarnessSection({ cli }: { cli?: HarnessAgent } = {}) {
       checking: "Checking…",
     };
     return {
-      label: "Lanework MCP sign-in",
-      description:
-        (auth && DESCRIPTION[auth]) ?? `${name} signs in through your browser.`,
-      keywords:
-        "mcp login sign in oauth authenticate token expired claude codex opencode",
-      control: (
+      status: (
+        <span
+          className={cn(
+            "inline-flex items-center gap-1 text-xs",
+            attention
+              ? "text-amber-600 dark:text-amber-400"
+              : "text-muted-foreground",
+          )}
+        >
+          {auth === "signed-in" && (
+            <HugeiconsIcon
+              icon={Tick02Icon}
+              className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+              strokeWidth={2}
+              aria-hidden="true"
+            />
+          )}
+          {LABEL[auth ?? "checking"]}
+        </span>
+      ),
+      note: auth && auth !== "signed-in" ? (DESCRIPTION[auth] ?? null) : null,
+      actions: (
         // A login waiting on the browser: hovering it (or tabbing to it)
         // swaps the spinner for Stop.
         <div className="group/mcp-login flex items-center gap-3">
-          <span
-            className={
-              attention
-                ? "text-[13px] text-amber-600 dark:text-amber-400"
-                : "text-muted-foreground text-[13px]"
-            }
-          >
-            {LABEL[auth ?? "checking"]}
-          </span>
           {auth === "login" ? (
             <div className="grid place-items-center">
               <HugeiconsIcon
@@ -496,7 +506,7 @@ export function HarnessSection({ cli }: { cli?: HarnessAgent } = {}) {
                 ? `Gives ${NAMES[agent]} the board's tools, for your local projects.`
                 : `Gives ${NAMES[agent]} the board's tools.`,
       keywords:
-        "mcp server lanework board tools claude codex opencode stdio local",
+        "mcp server lanework board tools claude codex opencode stdio local login sign in oauth authenticate token expired",
       control: (
         <Switch
           aria-label={`Lanework MCP — ${NAMES[agent]}`}
@@ -521,10 +531,20 @@ export function HarnessSection({ cli }: { cli?: HarnessAgent } = {}) {
         />
       ),
     };
-    const rows = [board, toolsetRow(agent)];
-    return cloud.includes(agent)
-      ? [...rows, authRow(agent, mcpAuth[agent])]
-      : rows;
+    // A cloud entry of ours signs in through the browser: its state and
+    // buttons join this row rather than a row of their own.
+    if (cloud.includes(agent) && entry?.installed && entry.ours) {
+      const auth = authParts(agent, mcpAuth[agent]);
+      board.byline = auth.status;
+      if (auth.note) board.description = auth.note;
+      board.control = (
+        <div className="flex items-center gap-3">
+          {auth.actions}
+          {board.control}
+        </div>
+      );
+    }
+    return [board, toolsetRow(agent)];
   };
 
   // The kit's search tools, a stdio entry of their own (FE-152).
@@ -533,7 +553,8 @@ export function HarnessSection({ cli }: { cli?: HarnessAgent } = {}) {
     const refusal = kitStatus?.refusal ?? null;
     const on = !!entry?.installed && entry.ours;
     return {
-      label: "lanework-kit",
+      label: "Lanework Kit",
+      byline: <PoweredBy />,
       description: !kitStatus
         ? "Checking…"
         : entry?.unreadable
@@ -544,12 +565,12 @@ export function HarnessSection({ cli }: { cli?: HarnessAgent } = {}) {
               ? `${entry.configPath} already has another lanework-kit server.`
               : refusal && !on
                 ? refusal
-                : `Lets ${NAMES[agent]} search files, code and past sessions in the folder it runs in.`,
+                : `Search, code and session tools for ${NAMES[agent]} in its project: faster, with less output than the shell.`,
       keywords:
-        "lanework-kit kit mcp search files text code structural ast-grep ripgrep sessions find stdio claude codex opencode",
+        "lanework-kit lwk kit mcp fast project search files text code structural ast-grep ripgrep sessions find grep stdio claude codex opencode",
       control: (
         <Switch
-          aria-label={`lanework-kit — ${NAMES[agent]}`}
+          aria-label={`Lanework Kit — ${NAMES[agent]}`}
           checked={on}
           title={preview ? PREVIEW_AGENT_SETUP_REFUSAL : undefined}
           disabled={
@@ -637,15 +658,67 @@ export function HarnessSection({ cli }: { cli?: HarnessAgent } = {}) {
   ];
 
   const codex = status?.codex;
+  // Codex runs a new hook only once trusted: its approval sits beside the
+  // row's label, and the button to give it only while it is missing.
+  const codexApproval: Pick<SettingsRowSpec, "byline" | "description"> & {
+    action: ReactNode;
+  } = !codex?.installed
+    ? { action: null }
+    : codex.approved
+      ? {
+          byline: (
+            <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
+              <HugeiconsIcon
+                icon={Tick02Icon}
+                className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+                strokeWidth={2}
+                aria-hidden="true"
+              />
+              Approved in Codex
+            </span>
+          ),
+          action: null,
+        }
+      : {
+          byline: (
+            <span className="text-xs text-amber-600 dark:text-amber-400">
+              Waiting for approval in Codex
+            </span>
+          ),
+          description: project
+            ? `Opens Codex in ${project.name}. Choose "Trust all and continue" when asked.`
+            : "Open a project first, or approve the hook when Codex asks.",
+          action: (
+            <Button
+              size="lg"
+              className={SETTINGS_BUTTON}
+              variant="outline"
+              disabled={preview || busy || !project || !projectKey}
+              onClick={() => void approveInCodex()}
+            >
+              Approve in Codex
+            </Button>
+          ),
+        };
   const codexRows: SettingsRowSpec[] = [
     {
       label: "Save progress for the next agent",
-      description: why(
-        codex ?? NO_HOOK,
-        "Leaves a checkpoint on the card after each turn, so another agent can continue.",
+      byline: codexApproval.byline,
+      description:
+        codexApproval.description ??
+        why(
+          codex ?? NO_HOOK,
+          "Leaves a checkpoint on the card after each turn, so another agent can continue.",
+        ),
+      keywords: "codex handoff checkpoint resume hook approve approved trust",
+      control: codexApproval.action ? (
+        <div className="flex items-center gap-3">
+          {codexApproval.action}
+          {switchFor("codex", codex)}
+        </div>
+      ) : (
+        switchFor("codex", codex)
       ),
-      keywords: "codex handoff checkpoint resume hook",
-      control: switchFor("codex", codex),
     },
     ...removed(codex),
     ...(codex?.installed && !codex.hooksEnabled
@@ -668,38 +741,6 @@ export function HarnessSection({ cli }: { cli?: HarnessAgent } = {}) {
                 />
                 {copied === "feature" ? "Copied" : "Copy the line"}
               </Button>
-            ),
-          },
-        ]
-      : []),
-    ...(codex?.installed
-      ? [
-          {
-            label: "Approved in Codex",
-            description: codex.approved
-              ? "Codex approved the hook."
-              : project
-                ? `Opens Codex in ${project.name}. Choose "Trust all and continue" when asked.`
-                : "Open a project first, or approve the hook when Codex asks.",
-            control: codex.approved ? (
-              <span className="text-muted-foreground text-[13px]">
-                Approved
-              </span>
-            ) : (
-              <div className="flex items-center gap-3">
-                <span className="text-[13px] text-amber-600 dark:text-amber-400">
-                  Waiting for approval
-                </span>
-                <Button
-                  size="lg"
-                  className={SETTINGS_BUTTON}
-                  variant="outline"
-                  disabled={preview || busy || !project || !projectKey}
-                  onClick={() => void approveInCodex()}
-                >
-                  Approve in Codex
-                </Button>
-              </div>
             ),
           },
         ]
@@ -792,156 +833,93 @@ export function HarnessSection({ cli }: { cli?: HarnessAgent } = {}) {
   ];
 
   // Lanework's switches for every agent, shown on each CLI's page.
+  // What a checkpoint carries of the code (FE-78): nothing, the changes to
+  // files git tracks, or those and new files too. One choice, since new files
+  // only ever go with the changes. Main asks before each wider step
+  // (FE-78/D4, D9); the state is read back rather than taken from the pick.
+  type PushChoice = "off" | "tracked" | "untracked";
+  const pushChoice: PushChoice = !status?.pushWip
+    ? "off"
+    : status.pushWipUntracked
+      ? "untracked"
+      : "tracked";
+  const PUSH_LABELS: Record<PushChoice, string> = {
+    off: "Off",
+    tracked: "Changed files",
+    untracked: "Changed and new files",
+  };
+  const PUSH_DESCRIPTIONS: Record<PushChoice, string> = {
+    off: "Checkpoints carry notes only, so unfinished code stays on this machine. Push it to let an agent on another machine or in the cloud continue from it.",
+    tracked:
+      "Pushes uncommitted changes to files git tracks to refs/lanework/wip/<task id>, never to your branches. Anyone who can read the remote can fetch it.",
+    untracked:
+      "Also pushes new files git does not ignore. A key or .env file .gitignore misses would go too; the hook skips a push when it spots one.",
+  };
+  const setPush = (next: PushChoice) =>
+    surface &&
+    void run(async () => {
+      if (next === "off") {
+        if (status?.pushWipUntracked) await surface.setPushWipUntracked(false);
+        await surface.setPushWip(false);
+      } else {
+        if (!status?.pushWip) await surface.setPushWip(true);
+        if ((next === "untracked") !== !!status?.pushWipUntracked)
+          await surface.setPushWipUntracked(next === "untracked");
+      }
+      return surface.status();
+    }, "Could not change this.");
   const pushRows: SettingsRowSpec[] = handoff
     ? [
         {
-          label: "Also push unfinished code to GitHub",
-          // Tracked changes only: new files can be keys or scratch notes that
-          // were never meant to leave the machine (FE-78/D9). And the ref is
-          // as readable as the remote, which the old copy did not say.
-          description:
-            "Pushes uncommitted changes to files git already tracks to refs/lanework/wip/<task id>. New files stay on this machine. Anyone who can read the remote can fetch that ref. Your branches are untouched.",
+          label: "Push unfinished code",
+          description: PUSH_DESCRIPTIONS[pushChoice],
           keywords:
-            "push wip ref uncommitted code git remote cloud tracked untracked new files fetch",
+            "push wip ref uncommitted code git remote github cloud tracked untracked new files include secrets fetch another machine",
           control: (
-            <Switch
-              aria-label="Also push unfinished code to GitHub"
-              checked={status?.pushWip ?? false}
+            <Select
+              value={pushChoice}
               disabled={preview || !surface || busy || !anyOn}
-              onCheckedChange={(checked) =>
-                surface &&
-                void run(
-                  // Main asks to confirm before turning this on (FE-78/D4),
-                  // and the user may cancel. Read the state back rather than
-                  // trusting the switch's new position.
-                  async () => {
-                    await surface.setPushWip(checked);
-                    return surface.status();
-                  },
-                  "Could not change this.",
-                )
-              }
-            />
-          ),
-        },
-        {
-          label: "Include new files",
-          description:
-            "Also pushes new files git does not ignore. A key or .env file that .gitignore misses would go too; the hook skips a push when it spots one.",
-          keywords: "push wip untracked new files include secrets",
-          control: (
-            <Switch
-              aria-label="Include new files in the pushed work"
-              checked={status?.pushWipUntracked ?? false}
-              disabled={preview || !surface || busy || !status?.pushWip}
-              onCheckedChange={(checked) =>
-                surface &&
-                void run(
-                  // Main asks first (FE-78/D9); read the answer back.
-                  async () => {
-                    await surface.setPushWipUntracked(checked);
-                    return surface.status();
-                  },
-                  "Could not change this.",
-                )
-              }
-            />
+              onValueChange={(next) => setPush(next as PushChoice)}
+            >
+              <SelectTrigger aria-label="Push unfinished code">
+                <SelectValue>
+                  {(current: PushChoice | null) =>
+                    current ? PUSH_LABELS[current] : ""
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              {/* As wide as its longest choice, never narrower than the
+                  trigger: "Changed and new files" outgrows "Off". */}
+              <SelectContent className="w-auto min-w-(--anchor-width)">
+                {(Object.keys(PUSH_LABELS) as PushChoice[]).map((choice) => (
+                  <SelectItem key={choice} value={choice}>
+                    {PUSH_LABELS[choice]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           ),
         },
       ]
     : [];
 
-  // The hook's whereabouts and the last checkpoint, for one CLI's page.
-  const statusSection = (only: HarnessAgent): SettingsSectionSpec | null =>
-    handoff && anyOn && status
-      ? {
-          title: "Status",
-          rows: [
-            ...(only === "claude" && status.claude.installed
-              ? [
-                  {
-                    label: "Claude Code hook",
-                    description: "Where Claude Code finds it.",
-                    control: (
-                      <SettingsValue>
-                        {status.claude.settingsPath}
-                      </SettingsValue>
-                    ),
-                  },
-                ]
-              : []),
-            ...(only === "codex" && status.codex.installed
-              ? [
-                  {
-                    label: "Codex hook",
-                    description: "Where Codex finds it.",
-                    control: (
-                      <SettingsValue>{status.codex.settingsPath}</SettingsValue>
-                    ),
-                  },
-                ]
-              : []),
-            ...(only === "opencode" && status.opencode.installed
-              ? [
-                  {
-                    label: "OpenCode plugin",
-                    description: "Where OpenCode finds it.",
-                    control: (
-                      <SettingsValue>
-                        {status.opencode.settingsPath}
-                      </SettingsValue>
-                    ),
-                  },
-                ]
-              : []),
-            ...(local
-              ? []
-              : [
-                  {
-                    label: "Credential",
-                    description: status.credential
-                      ? "Stored in the Keychain."
-                      : "Missing. Turn a switch off and on again.",
-                    control: (
-                      <span
-                        className={
-                          status.credential
-                            ? "text-muted-foreground text-[13px]"
-                            : "text-destructive text-[13px]"
-                        }
-                      >
-                        {status.credential ? "In the Keychain" : "Missing"}
-                      </span>
-                    ),
-                  },
-                ]),
-            {
-              label: "Last checkpoint",
-              description: "From the last turn that worked on a card.",
-              control: (
-                <span className="text-muted-foreground text-[13px]">
-                  {status.last
-                    ? `${status.last.taskId}, ${relativeTime(status.last.at, now)}`
-                    : "None yet"}
-                </span>
-              ),
-            },
-          ],
-        }
-      : null;
-
-  const resumeSection: SettingsSectionSpec | null = handoff
-    ? {
-        title: "Resuming",
-        rows: [
-          {
-            label: "Hand a card to another agent",
-            description: "Tell any connected agent: resume <task id>.",
-            keywords: "resume codex claude opencode command",
-          },
-        ],
-      }
-    : null;
+  // The handoff's state for every CLI at once (FE-161): the last checkpoint
+  // under the page's description, and the credential only when it is gone.
+  const handoffNotice: ReactNode =
+    handoff && anyOn && status ? (
+      <>
+        {status.last
+          ? `Last checkpoint: ${status.last.taskId}, ${relativeTime(status.last.at, now)}.`
+          : "No checkpoint yet."}
+        {!local && !status.credential && (
+          <span className="text-destructive">
+            {" "}
+            The checkpoint credential is missing from the Keychain: turn a
+            switch off and on again.
+          </span>
+        )}
+      </>
+    ) : null;
 
   const problemSection: SettingsSectionSpec | null = error
     ? {
@@ -960,15 +938,19 @@ export function HarnessSection({ cli }: { cli?: HarnessAgent } = {}) {
   if (cli) {
     const at = CLIS.findIndex(({ harness: kind }) => kind === cli);
     const card = cardSections[at];
-    const laneworkRows =
-      handoff && at >= 0
+    // FE-161: bringing this CLI's sessions into Lanework sits with the rest
+    // of what Lanework adds to it, not in a section of its own.
+    const laneworkRows = [
+      ...(handoff && at >= 0
         ? [
             ...mcpRows(CLIS[at].agent),
             kitRow(CLIS[at].agent),
             ...HOOK_ROWS[CLIS[at].agent],
             ...pushRows,
           ]
-        : [];
+        : []),
+      ...(pullSection.rows ?? []),
+    ];
     const page: (SettingsSectionSpec | null | undefined)[] = [
       card,
       laneworkRows.length
@@ -990,9 +972,6 @@ export function HarnessSection({ cli }: { cli?: HarnessAgent } = {}) {
           "models model picker favourite favorite star order reorder hide show slug id",
         content: <HarnessModels agent={cli} />,
       },
-      pullSection,
-      statusSection(cli),
-      resumeSection,
       problemSection,
     ];
     return (
@@ -1049,6 +1028,7 @@ export function HarnessSection({ cli }: { cli?: HarnessAgent } = {}) {
   return (
     <SettingsPage
       actions={checkButton}
+      notice={handoffNotice}
       title="Harness"
       description={
         handoff

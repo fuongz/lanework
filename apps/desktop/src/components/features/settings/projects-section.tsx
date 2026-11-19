@@ -19,7 +19,6 @@ import {
   SETTINGS_BUTTON,
   SettingsPage,
 } from "#/components/shared/settings/settings-page";
-import { SettingsScope } from "#/components/shared/settings/settings-scope";
 import { Alert, AlertDescription, AlertTitle } from "#/components/ui/alert";
 import {
   AlertDialog,
@@ -122,17 +121,6 @@ export function ProjectsSection({ slug }: { slug: string }) {
   return (
     <>
       <SettingsPage
-        scope={
-          <SettingsScope
-            current={selected}
-            onChoose={(next) =>
-              void navigate({
-                to: "/settings/projects/$slug",
-                params: { slug: next },
-              })
-            }
-          />
-        }
         title="General"
         description="Its name, folders, readiness and board."
         sections={[

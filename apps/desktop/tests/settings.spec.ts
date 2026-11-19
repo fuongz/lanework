@@ -393,17 +393,16 @@ test("Agents: the switch installs the hook and its credential, and removes only 
     const main = page.getByRole("switch", {
       name: "Save progress for the next agent — Claude Code",
     });
-    const push = page.getByRole("switch", {
-      name: "Also push unfinished code to GitHub",
+    const push = page.getByRole("combobox", {
+      name: "Push unfinished code",
     });
     await expect(main).not.toBeChecked();
     await expect(push).toBeDisabled();
 
     await main.click();
     await expect(main).toBeChecked();
-    await expect(
-      page.getByText("In the Keychain", { exact: true }),
-    ).toBeVisible();
+    // The handoff's state is a line under the page's description now.
+    await expect(page.getByText("No checkpoint yet.")).toBeVisible();
     const on = await read();
     expect(on.model).toBe("opus");
     const commands = on.hooks.Stop.flatMap(
@@ -423,8 +422,10 @@ test("Agents: the switch installs the hook and its credential, and removes only 
     // D3 (FE-28): pushing code is off until chosen — and choosing it changes
     // a setting the hook reads, never the command.
     await expect(push).toBeEnabled();
+    await expect(push).toHaveText("Off");
     await push.click();
-    await expect(push).toBeChecked();
+    await page.getByRole("option", { name: "Changed files" }).click();
+    await expect(push).toHaveText("Changed files");
     expect(JSON.parse(await readFile(hookConfig, "utf8")).pushWip).toBe(true);
     expect(await read()).toEqual(on);
 
@@ -492,7 +493,9 @@ test("Agents: the Codex switch installs its hook and waits for Codex's approval"
       `${before}\n[hooks.state."${hooksFile}:stop:1:0"]\ntrusted_hash = "sha256:abc"\n`,
     );
     await page.reload();
-    await expect(page.getByText("Approved", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("Approved in Codex", { exact: true }),
+    ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Approve in Codex" }),
     ).toHaveCount(0);

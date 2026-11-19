@@ -20,7 +20,7 @@ import { useBoard } from "#/stores/board";
 import { useTerminal } from "#/stores/terminal";
 
 const KEYWORDS =
-  "pull import sessions conversations transcripts history rail lanework all projects claude codex opencode";
+  "pull sync import sessions conversations transcripts history rail lanework all projects claude codex opencode";
 
 const LIST = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
 
@@ -63,6 +63,9 @@ function agentProgress(pull: AgentPull, agent: TerminalAgent): string {
  * NOTE: The CLIs ticked are this page's choice, not a setting: every CLI here
  * starts ticked again the next time it opens.
  */
+/** On one CLI's page the pull reads as syncing its sessions (FE-161). */
+const SYNC_LABEL = "Sync sessions to Lanework";
+
 export function usePullAllSection(only?: TerminalAgent): SettingsSectionSpec {
   // On one CLI's page (FE-146), that CLI alone: no ticks to choose from.
   const installed = useTerminal((state) => state.agents);
@@ -108,7 +111,7 @@ export function usePullAllSection(only?: TerminalAgent): SettingsSectionSpec {
       keywords: KEYWORDS,
       rows: [
         {
-          label: "Pull all projects",
+          label: only ? SYNC_LABEL : "Pull all projects",
           description:
             "Brings the conversations your agent CLIs already had into Lanework.",
           keywords: KEYWORDS,
@@ -123,7 +126,7 @@ export function usePullAllSection(only?: TerminalAgent): SettingsSectionSpec {
       keywords: KEYWORDS,
       rows: [
         {
-          label: "Pull all projects",
+          label: only ? SYNC_LABEL : "Pull all projects",
           description: only
             ? `${HARNESS_NAMES[only]} is not on this machine.`
             : "No agent CLI on this machine. Install Claude Code, Codex or OpenCode first.",
@@ -175,7 +178,7 @@ export function usePullAllSection(only?: TerminalAgent): SettingsSectionSpec {
     rows: [
       ...agentRows,
       {
-        label: "Pull all projects",
+        label: only ? SYNC_LABEL : "Pull all projects",
         description,
         keywords: KEYWORDS,
         control: mine ? (
@@ -196,7 +199,7 @@ export function usePullAllSection(only?: TerminalAgent): SettingsSectionSpec {
             disabled={!surface || other || chosen.length === 0}
             onClick={() => void pullAll(chosen)}
           >
-            Pull
+            {only ? "Sync" : "Pull"}
           </Button>
         ),
       },

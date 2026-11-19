@@ -1,8 +1,20 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { Fragment, type ReactNode } from "react";
 import type { HarnessAgent } from "#/../shared/harness";
+import type { Project } from "#/../shared/projects";
 import { HARNESS_NAMES } from "#/components/shared/agents/harness-island";
 import { WindowTitlebar } from "#/components/shared/navigation/window-titlebar";
+import { SettingsScope } from "#/components/shared/settings/settings-scope";
+import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "#/components/ui/dropdown-menu";
 import { settingsTitle } from "#/lib/settings-catalog";
 import { useBoard } from "#/stores/board";
 
@@ -13,6 +25,66 @@ const HARNESS_PAGE = /^\/settings\/harness\/([^/]+)\/?$/;
 const CRUMB = "text-muted-foreground shrink-0 text-[14px] leading-5";
 const SLASH = "text-muted-foreground/60 shrink-0 text-[14px] leading-5";
 const TITLE = "min-w-0 truncate text-[14px] leading-5 font-semibold";
+
+/**
+ * The last crumb on a CLI's page (FE-161): its mark and name, a menu that
+ * goes straight to another CLI's page.
+ */
+function HarnessSwitcher({
+  cli,
+  heading,
+}: {
+  cli: HarnessAgent;
+  heading: boolean;
+}) {
+  const navigate = useNavigate();
+  const Title = heading ? "h1" : "span";
+  // The heading holds the button, never the other way round.
+  return (
+    <Title className="flex min-w-0">
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <button
+              type="button"
+              aria-label={`${HARNESS_NAMES[cli]}, switch harness`}
+              className="hover:bg-foreground/[0.06] data-popup-open:bg-foreground/[0.06] -mx-1.5 flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 transition-colors"
+            />
+          }
+        >
+          <TerminalKindIcon kind={cli} className="size-4 shrink-0" />
+          <span className={TITLE} aria-current="page">
+            {HARNESS_NAMES[cli]}
+          </span>
+          <HugeiconsIcon
+            icon={ArrowDown01Icon}
+            className="text-muted-foreground size-3.5 shrink-0"
+            strokeWidth={2}
+            aria-hidden="true"
+          />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-max min-w-44">
+          <DropdownMenuRadioGroup
+            value={cli}
+            onValueChange={(next) =>
+              void navigate({
+                to: "/settings/harness/$cli",
+                params: { cli: next as HarnessAgent },
+              })
+            }
+          >
+            {(Object.keys(HARNESS_NAMES) as HarnessAgent[]).map((agent) => (
+              <DropdownMenuRadioItem key={agent} value={agent}>
+                <TerminalKindIcon kind={agent} className="size-4 shrink-0" />
+                {HARNESS_NAMES[agent]}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </Title>
+  );
+}
 
 /**
  * Where a settings page sits, as the chat header has it: "Settings / Skills",
@@ -31,24 +103,27 @@ function SettingsBreadcrumb({ heading }: { heading: boolean }) {
   const section = settingsTitle(pathname);
 
   const cli = HARNESS_PAGE.exec(pathname)?.[1] as HarnessAgent | undefined;
+  const navigate = useNavigate();
 
   const trail: {
     label: string;
     to?: "/settings/projects" | "/settings/harness";
+    /** The crumb is this CLI's switcher. */
+    cli?: HarnessAgent;
+    /** The crumb is this project's switcher. */
+    project?: Project | null;
   }[] = [{ label: "Settings" }];
   if (slug) {
     const decoded = decodeURIComponent(slug);
+    const found = projects.find((project) => project.slug === decoded) ?? null;
     trail.push(
       { label: "Projects", to: "/settings/projects" },
-      {
-        label:
-          projects.find((project) => project.slug === decoded)?.name ?? decoded,
-      },
+      { label: found?.name ?? decoded, project: found },
     );
   } else if (cli && cli in HARNESS_NAMES) {
     trail.push(
       { label: "Harness", to: "/settings/harness" },
-      { label: HARNESS_NAMES[cli] },
+      { label: HARNESS_NAMES[cli], cli },
     );
   } else if (section) trail.push({ label: section });
 
@@ -65,7 +140,23 @@ function SettingsBreadcrumb({ heading }: { heading: boolean }) {
               /
             </span>
           )}
-          {index === last ? (
+          {index === last && crumb.cli ? (
+            <HarnessSwitcher cli={crumb.cli} heading={heading} />
+          ) : index === last && crumb.project ? (
+            // FE-161: the page's project, and a menu to go to another's.
+            <Title className="flex min-w-0">
+              <SettingsScope
+                crumb
+                current={crumb.project}
+                onChoose={(next) =>
+                  void navigate({
+                    to: "/settings/projects/$slug",
+                    params: { slug: next },
+                  })
+                }
+              />
+            </Title>
+          ) : index === last ? (
             <Title className={TITLE} aria-current="page">
               {crumb.label}
             </Title>

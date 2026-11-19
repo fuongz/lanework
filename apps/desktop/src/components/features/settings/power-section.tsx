@@ -6,7 +6,7 @@ import {
   type PowerMinutes,
   type PowerSettings,
 } from "#/../shared/conversation";
-import logo from "#/components/shared/common/lanework-logo.png";
+import { PoweredBy } from "#/components/shared/settings/powered-by";
 import { SettingsPage } from "#/components/shared/settings/settings-page";
 import {
   Select,
@@ -132,16 +132,7 @@ export function PowerSection() {
             {
               label: "Search engine (lwk)",
               description: LWK_MODE_DESCRIPTIONS[settings?.lwkMode ?? "always"],
-              byline: (
-                <>
-                  <img
-                    src={logo}
-                    alt=""
-                    className="size-3.5 shrink-0 rounded-[3px]"
-                  />
-                  Powered by Lanework
-                </>
-              ),
+              byline: <PoweredBy />,
               keywords:
                 "lwk lanework-kit search engine kit find grep files code serve process resident memory ram always on demand per search idle powered by lanework",
               control: (
