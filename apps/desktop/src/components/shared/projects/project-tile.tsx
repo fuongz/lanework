@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Project } from "#/../shared/projects";
 import { cn } from "#/lib/utils";
+import { AvatarFace } from "./project-avatar";
 
 /**
  * Icons main returned this session, by `id|iconKey`.
@@ -78,8 +79,8 @@ function tile(slug: string): string {
 }
 
 /**
- * A project's mark: its GitHub repo owner's avatar, or else its initial on a
- * colour picked by its slug.
+ * A project's mark: the avatar chosen for it (FE-162), else its GitHub repo
+ * owner's avatar, else its initial on a colour picked by its slug.
  *
  * Shared by the project switcher and Settings → Projects, so a project wears
  * one face in both.
@@ -92,6 +93,9 @@ export function ProjectTile({
   className?: string;
 }) {
   const icon = useProjectIcon(project);
+  // FE-162: an avatar chosen for the project wins over its GitHub icon.
+  if (project?.avatar)
+    return <AvatarFace avatar={project.avatar} className={className} />;
   if (icon)
     return (
       <img

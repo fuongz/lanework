@@ -3,6 +3,7 @@ import {
   Delete02Icon,
   Folder01Icon,
   GitBranchIcon,
+  PencilEdit02Icon,
   RefreshIcon,
   SecurityBlockIcon,
   SecurityCheckIcon,
@@ -52,8 +53,10 @@ import {
   EmptyTitle,
 } from "#/components/ui/empty";
 import { Input } from "#/components/ui/input";
+import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
 import { useReadiness, useReadinessWatch } from "#/stores/readiness";
+import { ProjectAvatarDialog } from "./project-avatar-dialog";
 import { ReadinessFixDialog } from "./readiness-fix-dialog";
 import { ReadinessLinkDialog } from "./readiness-link-dialog";
 import { ReadinessList } from "./readiness-list";
@@ -75,9 +78,20 @@ export function Row({
     <div className="flex items-center justify-between gap-6 px-4 py-3.5">
       <div className="flex min-w-0 flex-1 items-center gap-3">
         {leading}
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
+        {/* Beside an avatar, the name and its slug read as one block. */}
+        <div
+          className={cn(
+            "flex min-w-0 flex-1 flex-col",
+            leading ? "gap-0" : "gap-1",
+          )}
+        >
           <span className="truncate text-sm font-medium">{label}</span>
-          <span className="text-muted-foreground text-[13px] leading-relaxed">
+          <span
+            className={cn(
+              "text-muted-foreground text-[13px]",
+              leading ? "leading-5" : "leading-relaxed",
+            )}
+          >
             {description}
           </span>
         </div>
@@ -396,6 +410,7 @@ export function SelectedProjectSection({
   const view = useBoard((state) => state.view);
   const purgeIssues = useBoard((state) => state.purgeIssues);
   const [purging, setPurging] = useState(false);
+  const [editingAvatar, setEditingAvatar] = useState(false);
   const [typed, setTyped] = useState("");
   const [removed, setRemoved] = useState<number | null>(null);
   const confirmId = useId();
@@ -432,9 +447,36 @@ export function SelectedProjectSection({
   // page, spaced like "On this account" below them.
   return (
     <div className="flex flex-col gap-2.5">
+      {editingAvatar && (
+        <ProjectAvatarDialog
+          project={project}
+          open={editingAvatar}
+          onOpenChange={setEditingAvatar}
+        />
+      )}
       <SettingsCard>
         <Row
-          leading={<ProjectTile project={project} className="size-9 text-sm" />}
+          leading={
+            // FE-162: a pencil on the avatar's corner opens its editor.
+            <span className="relative shrink-0">
+              <ProjectTile project={project} className="size-9 text-sm" />
+              <button
+                type="button"
+                aria-label={`Change ${project.name}'s avatar`}
+                title={id ? "Change avatar" : noId}
+                disabled={!id}
+                onClick={() => setEditingAvatar(true)}
+                className="bg-background border-border text-muted-foreground hover:text-foreground absolute -right-1.5 -bottom-1.5 grid size-5 place-items-center rounded-full border shadow-sm transition-colors disabled:opacity-50"
+              >
+                <HugeiconsIcon
+                  icon={PencilEdit02Icon}
+                  className="size-3"
+                  strokeWidth={2}
+                  aria-hidden="true"
+                />
+              </button>
+            </span>
+          }
           label={project.name}
           description={
             <span className="font-mono text-xs">{project.slug}</span>

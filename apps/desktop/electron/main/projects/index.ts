@@ -1,4 +1,5 @@
 import { BrowserWindow } from "electron";
+import { parseProjectAvatar } from "../../../shared/project-avatar";
 import {
   type BoardActivityPage,
   type BoardAttachment,
@@ -61,6 +62,7 @@ import {
   sealBoardMigration,
   searchCards,
   setFavorite,
+  setProjectAvatar,
   setSubscription,
   toggleChecklistItem,
   updateCard,
@@ -768,6 +770,31 @@ export function registerProjects(devUrl?: string): void {
       // Nothing local needs rewriting either, unlike the delete below: the
       // service will not change a slug, so the folder link and the saved
       // selection still name this project.
+      return load();
+    },
+  );
+  handle(
+    projectChannels.setProjectAvatar,
+    devUrl,
+    async (args): Promise<ProjectSnapshot> => {
+      const [id, raw] = args;
+      if (
+        args.length !== 2 ||
+        typeof id !== "string" ||
+        !id.trim() ||
+        id.length > 200
+      )
+        throw new Error("A project is required");
+      // Checked here too: what the renderer sends is never trusted as is.
+      const avatar = raw === null ? null : parseProjectAvatar(raw);
+      if (raw !== null && !avatar) throw new Error("That avatar is not one");
+      if (await localTarget(id)) {
+        writeLocal((store) => store.updateProject(id, { avatar }));
+        return load();
+      }
+      const record = await authorizedRecord();
+      await setProjectAvatar(record, id, avatar);
+      // `load()`, not `load(id)`, as after a rename: never a selection.
       return load();
     },
   );

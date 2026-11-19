@@ -107,6 +107,8 @@ const ADDITIVE_COLUMNS: readonly {
 }[] = [
   { table: "project_issues", column: "started_at", type: "TEXT" },
   { table: "project_issues", column: "completed_at", type: "TEXT" },
+  // FE-162: the project's chosen avatar, a `ProjectAvatar` as JSON, or null.
+  { table: "projects", column: "avatar", type: "TEXT" },
 ];
 
 /** Whether a file has every {@link ADDITIVE_COLUMNS} column. */

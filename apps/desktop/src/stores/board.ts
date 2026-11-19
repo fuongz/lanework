@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { ProjectAvatar } from "#/../shared/project-avatar";
 import { byRank, evidenceMessage, isSendBack } from "#/lib/board-view";
 import { ipcMessage } from "#/lib/ipc-error";
 import { desktopSurface } from "#/server/desktop";
@@ -180,6 +181,15 @@ interface BoardState {
    * @returns The failure, ready to show, when it did not save.
    */
   renameProject: (id: string, name: string) => Promise<{ error?: string }>;
+  /**
+   * Set a project's avatar, or null for its default mark (FE-162).
+   *
+   * @returns The failure, ready to show, when it did not save.
+   */
+  setProjectAvatar: (
+    id: string,
+    avatar: ProjectAvatar | null,
+  ) => Promise<{ error?: string }>;
   /**
    * Put the account's projects in this order, by slug, first to last.
    *
@@ -901,6 +911,24 @@ export const useBoard = create<BoardState>()((set, get) => ({
       set({ busy: null });
       return {
         error: ipcMessage(error, "Could not rename that project. Try again."),
+      };
+    }
+  },
+
+  setProjectAvatar: async (id, avatar) => {
+    set({ busy: `avatar:${id}`, error: null });
+    try {
+      const snapshot = await desktopSurface("projects").setAvatar(id, avatar);
+      set({
+        projects: snapshot.projects,
+        active: snapshot.active,
+        busy: null,
+      });
+      return {};
+    } catch (error) {
+      set({ busy: null });
+      return {
+        error: ipcMessage(error, "Could not change the avatar. Try again."),
       };
     }
   },

@@ -31,6 +31,8 @@ export {
   type StreamRole,
 } from "@lanework/contracts";
 
+import type { ProjectAvatar } from "./project-avatar";
+
 export interface Project {
   /**
    * The cloud project id, the key every board call is addressed by.
@@ -67,6 +69,11 @@ export interface Project {
    * service older than BE-18, and older test fixtures, omit it.
    */
   iconKey?: string | null;
+  /**
+   * The avatar chosen for it (FE-162): null or absent wears the GitHub icon
+   * or the letter tile. Absent from a service that does not store one yet.
+   */
+  avatar?: ProjectAvatar | null;
   /**
    * Where the board lives; absent means `cloud`.
    *
@@ -1082,6 +1089,7 @@ export const projectChannels = {
   changes: "projects:board:changes",
   createProject: "projects:new",
   renameProject: "projects:rename",
+  setProjectAvatar: "projects:set-avatar",
   reorderProjects: "projects:reorder",
   deleteProject: "projects:delete",
   folderState: "projects:folder:state",
@@ -1466,6 +1474,14 @@ export interface DesktopProjectsApi {
    * send an id has no route for it. The screen says so rather than calling.
    */
   rename: (id: string, name: string) => Promise<ProjectSnapshot>;
+  /**
+   * Set a project's avatar, or null for its default mark (FE-162). Same
+   * addressing and refusals as {@link rename}.
+   */
+  setAvatar: (
+    id: string,
+    avatar: ProjectAvatar | null,
+  ) => Promise<ProjectSnapshot>;
   /**
    * Put the account's projects in this order, first to last, by CLOUD ID.
    *

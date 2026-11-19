@@ -7,6 +7,10 @@ import {
   stripUserinfo,
 } from "@lanework/contracts";
 import {
+  type ProjectAvatar,
+  parseProjectAvatar,
+} from "../../../shared/project-avatar";
+import {
   type BoardActivity,
   type BoardActivityPage,
   type BoardAssignees,
@@ -100,6 +104,11 @@ export function parseProjects(value: unknown): Project[] {
       // Absent from a service older than BE-18; anything but a string is no
       // icon, never a refusal.
       ...(text(row.iconKey) ? { iconKey: row.iconKey } : {}),
+      // FE-162: absent from a service that does not store one; a value this
+      // build cannot read is no avatar, never a refused list.
+      ...(row.avatar !== undefined
+        ? { avatar: parseProjectAvatar(row.avatar) }
+        : {}),
     };
   });
 }
@@ -1776,6 +1785,36 @@ export async function renameProject(
   if (!response.ok)
     throw new Error(
       `Could not rename that project (HTTP ${response.status}). Try again.`,
+    );
+}
+
+/**
+ * Set a project's avatar, or null for its default mark (FE-162), on the same
+ * route as {@link renameProject}.
+ *
+ * A 400 from a service that does not know the field yet (BE-32 on board
+ * fuongz/lanework) says so, rather than reading as a bad avatar.
+ */
+export async function setProjectAvatar(
+  record: MachineRecord,
+  id: string,
+  avatar: ProjectAvatar | null,
+): Promise<void> {
+  const response = await call(record, paths.syncWorkspaceById(id), {
+    method: "PATCH",
+    body: JSON.stringify({ avatar }),
+  });
+  if (response.status === 404)
+    throw new Error(
+      "That project is no longer on your account. Refresh to see what is left.",
+    );
+  if (response.status === 400)
+    throw new Error(
+      "The Lanework service does not take project avatars yet. Try again after it updates.",
+    );
+  if (!response.ok)
+    throw new Error(
+      `Could not change that project's avatar (HTTP ${response.status}). Try again.`,
     );
 }
 

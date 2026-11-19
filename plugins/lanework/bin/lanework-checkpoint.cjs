@@ -55,18 +55,165 @@ var import_node_crypto5 = require("node:crypto");
 var import_node_fs6 = require("node:fs");
 var import_node_os6 = require("node:os");
 var import_node_path9 = require("node:path");
-// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/auth.ts
+// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/auth.ts
 var LOOPBACK_CALLBACK_PATH = "/oauth/callback";
-// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/boards.ts
+// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/avatar.ts
+var PROJECT_AVATAR_COLORS = [
+  "slate",
+  "red",
+  "orange",
+  "amber",
+  "green",
+  "teal",
+  "sky",
+  "blue",
+  "violet",
+  "pink",
+  "sunset",
+  "ocean",
+  "forest",
+  "candy",
+  "dusk",
+  "aurora"
+];
+var PROJECT_AVATAR_ICONS = [
+  "Rocket01Icon",
+  "SourceCodeIcon",
+  "ComputerTerminal01Icon",
+  "GitBranchIcon",
+  "Bug01Icon",
+  "Database01Icon",
+  "ServerStack01Icon",
+  "CloudIcon",
+  "Globe02Icon",
+  "Link01Icon",
+  "Layers01Icon",
+  "Package01Icon",
+  "DashboardSquare01Icon",
+  "Settings01Icon",
+  "Wrench01Icon",
+  "Shield01Icon",
+  "LockIcon",
+  "Robot01Icon",
+  "AiBrain01Icon",
+  "SparklesIcon",
+  "MagicWand01Icon",
+  "Briefcase01Icon",
+  "Analytics01Icon",
+  "ChartLineData01Icon",
+  "Wallet01Icon",
+  "CreditCardIcon",
+  "ShoppingCart01Icon",
+  "ShoppingBag01Icon",
+  "Store01Icon",
+  "Target02Icon",
+  "Flag01Icon",
+  "Award01Icon",
+  "Mail01Icon",
+  "BubbleChatIcon",
+  "Notification01Icon",
+  "Calendar03Icon",
+  "Clock01Icon",
+  "Folder01Icon",
+  "File01Icon",
+  "Book02Icon",
+  "School01Icon",
+  "PencilEdit01Icon",
+  "Home01Icon",
+  "UserIcon",
+  "UserGroupIcon",
+  "Location01Icon",
+  "Compass01Icon",
+  "Car01Icon",
+  "Airplane01Icon",
+  "AnchorIcon",
+  "PaintBoardIcon",
+  "ColorsIcon",
+  "Image01Icon",
+  "Camera01Icon",
+  "MusicNote01Icon",
+  "HeadphonesIcon",
+  "GameController01Icon",
+  "PuzzleIcon",
+  "Atom01Icon",
+  "TestTube01Icon",
+  "Idea01Icon",
+  "Sun01Icon",
+  "Moon02Icon",
+  "FlashIcon",
+  "FireIcon",
+  "Leaf01Icon",
+  "Plant01Icon",
+  "Tree01Icon",
+  "Coffee01Icon",
+  "Pizza01Icon",
+  "BirthdayCakeIcon",
+  "GiftIcon",
+  "Diamond01Icon",
+  "CrownIcon",
+  "StarIcon",
+  "FavouriteIcon",
+  "SmileIcon"
+];
+var COLORS = new Set(PROJECT_AVATAR_COLORS);
+var ICONS = new Set(PROJECT_AVATAR_ICONS);
+var GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+var CONTROL = /\p{Cc}|\p{Cf}/u;
+var EMOJI = /\p{Extended_Pictographic}|\p{Regional_Indicator}|⃣/u;
+function graphemes(text) {
+  return Array.from(GRAPHEMES.segment(text), (s) => s.segment);
+}
+function isObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function parseProjectAvatar(value) {
+  if (!isObject(value))
+    return null;
+  const { kind, color } = value;
+  if (typeof color !== "string" || !COLORS.has(color))
+    return null;
+  const c = color;
+  switch (kind) {
+    case "letter": {
+      const { text } = value;
+      if (typeof text !== "string" || text.trim() !== text)
+        return null;
+      if (CONTROL.test(text))
+        return null;
+      const n = graphemes(text).length;
+      if (n < 1 || n > 2)
+        return null;
+      return { kind, text, color: c };
+    }
+    case "emoji": {
+      const { emoji } = value;
+      if (typeof emoji !== "string")
+        return null;
+      const g = graphemes(emoji);
+      if (g.length !== 1 || !EMOJI.test(emoji))
+        return null;
+      return { kind, emoji, color: c };
+    }
+    case "icon": {
+      const { icon } = value;
+      if (typeof icon !== "string" || !ICONS.has(icon))
+        return null;
+      return { kind, icon, color: c };
+    }
+    default:
+      return null;
+  }
+}
+// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/boards.ts
 var WORK_ITEM_TYPES = ["epic", "issue", "task"];
 var PRIORITIES = ["low", "medium", "high"];
 var CHECKLIST_SECTIONS = ["decisions", "verify"];
 var STREAM_ROLES = ["research", "implement", "test"];
 var STREAM_ISOLATIONS = ["worktree", "shared"];
-// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/checkpoints.ts
+// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/checkpoints.ts
 var CHECKPOINTS_KEPT = 5;
 var CHECKPOINT_MAX_BYTES = 16 * 1024;
-// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/common.ts
+// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/common.ts
 var DEFAULT_API_ORIGIN = "https://api.lanework.dev";
 var AGENT_HEADER = "x-lanework-agent";
 var TOKEN_PREFIXES = {
@@ -94,7 +241,7 @@ function stripUserinfo(remote) {
     return value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/]*@/i, "$1");
   }
 }
-// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/endpoints.ts
+// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/endpoints.ts
 function seg(value) {
   if (value === "" || value === "." || value === "..")
     throw new Error(`Refusing the path segment ${JSON.stringify(value)}.`);
@@ -144,7 +291,7 @@ function withQuery(path, query) {
   const text = query === undefined ? "" : String(query);
   return text ? `${path}?${text}` : path;
 }
-// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/tools/control.ts
+// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/tools/control.ts
 var CONTROL_TOOL_LIMITS = {
   TITLE_MAX: 160,
   PROMPT_MAX: 30000,
@@ -170,7 +317,7 @@ var SCOPES = {
   type: "string[]",
   description: `The write scope: at most ${L.FILES_MAX} project-relative paths; a directory covers what is under it, ["."] the whole checkout, [] edits no file`
 };
-// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/tools/board.ts
+// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/tools/board.ts
 var BOARD_ID = {
   type: "string",
   description: "Workspace id of the board, from `list_boards`."
@@ -549,7 +696,7 @@ var BOARD_TOOLS = [
   }
 ];
 
-// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/tools/kit.ts
+// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/tools/kit.ts
 var KIT_TOOL_LIMITS = {
   find_files: { default: 50, max: 200 },
   search_text: { default: 50, max: 200 },
@@ -666,7 +813,7 @@ var KIT_TOOLS = [
     required: ["query"]
   }
 ];
-// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/tools/instructions.ts
+// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/tools/instructions.ts
 var INTRO = "lanework is a Kanban board for AI-driven development. A card is a " + "review checklist: decisions to approve, then verify steps to prove. ";
 var FIND_BOARD = "Every tool needs a board_id and there is no default. A conversation " + "the Lanework app started is told its board_id when it starts: use that " + "one. Otherwise run `git remote get-url origin` and call " + "list_boards({ repo }) with the output as is. Exactly one board: use it. ";
 var NO_BOARD = "None: list_boards without repo and ask which board this repo belongs to, " + "offering also a new one (suggest `owner/name` from the remote); then " + "link_repo their pick, or create_board only if they asked. Linking a board " + "that has another repo MOVES the link. Several, or no remote: ask. Never " + "pick a board by its name. ";
@@ -682,7 +829,7 @@ var RUN_STREAMS = "A card with streams comes back from get_review with dispatch 
 var REVIEW_SHORT = "To review a card with the user: get_review it and ask with your option " + "picker, one single-select question per pick-ONE group (recommended " + "first) and the other decisions as multi-select, at most 4 questions a " + "turn; then call review_card ONCE with exactly what they picked (unpicked " + "offered boxes false, Other text as the note). Never tick a decision they " + "did not pick. Work starts only once it answers ready: true.";
 var BOARD_INSTRUCTIONS = INTRO + FIND_BOARD + NO_BOARD + NEW_CARD + REVIEW_GATE + CHECKPOINT_FLOW + STALE + HAND_OFF + WRITE_STREAMS + RUN_STREAMS + REVIEW_SHORT;
 var BOARD_WORKER_INSTRUCTIONS = INTRO + "This connection serves only the tools for working an existing card; " + "creating, linking or reviewing cards needs the full lanework server. " + FIND_BOARD + "None, several, or no git remote: ask the user. Never pick a board by " + "its name. Do not start a card still in todo with decisions unticked. " + CHECKPOINT_FLOW + HAND_OFF + RUN_STREAMS.trimEnd();
-// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/tools/outputs.ts
+// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/tools/outputs.ts
 var str = { kind: "string" };
 var num = { kind: "number" };
 var bool = { kind: "boolean" };
@@ -866,7 +1013,7 @@ var BOARD_TOOL_OUTPUT_SHAPES = {
     review: list(obj({ ...CARD_REF_FIELDS, columnKey: str }))
   })
 };
-// node_modules/.bun/@lanework+contracts@0.4.1/node_modules/@lanework/contracts/src/tools/schema.ts
+// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/tools/schema.ts
 function paramSchema(param) {
   const described = (schema) => param.description ? { ...schema, description: param.description } : schema;
   switch (param.type) {
@@ -1732,7 +1879,8 @@ var MIGRATIONS = [
 ];
 var ADDITIVE_COLUMNS = [
   { table: "project_issues", column: "started_at", type: "TEXT" },
-  { table: "project_issues", column: "completed_at", type: "TEXT" }
+  { table: "project_issues", column: "completed_at", type: "TEXT" },
+  { table: "projects", column: "avatar", type: "TEXT" }
 ];
 function hasColumns(db) {
   return ADDITIVE_COLUMNS.every(({ table, column }) => db.prepare(`PRAGMA table_info(${table})`).all().some((row) => row.name === column));
@@ -1772,6 +1920,10 @@ function migrate(db) {
 // apps/desktop/electron/local-store/store.ts
 var import_node_fs = require("node:fs");
 var import_node_path5 = require("node:path");
+
+// apps/desktop/shared/project-avatar.ts
+var PROJECT_AVATAR_SOLIDS = PROJECT_AVATAR_COLORS.slice(0, 10);
+var PROJECT_AVATAR_GRADIENTS = PROJECT_AVATAR_COLORS.slice(10);
 
 // apps/desktop/electron/main/projects/review-defaults.ts
 var DEFAULT_COLUMNS = [
@@ -2249,6 +2401,7 @@ function toProject(row) {
     taskHeads: parseJson(row.task_heads, {}),
     cloudId: row.cloud_id,
     syncedAt: row.synced_at,
+    avatar: row.avatar ? parseProjectAvatar(parseJson(row.avatar, null)) : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     deletedAt: row.deleted_at
@@ -2365,8 +2518,14 @@ class LocalStore {
       const slug = input.slug === undefined ? current.slug : this.#uniqueSlug(slugify(input.slug), current.id);
       const config = input.config ? { ...current.config, ...input.config } : current.config;
       checkConfig(config);
-      this.#run(`UPDATE projects SET name = ?, slug = ?, config = ?, cloud_id = ?, synced_at = ?, updated_at = ?
-         WHERE id = ?`, name, slug, JSON.stringify(config), input.cloudId === undefined ? current.cloudId : input.cloudId, input.syncedAt === undefined ? current.syncedAt : input.syncedAt, this.#now(), current.id);
+      let avatar = current.avatar;
+      if (input.avatar !== undefined) {
+        avatar = input.avatar === null ? null : parseProjectAvatar(input.avatar);
+        if (input.avatar !== null && !avatar)
+          invalid2("that avatar is not one");
+      }
+      this.#run(`UPDATE projects SET name = ?, slug = ?, config = ?, avatar = ?, cloud_id = ?, synced_at = ?, updated_at = ?
+         WHERE id = ?`, name, slug, JSON.stringify(config), avatar ? JSON.stringify(avatar) : null, input.cloudId === undefined ? current.cloudId : input.cloudId, input.syncedAt === undefined ? current.syncedAt : input.syncedAt, this.#now(), current.id);
       return this.#project(current.id);
     });
   }
@@ -2810,7 +2969,7 @@ class InvalidParams extends Error {
     this.name = "InvalidParams";
   }
 }
-var isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var isObject2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 function checkParam(path, param, value) {
   const fail = (expected) => {
     throw new InvalidParams(`${path} must be ${expected}`);
@@ -2843,11 +3002,11 @@ function checkParam(path, param, value) {
         fail("a string or null");
       return value;
     case "string-map":
-      if (!isObject(value) || Object.values(value).some((v) => v !== null && typeof v !== "string"))
+      if (!isObject2(value) || Object.values(value).some((v) => v !== null && typeof v !== "string"))
         fail("an object of strings (or null)");
       return value;
     case "object":
-      if (!isObject(value))
+      if (!isObject2(value))
         fail("an object");
       return checkShape(param, value, `${path}.`);
     case "object[]": {
@@ -2857,7 +3016,7 @@ function checkParam(path, param, value) {
       if (param.minItems && list.length < param.minItems)
         fail(`a list of at least ${param.minItems}`);
       return list.map((entry, index) => {
-        if (!isObject(entry))
+        if (!isObject2(entry))
           fail(`a list of objects (item ${index})`);
         return checkShape(param, entry, `${path}[${index}].`);
       });
@@ -2866,7 +3025,7 @@ function checkParam(path, param, value) {
 }
 function checkShape(shape, args, prefix = "") {
   const input = args === undefined || args === null ? {} : args;
-  if (!isObject(input))
+  if (!isObject2(input))
     throw new InvalidParams("arguments must be an object");
   const out = {};
   for (const name of shape.required ?? [])

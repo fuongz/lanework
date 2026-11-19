@@ -92,6 +92,7 @@ export function toProject(
     // Moved only once the upload was sealed. A cloud id with no `syncedAt` is
     // a sync that stopped half way: the local board is still the real one.
     movedTo: project.syncedAt ? project.cloudId : null,
+    avatar: project.avatar,
   };
 }
 

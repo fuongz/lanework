@@ -13,6 +13,7 @@ import type {
   Placement,
   Stream,
 } from "@lanework/contracts";
+import { parseProjectAvatar } from "../../shared/project-avatar";
 import { appHomeDir } from "../main/paths";
 import {
   DEFAULT_CATEGORIES,
@@ -113,6 +114,8 @@ interface ProjectRow {
   task_heads: string;
   cloud_id: string | null;
   synced_at: string | null;
+  /** FE-162; absent until the column is added. */
+  avatar?: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -129,6 +132,10 @@ function toProject(row: ProjectRow): LocalProject {
     taskHeads: parseJson<Record<string, number>>(row.task_heads, {}),
     cloudId: row.cloud_id,
     syncedAt: row.synced_at,
+    // A value this build cannot read is no avatar, never a broken project.
+    avatar: row.avatar
+      ? parseProjectAvatar(parseJson<unknown>(row.avatar, null))
+      : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     deletedAt: row.deleted_at,
@@ -329,12 +336,19 @@ export class LocalStore {
         ? { ...current.config, ...input.config }
         : current.config;
       checkConfig(config);
+      let avatar = current.avatar;
+      if (input.avatar !== undefined) {
+        avatar =
+          input.avatar === null ? null : parseProjectAvatar(input.avatar);
+        if (input.avatar !== null && !avatar) invalid("that avatar is not one");
+      }
       this.#run(
-        `UPDATE projects SET name = ?, slug = ?, config = ?, cloud_id = ?, synced_at = ?, updated_at = ?
+        `UPDATE projects SET name = ?, slug = ?, config = ?, avatar = ?, cloud_id = ?, synced_at = ?, updated_at = ?
          WHERE id = ?`,
         name,
         slug,
         JSON.stringify(config),
+        avatar ? JSON.stringify(avatar) : null,
         input.cloudId === undefined ? current.cloudId : input.cloudId,
         input.syncedAt === undefined ? current.syncedAt : input.syncedAt,
         this.#now(),

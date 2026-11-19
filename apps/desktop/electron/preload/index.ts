@@ -837,6 +837,8 @@ const projects: DesktopProjectsApi = {
   // shape, so only the service, not anything here, would catch a mix-up.
   rename: (id, name) =>
     ipcRenderer.invoke(projectChannels.renameProject, id, name),
+  setAvatar: (id, avatar) =>
+    ipcRenderer.invoke(projectChannels.setProjectAvatar, id, avatar),
   reorder: (ids) => ipcRenderer.invoke(projectChannels.reorderProjects, ids),
   // NOTE: By ID for the service and by SLUG for this machine, and both must
   // travel. The machine surface deletes by cloud id (it refuses a slug with

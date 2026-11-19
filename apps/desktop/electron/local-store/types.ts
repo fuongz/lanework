@@ -10,6 +10,7 @@ import type {
   TagPolicy,
   WorkItemType,
 } from "@lanework/contracts";
+import type { ProjectAvatar } from "../../shared/project-avatar";
 
 /**
  * What a local board is configured with.
@@ -35,6 +36,8 @@ export interface LocalProject {
   taskHeads: Record<string, number>;
   cloudId: string | null;
   syncedAt: IsoDate | null;
+  /** The chosen avatar (FE-162), or null for the default mark. */
+  avatar: ProjectAvatar | null;
   createdAt: IsoDate;
   updatedAt: IsoDate;
   deletedAt: IsoDate | null;
@@ -51,6 +54,8 @@ export interface ProjectCreateInput {
 
 export interface ProjectUpdateInput {
   name?: string;
+  /** null clears it. */
+  avatar?: ProjectAvatar | null;
   slug?: string;
   config?: Partial<LocalBoardConfig>;
   cloudId?: string | null;
