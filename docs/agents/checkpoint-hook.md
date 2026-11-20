@@ -79,9 +79,12 @@ Without the app, Claude Code users install the plugin from
 `/plugin marketplace add lanework-dev/plugins`, `/plugin install lanework@lanework`,
 then `! lanework login`. Its bundle, `plugins/lanework/bin/lanework-checkpoint.cjs`,
 is committed there and built from this repo's `apps/desktop/electron/hook/`.
-After changing the hook, commit here, then run `bun run build:plugin` (it
-writes into a clone of the plugins repo: `--out <dir>`, `LANEWORK_PLUGINS_DIR`,
-or `../lanework-dev/plugins`) and commit the bundle and `build.json` there.
+Each push to main runs `.github/workflows/plugin-sync.yml`: it rebuilds the
+bundle and, when it changed, opens or refreshes the `sync/hook` PR there with
+the bundle, `build.json` and a patch bump of the plugin's version (secret
+`PLUGINS_SYNC_TOKEN` in the `plugin-sync` environment). By hand: `bun run build:plugin` writes into a clone of
+the plugins repo (`--out <dir>`, `LANEWORK_PLUGINS_DIR`, or
+`../lanework-dev/plugins`); commit the bundle and `build.json` there.
 `build.json` names the commit here it came from; the plugins repo's CI
 rebuilds from that commit and fails on any difference. This repo carries no
 copy of the hook of its own — two installs would checkpoint every turn twice.

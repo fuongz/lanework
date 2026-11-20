@@ -1,0 +1,94 @@
+# INF-12/D1: keep lanework-dev/plugins' hook bundle in step with this repo.
+#
+# On every push to main, rebuild plugins/lanework/bin/lanework-checkpoint.cjs
+# from apps/desktop/electron/hook/ (scripts/build-plugin.mjs). When the bundle
+# changed, open (or refresh) one pull request in lanework-dev/plugins with the
+# bundle, build.json and a patch bump of the plugin's version. A push that
+# leaves the bundle as it was does nothing, so docs-only commits make no PR.
+#
+# Needs PLUGINS_SYNC_TOKEN in the `plugin-sync` environment (deploys from main
+# only): a fine-grained token with access to lanework-dev/plugins only,
+# Contents and Pull requests read/write.
+# It runs on push to main only, never on a pull request, so a fork never sees
+# the token.
+name: plugin-sync
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plugin-sync
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    name: sync
+    # The token lives in this environment only, which deploys from main only.
+    environment: plugin-sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          path: source
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          repository: lanework-dev/plugins
+          path: plugins
+          token: ${{ secrets.PLUGINS_SYNC_TOKEN }}
+      # Exactly the bun in package.json `packageManager`: build-plugin.mjs
+      # refuses any other, and the plugins repo's check rebuilds on it.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+      # The hook needs only its own imports; no install scripts, so no
+      # Electron download.
+      - run: bun install --frozen-lockfile --ignore-scripts
+        working-directory: source
+      - run: node scripts/build-plugin.mjs --out "$GITHUB_WORKSPACE/plugins"
+        working-directory: source
+      - name: Open a pull request when the bundle changed
+        working-directory: plugins
+        env:
+          GH_TOKEN: ${{ secrets.PLUGINS_SYNC_TOKEN }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          if git diff --quiet -- plugins/lanework/bin; then
+            echo "Bundle unchanged; nothing to sync."
+            exit 0
+          fi
+          short="${SOURCE_SHA:0:7}"
+          manifest=plugins/lanework/.claude-plugin/plugin.json
+          version=$(jq -r .version "$manifest")
+          next=$(echo "$version" | awk -F. '{ printf "%d.%d.%d", $1, $2, $3 + 1 }')
+          jq --arg v "$next" '.version = $v' "$manifest" > "$RUNNER_TEMP/plugin.json"
+          mv "$RUNNER_TEMP/plugin.json" "$manifest"
+
+          branch=sync/hook
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$branch"
+          git add plugins/lanework/bin plugins/lanework/build.json "$manifest"
+          git commit -q -F - <<EOF
+          build(lanework): rebuild the hook, v$next
+
+          Built from fuongz/lanework@$short.
+          EOF
+          git push -f origin "$branch"
+
+          title="build(lanework): rebuild the hook from fuongz/lanework@$short"
+          body="Rebuilt by fuongz/lanework's plugin-sync workflow from https://github.com/fuongz/lanework/commit/$SOURCE_SHA. Bumps the plugin to v$next. The check workflow rebuilds from build.json and must pass before merging."
+          if gh pr view "$branch" --json state -q .state 2>/dev/null | grep -q OPEN; then
+            gh pr edit "$branch" --title "$title" --body "$body"
+          else
+            gh pr create --base main --head "$branch" --title "$title" --body "$body"
+          fi
