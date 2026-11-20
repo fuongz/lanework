@@ -24,6 +24,10 @@ const MINIMUM = [2, 0, 15] as const;
 export const OPENCODE_TOO_OLD =
   "Chat needs OpenCode 2.0.15 or newer. Update it in Settings › Harness.";
 
+/** What `service` throws when asked not to start a service that is down. */
+export const OPENCODE_NOT_RUNNING =
+  "OpenCode's background service is not running.";
+
 /** How long a found service is trusted before the CLI is asked again. */
 const TTL_MS = 5 * 60_000;
 /** How long one `opencode` command may take. */
@@ -108,7 +112,7 @@ export function createOpenCodeService(
   let cached: { at: number; service: OpenCodeService } | null = null;
   let running: Promise<OpenCodeService> | null = null;
 
-  async function find(): Promise<OpenCodeService> {
+  async function find(start: boolean): Promise<OpenCodeService> {
     const binary = await cli();
     const version = parseOpenCodeVersion(await exec(binary, ["--version"]));
     if (!version || !isSupportedOpenCode(version))
@@ -116,6 +120,7 @@ export function createOpenCodeService(
     let url = parseServiceUrl(
       await exec(binary, ["service", "status"]).catch(() => ""),
     );
+    if (!url && !start) throw new Error(OPENCODE_NOT_RUNNING);
     if (!url) {
       url = parseServiceUrl(await exec(binary, ["service", "start"]));
       url ??= parseServiceUrl(await exec(binary, ["service", "status"]));
@@ -136,10 +141,20 @@ export function createOpenCodeService(
      *
      * @throws When OpenCode is missing, too old, or its service cannot start.
      */
-    async service(fresh = false): Promise<OpenCodeService> {
+    async service(
+      fresh = false,
+      { start = true }: { start?: boolean } = {},
+    ): Promise<OpenCodeService> {
       if (!fresh && cached && Date.now() - cached.at < TTL_MS)
         return cached.service;
-      running ??= find().finally(() => {
+      // NOTE: A read that may not start the service does not share a find
+      // that may: it would start it after all.
+      if (!start) {
+        const service = await find(false);
+        cached = { at: Date.now(), service };
+        return service;
+      }
+      running ??= find(true).finally(() => {
         running = null;
       });
       const service = await running;
@@ -154,3 +169,25 @@ export function createOpenCodeService(
 }
 
 export type OpenCodeServices = ReturnType<typeof createOpenCodeService>;
+
+/**
+ * OpenCode's models as `opencode models --standalone` lists them: a private
+ * server that exits with the command, so nothing stays in memory after.
+ *
+ * NOTE: Only for when the background service is down. Listing models must
+ * not start it: it is a ~300 MB process that stays after Lanework quits, and
+ * reading the model menu once started it on every launch.
+ *
+ * @returns `provider/model` ids, in the CLI's order.
+ */
+export async function listOpenCodeModelIds(
+  cli: () => Promise<ClaudeCli>,
+  exec: Exec = run,
+): Promise<string[]> {
+  const output = await exec(await cli(), ["models", "--standalone"]);
+  return output
+    .replace(ANSI, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^[A-Za-z0-9._-]+\/[^\s]+$/.test(line));
+}

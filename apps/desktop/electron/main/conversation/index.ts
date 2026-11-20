@@ -157,8 +157,11 @@ import {
   localMcpFor,
 } from "./mcp-binding";
 import { openCodeClient } from "./opencode-client";
-import { createOpenCodeModels } from "./opencode-models";
-import { createOpenCodeService } from "./opencode-service";
+import { createOpenCodeModels, openCodeModelsOfIds } from "./opencode-models";
+import {
+  createOpenCodeService,
+  listOpenCodeModelIds,
+} from "./opencode-service";
 import {
   isOpenCodeConversation,
   readOpenCodeConversation,
@@ -1089,18 +1092,19 @@ export function registerConversation(
   };
   // FE-104: OpenCode's models are its service's. Found through the user's
   // own `opencode`; LANEWORK_OPENCODE_BIN is the test seam.
-  const opencode = createOpenCodeService(
-    createAgentCli("opencode", () =>
-      testing ? process.env.LANEWORK_OPENCODE_BIN : undefined,
-    ),
+  const opencodeCli = createAgentCli("opencode", () =>
+    testing ? process.env.LANEWORK_OPENCODE_BIN : undefined,
   );
+  const opencode = createOpenCodeService(opencodeCli);
   // Go puts OpenCode Go's models first: the subscription the user pays for.
   // The account signed in on opencode.ai has it when the service's limits
   // name `go` (it has no key of its own, FE-105); else a Go key. Only the
   // real home's counts, as for the usage it gates.
   const realHome = () => agentHomeDir() === homedir();
   const readOpenCodeModels = createOpenCodeModels(
-    async () => openCodeClient(await opencode.service(), null),
+    // NOTE: Never started for the menu: only a chat on OpenCode starts it.
+    async () =>
+      openCodeClient(await opencode.service(false, { start: false }), null),
     async (client) => {
       if (!realHome()) return false;
       const limits = await client
@@ -1111,6 +1115,9 @@ export function registerConversation(
         await opencodeGoKey(opencodeDataDir(agentHomeDir(), process.env, true)),
       );
     },
+    30_000,
+    // Its service down: the ids from a private server that exits at once.
+    async () => openCodeModelsOfIds(await listOpenCodeModelIds(opencodeCli)),
   );
   const opencodeModels = async (fresh = false): Promise<AgentModel[]> => {
     const models = await readOpenCodeModels(fresh);

@@ -218,20 +218,38 @@ export function createOpenCodeModels(
   /** Whether the user has OpenCode Go, asked with the same client. */
   hasGo: (client: OpenCodeClient) => Promise<boolean> = async () => false,
   maxAgeMs = 30_000,
+  /**
+   * The models when `connect` fails (the background service is down), read
+   * without starting it; none by default.
+   */
+  offline: () => Promise<AgentModel[]> = async () => [],
+  /** How long an offline list is kept: it costs a private server each time. */
+  offlineMaxAgeMs = 10 * 60_000,
 ) {
-  let cached: { at: number; models: AgentModel[] } | null = null;
+  let cached: { at: number; models: AgentModel[]; offline: boolean } | null =
+    null;
   let running: Promise<AgentModel[]> | null = null;
   return async function opencodeModels(fresh = false): Promise<AgentModel[]> {
-    if (!fresh && cached && Date.now() - cached.at < maxAgeMs)
-      return cached.models;
+    const age = cached?.offline ? offlineMaxAgeMs : maxAgeMs;
+    if (!fresh && cached && Date.now() - cached.at < age) return cached.models;
     running ??= connect()
-      .then(async (client) =>
-        readOpenCodeModels(client, await hasGo(client).catch(() => false)),
-      )
-      // A failed read keeps what the last one found.
-      .catch(() => cached?.models ?? [])
-      .then((models) => {
-        cached = { at: Date.now(), models };
+      .then(async (client) => ({
+        models: await readOpenCodeModels(
+          client,
+          await hasGo(client).catch(() => false),
+        ),
+        offline: false,
+      }))
+      .catch(async () => {
+        const models = await offline().catch(() => []);
+        // A failed read keeps what the last one found.
+        return {
+          models: models.length ? models : (cached?.models ?? []),
+          offline: true,
+        };
+      })
+      .then(({ models, offline: wasOffline }) => {
+        cached = { at: Date.now(), models, offline: wasOffline };
         return models;
       })
       .finally(() => {
@@ -239,4 +257,26 @@ export function createOpenCodeModels(
       });
     return running;
   };
+}
+
+/**
+ * The model menu's entries for `provider/model` ids alone: what the CLI lists
+ * without its background service. No names, variants or Go order: those need
+ * the service, and come back once it runs.
+ */
+export function openCodeModelsOfIds(ids: readonly string[]): AgentModel[] {
+  const seen = new Set<string>();
+  const out: AgentModel[] = [];
+  for (const id of ids) {
+    const slash = id.indexOf("/");
+    if (slash <= 0 || !OPENCODE_MODEL_ID.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push({
+      id,
+      label: id.slice(slash + 1).slice(0, 60),
+      agent: "opencode",
+      group: id.slice(0, slash).slice(0, 40),
+    });
+  }
+  return out;
 }
