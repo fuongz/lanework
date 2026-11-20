@@ -59,10 +59,11 @@ after(() => {
 const SHIM = "/Users/me/.lanew/bin/lanework-mcp";
 
 describe("lanework MCP entry", () => {
-  test("a shim of ours is stale only in a temp home, or when it is gone", () => {
+  test("a shim of ours is stale in a temp home, or when it is gone", () => {
     // This app's own shim, a test run's, one whose home is gone, and
-    // something else entirely. One still on disk outside a temp folder (a dev
-    // build's) is not stale, but a test cannot make one without a real home.
+    // something else entirely. One still on disk outside a temp folder is
+    // stale only when the app wrote it under a home not named `.lanew…`, but
+    // a test cannot make one without a real home.
     assert.equal(isStaleShim(SHIM, SHIM), false);
     assert.equal(
       isStaleShim("/tmp/lw-verify/home/bin/lanework-mcp", SHIM),

@@ -19,7 +19,7 @@
 // Electron-free, so a spec can drive it against a fake home. The paths come
 // from `agentHome`, which follows `$CLAUDE_CONFIG_DIR` and `$CODEX_HOME` (the
 // variables every test launch sets); the app home follows `LANEWORK_HOME`.
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
@@ -334,22 +334,46 @@ function modeOf(
  * meant.
  *
  * That is the offline server's `<home>/bin/lanework-mcp`, but from ANOTHER app
- * home that is a temp folder (a test or verification run's `LANEWORK_HOME`)
- * or is gone. A stale one is ours to fix: it points every Claude Code or Codex
+ * home that is a temp folder (a test or verification run's `LANEWORK_HOME`),
+ * is gone, or is no Lanework build's home: a script the app wrote (its header
+ * says so) under a folder not named `.lanew…`, such as an old dev run's
+ * `~/.lw_local/home`. A stale one is ours to fix: it points every agent
  * session at a board nobody uses.
  *
- * NOTE: Only those two. A shim from a home that is still there (a dev
- * build's) is that build's entry and stays the user's, or the two apps would
- * take the entry from each other on every launch.
+ * NOTE: A shim under another live `.lanew…` home (the release's, the
+ * Preview's, a dev build's) is that build's entry and stays, or the builds
+ * would take the entry from each other on every launch.
  */
 export function isStaleShim(command: unknown, shim: string): boolean {
+  return isStaleShimOf(command, shim, "lanework-mcp", MCP_SHIM_HEADER);
+}
+
+/** The header line of the board shim, as {@link buildMcpShim} writes it. */
+const MCP_SHIM_HEADER = "# Lanework's offline MCP server";
+
+/** {@link isStaleShim} for the shim `name` whose script starts `header`. */
+function isStaleShimOf(
+  command: unknown,
+  shim: string,
+  name: string,
+  header: string,
+): boolean {
   if (typeof command !== "string" || command === shim) return false;
-  if (!/[/\\]bin[/\\]lanework-mcp$/.test(command)) return false;
+  const parts = command.split(/[/\\]/);
+  if (parts.at(-1) !== name || parts.at(-2) !== "bin") return false;
   const temp = [tmpdir(), "/tmp", "/private/tmp", "/var/folders"];
-  return (
-    temp.some((dir) => command.startsWith(`${dir}${sep}`)) ||
-    !existsSync(command)
-  );
+  if (temp.some((dir) => command.startsWith(`${dir}${sep}`))) return true;
+  if (!existsSync(command)) return true;
+  return !isOtherAppShim(command, name) && writtenByLanework(command, header);
+}
+
+/** Whether the script at `path` carries the header the app writes. */
+function writtenByLanework(path: string, header: string): boolean {
+  try {
+    return readFileSync(path, "utf8").startsWith(`#!/bin/sh\n${header}`);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -912,16 +936,15 @@ async function writeKitShim(
 }
 
 /**
- * Whether `command` is a kit shim of this app's from another app home that
- * is a temp folder or gone, as {@link isStaleShim} judges the board's.
+ * Whether `command` is a kit shim of this app's that is stale, as
+ * {@link isStaleShim} judges the board's.
  */
 function isStaleKitShim(command: unknown, shim: string): boolean {
-  if (typeof command !== "string" || command === shim) return false;
-  if (!/[/\\]bin[/\\]lanework-kit-mcp$/.test(command)) return false;
-  const temp = [tmpdir(), "/tmp", "/private/tmp", "/var/folders"];
-  return (
-    temp.some((dir) => command.startsWith(`${dir}${sep}`)) ||
-    !existsSync(command)
+  return isStaleShimOf(
+    command,
+    shim,
+    "lanework-kit-mcp",
+    "# Lanework's lanework-kit MCP server",
   );
 }
 
