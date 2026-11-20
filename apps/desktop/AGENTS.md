@@ -6,8 +6,7 @@ review cards and commits.
 
 `bun run gate` (root) runs, in order: `build`, `scripts/audit-electron.mjs`,
 `lint` (Biome with `--error-on-warnings`, then `audit-layout.mjs`,
-`audit-loading.mjs`, `audit-sinks.mjs`), `typecheck` and
-`build-plugin.mjs --check`. CI runs the same command
+`audit-loading.mjs`, `audit-sinks.mjs`) and `typecheck`. CI runs the same command
 (`.github/workflows/gate.yml`).
 
 Details: [process boundaries](../../docs/standards/process-boundaries.md),
@@ -56,7 +55,7 @@ Details: [process boundaries](../../docs/standards/process-boundaries.md),
 | Production is a static Start SPA over `app://lanework`; no server functions without a reviewed design. | Not gated | [Development](../../docs/development.md#runtime-boundaries) |
 | Dev uses port 5175; change Vite, Electron's origin check and the dev launcher together. | Not gated | [Development](../../docs/development.md#run) |
 | TypeScript is strict (`tsconfig.base.json`); renderer and Electron typecheck separately. | `typecheck` | `tsconfig.json`, `tsconfig.node.json` |
-| The committed plugin bundle matches a fresh build on Bun 1.4.4. | `build-plugin.mjs --check` | Root AGENTS.md |
+| The plugin's hook bundle (lanework-dev/plugins) rebuilds from a commit here on Bun 1.4.4. | That repo's CI (`build-plugin.mjs --check`) | Root AGENTS.md |
 | Never commit generated route trees, build output, test profiles or installers. | Not gated | — |
 
 ## Tests

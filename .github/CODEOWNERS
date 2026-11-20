@@ -1,11 +1,8 @@
 # INF-06 (SR-02): code that runs on users' and contributors' machines once
-# merged: the plugin (its committed hook bundle runs after every Claude Code
-# turn) and the marketplace that lists it, the project's Claude Code skills
-# and settings, the hook source, and CI.
+# merged: the project's Claude Code skills and settings, the hook source (the
+# Claude Code plugin in lanework-dev/plugins bundles it), and CI.
 # A change here needs the owner's review; branch protection on main requires
 # code-owner review and the `gate` job.
-/plugins/lanework/ @fuongz
-/.claude-plugin/ @fuongz
 /.claude/ @fuongz
 /apps/desktop/electron/hook/ @fuongz
 # The workflows: the release job signs and notarizes with the maintainer's

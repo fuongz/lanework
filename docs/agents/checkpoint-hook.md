@@ -13,7 +13,7 @@ installed and when it runs.
 | Desktop app, Claude Code (Settings → Agents) | `~/.claude/settings.json` | `Stop`, `PreCompact`, `SessionStart` (matcher `compact`) |
 | Desktop app, Codex | `~/.codex/hooks.json` | `Stop` |
 | Desktop app, OpenCode | `~/.config/opencode/plugins/` | `session.idle` |
-| Plugin, Claude Code (INF-03) | `plugins/lanework/hooks/hooks.json` | `Stop`, `PreCompact`, `SessionStart` (matcher `compact`) |
+| Plugin, Claude Code (INF-03) | `plugins/lanework/hooks/hooks.json` in lanework-dev/plugins | `Stop`, `PreCompact`, `SessionStart` (matcher `compact`) |
 
 Every app entry runs the same command, `'<app home>/hooks/lanework-checkpoint'
 --agent claude-code|codex`. The plugin's hook stands down whenever the app's
@@ -74,12 +74,17 @@ history are never touched.
 
 ## The plugin (INF-03)
 
-Without the app, Claude Code users install the plugin (`plugins/lanework/`):
-`/plugin marketplace add fuongz/lanework`, `/plugin install lanework@lanework`,
+Without the app, Claude Code users install the plugin from
+[lanework-dev/plugins](https://github.com/lanework-dev/plugins):
+`/plugin marketplace add lanework-dev/plugins`, `/plugin install lanework@lanework`,
 then `! lanework login`. Its bundle, `plugins/lanework/bin/lanework-checkpoint.cjs`,
-is committed — rebuild it with `bun run build:plugin` after changing the hook;
-`bun run gate` fails when it is stale. This repo carries no copy of the hook of
-its own — two installs would checkpoint every turn twice.
+is committed there and built from this repo's `apps/desktop/electron/hook/`.
+After changing the hook, commit here, then run `bun run build:plugin` (it
+writes into a clone of the plugins repo: `--out <dir>`, `LANEWORK_PLUGINS_DIR`,
+or `../lanework-dev/plugins`) and commit the bundle and `build.json` there.
+`build.json` names the commit here it came from; the plugins repo's CI
+rebuilds from that commit and fails on any difference. This repo carries no
+copy of the hook of its own — two installs would checkpoint every turn twice.
 
 ## Codex (FE-117/D5)
 

@@ -24,11 +24,13 @@ What only this repo adds:
   (`nextStepFrom` says which): the Stop hook writes after every turn but never
   states a next step. Tick boxes only for what YOU verified.
 - **Checkpoint hook:** Claude Code and Codex checkpoint after every turn
-  through the Stop hook the app installs (**Settings → Agents**) or the plugin
-  (`plugins/lanework/`). Its bundle, `plugins/lanework/bin/lanework-checkpoint.cjs`,
-  is committed: rebuild it with `bun run build:plugin` after changing the hook
-  or anything it imports; `bun run gate` fails when it is stale. This repo
-  carries no copy of the hook. Details: [docs/agents/checkpoint-hook.md](docs/agents/checkpoint-hook.md).
+  through the Stop hook the app installs (**Settings → Agents**) or the Claude
+  Code plugin, which lives in [lanework-dev/plugins](https://github.com/lanework-dev/plugins)
+  and bundles `apps/desktop/electron/hook/`. After changing the hook or
+  anything it imports, commit here, then `bun run build:plugin` writes the
+  bundle into a clone of that repo (`--out`, `LANEWORK_PLUGINS_DIR`, or
+  `../lanework-dev/plugins`) for a commit there. This repo carries no copy of
+  the hook. Details: [docs/agents/checkpoint-hook.md](docs/agents/checkpoint-hook.md).
 - `.agents/reviews/` is gone (BE-09): cards used to be files there; do not
   recreate the folder.
 

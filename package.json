@@ -14,7 +14,7 @@
     "lint": "biome check --error-on-warnings . && node scripts/audit-layout.mjs && node scripts/audit-loading.mjs && node scripts/audit-sinks.mjs",
     "format": "biome check --write .",
     "gate": "bun run gate:public",
-    "gate:public": "bun run build && node apps/desktop/scripts/check-lwk-contract.mjs && bun apps/desktop/scripts/mcp-parity.mjs && node scripts/audit-electron.mjs && node scripts/audit-agents-size.mjs && bun run lint && bun run typecheck && node scripts/build-plugin.mjs --check",
+    "gate:public": "bun run build && node apps/desktop/scripts/check-lwk-contract.mjs && bun apps/desktop/scripts/mcp-parity.mjs && node scripts/audit-electron.mjs && node scripts/audit-agents-size.mjs && bun run lint && bun run typecheck",
     "package": "bun run --cwd apps/desktop package",
     "test": "bun run --cwd apps/desktop test",
     "test:unit": "bun run --cwd apps/desktop test:unit",

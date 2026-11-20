@@ -93,8 +93,7 @@ apps/desktop/
 ├── build/                   # Icons and macOS entitlements
 └── electron-builder.yml     # Packaging, fuses and asar unpacking
 (shared contract: github.com/lanework-dev/contracts, npm @lanework/contracts)
-plugins/lanework/            # Claude Code plugin; bin/ holds the committed hook bundle
-scripts/                     # Gate audits and the plugin build
+scripts/                     # Gate audits and the plugin build (into lanework-dev/plugins)
 docs/standards/              # Layout, loading-state and process-boundary standards
 ```
 

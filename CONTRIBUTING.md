@@ -1,7 +1,9 @@
 # Contributing
 
-Thanks for helping with Lanework. This repository holds the **desktop app**
-and the Claude Code plugin. It is licensed under the
+Thanks for helping with Lanework. This repository holds the **desktop app**.
+The Claude Code plugin lives in
+[lanework-dev/plugins](https://github.com/lanework-dev/plugins), built from
+the hook here. It is licensed under the
 [MIT license](LICENSE); the name and logo are covered by
 [TRADEMARKS.md](TRADEMARKS.md).
 
@@ -15,9 +17,9 @@ only change what lives in this repository.
 ## Run the desktop app
 
 Use Node.js 24 LTS and **exactly Bun 1.4.4**, the version `packageManager`
-in `package.json` pins. The committed plugin bundle is compared byte for byte
-with a fresh build, and bun's bundler output changes between releases, so
-`build:plugin` and the gate refuse any other bun. With mise:
+in `package.json` pins. bun's bundler output changes between releases, and
+the plugin's hook bundle must rebuild byte for byte, so `build:plugin`
+refuses any other bun. With mise:
 `mise use bun@1.4.4`.
 
 ```sh
@@ -43,9 +45,8 @@ bun run gate:public
 ```
 
 It builds the desktop app, runs Biome (a warning fails it) and the layout,
-loading-state and HTML-sink audits, typechecks it, and checks that the
-committed plugin bundle is current (`bun run build:plugin` rebuilds it). It
-needs nothing from the backend.
+loading-state and HTML-sink audits, and typechecks it. It needs nothing from
+the backend.
 
 The same command runs on every pull request (`.github/workflows/gate.yml`),
 together with a gitleaks scan of the full history and a `bun audit` that fails
@@ -53,8 +54,8 @@ only on a critical or high advisory in a package the app ships. CI runs no
 tests. The Electron-free unit tests run with `bun run test:unit`, the
 Playwright suite with `bun run test` after `bun run build`.
 
-Changes under `plugins/lanework/`, `.claude/` and
-`apps/desktop/electron/hook/` run on other people's machines once merged, so
+Changes under `.claude/` and `apps/desktop/electron/hook/` (the plugin
+bundles it) run on other people's machines once merged, so
 they need the code owner's review (`.github/CODEOWNERS`).
 
 Format only the files you changed (`bunx biome check --write <files>`), not

@@ -9,8 +9,7 @@
  * - the main bundle requires node-pty, bundles xterm, or has inputs from the
  *   Stop hook or the offline MCP server (only `hook/redact.ts` is shared);
  * - an output run on Electron's plain Node (`ELECTRON_RUN_AS_NODE`: the hook,
- *   the statusline, the offline MCP, `lanework-control`), or the committed
- *   plugin bundle, imports `electron`;
+ *   the statusline, the offline MCP, `lanework-control`) imports `electron`;
  * - a source file in an Electron-free folder imports `electron`;
  * - a main-process file runs `git` itself instead of through `git/runner.ts`;
  * - `projects/client.ts` builds a `/v1` path by hand.
@@ -22,7 +21,6 @@ import { join, relative, sep } from "node:path";
 
 const APP = "apps/desktop";
 const META = join(APP, "dist/electron-meta.json");
-const PLUGIN = "plugins/lanework/bin/lanework-checkpoint.cjs";
 
 /** The main process's bundle, as the metafile names it (APP-relative). */
 const MAIN = "dist/electron/main/index.cjs";
@@ -107,8 +105,6 @@ for (const name of NODE_OUTPUTS) {
   if (output.imports.some(({ path }) => path === "electron"))
     problems.push(`${name} imports electron, and runs without it`);
 }
-if (/\brequire\(\s*["']electron["']\s*\)/.test(readFileSync(PLUGIN, "utf8")))
-  problems.push(`${PLUGIN} requires electron, and runs on plain Node`);
 
 // Which sources import Electron.
 const electronImporters = Object.entries(meta.inputs)
@@ -159,5 +155,5 @@ if (problems.length) {
   process.exit(1);
 }
 console.log(
-  "\nelectron boundaries OK: main has no pty, xterm, hook or MCP code; the Node outputs and the plugin have no electron",
+  "\nelectron boundaries OK: main has no pty, xterm, hook or MCP code; the Node outputs have no electron",
 );

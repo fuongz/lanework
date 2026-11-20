@@ -40,10 +40,10 @@ Lanework needs at least one agent that is installed and signed in. For example, 
 
 ### Claude Code plugin
 
-Without the app, the plugin brings the board's MCP tools and the checkpoint hook to Claude Code:
+Without the app, the plugin from [lanework-dev/plugins](https://github.com/lanework-dev/plugins) brings the board's MCP tools and the checkpoint hook to Claude Code:
 
 ```text
-/plugin marketplace add fuongz/lanework
+/plugin marketplace add lanework-dev/plugins
 /plugin install lanework@lanework
 ```
 
