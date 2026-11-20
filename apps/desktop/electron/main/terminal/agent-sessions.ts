@@ -227,6 +227,9 @@ export function laneworkCard(line: Line): AgentCard | null {
  *
  * @param aligned `start` is the start of a line; otherwise the first, cut
  *   line is skipped.
+ * @param held Bytes of `file` the caller already has, ending at `end`. They
+ *   spare the read when they cover what is asked; when they cover only its
+ *   newest part, a card found in them is the newest one all the same.
  * @returns The card, and where the whole lines read end: the next read's
  *   `start`.
  */
@@ -235,9 +238,24 @@ export async function lastCardIn(
   start: number,
   end: number,
   aligned: boolean,
+  held?: { start: number; buffer: Buffer | null },
 ): Promise<{ card: AgentCard | null; end: number }> {
   const from = end - start > CARD_SCAN ? end - CARD_SCAN : start;
   const whole = aligned && from === start;
+  // NOTE: A settled write reads the end of the transcript for its state, then
+  // here for its card, and a card is mostly in the last lines: the end the
+  // caller holds is scanned first.
+  if (held?.buffer && held.start + held.buffer.length === end) {
+    if (held.start <= from)
+      return cardIn(
+        held.buffer.subarray(from - held.start),
+        from,
+        whole,
+        start,
+      );
+    const found = cardIn(held.buffer, held.start, false, start);
+    if (found.card) return found;
+  }
   const handle = await open(file, "r");
   let buffer: Buffer;
   try {
@@ -247,6 +265,21 @@ export async function lastCardIn(
   } finally {
     await handle.close();
   }
+  return cardIn(buffer, from, whole, start);
+}
+
+/**
+ * The last card named in `buffer`, which holds `file` from byte `from`.
+ *
+ * @param whole `from` is the start of a line.
+ * @param start Where a read that met no line end goes on from.
+ */
+function cardIn(
+  buffer: Buffer,
+  from: number,
+  whole: boolean,
+  start: number,
+): { card: AgentCard | null; end: number } {
   const last = buffer.lastIndexOf(0x0a);
   if (last === -1) return { card: null, end: whole ? from : start };
   let stop = last;

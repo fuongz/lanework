@@ -37,7 +37,7 @@ const exact = (value: number) => value.toLocaleString("en-US");
  * Claude's `cost-state` is the whole CLI's spend on the conversation (its
  * sub-agents' calls, titles and recaps included), priced as the API would be.
  */
-const COST_NOTE =
+export const COST_NOTE =
   "An estimate at API prices — not what a subscription is billed. It includes this conversation's sub-agents.";
 
 /** Why a Claude total lags its transcript: it is saved now and then. */
@@ -45,7 +45,7 @@ const STALE_NOTE =
   "As Claude last saved it: it saves when it is left or quit, so the turns since are not counted yet.";
 
 /** The context's window and how full it is: Claude's guessed from its model. */
-function contextUse(
+export function contextUse(
   facts: AgentFacts,
 ): { window: number | null; share: number | null; guessed: boolean } | null {
   if (!facts.context) return null;
@@ -143,21 +143,6 @@ function runFacts(facts: AgentFacts): Fact[] {
       title: `Ran ${ran}: the model ${durationText(facts.duration.api)}, tools ${durationText(facts.duration.tools)}${stale}`,
     },
   ];
-}
-
-/**
- * Cost and context in one line, for a rail row's tooltip.
- *
- * @returns null when neither is known.
- */
-export function factsSummary(facts: AgentFacts): string | null {
-  const parts = [
-    facts.costUSD !== null
-      ? `${costText(facts.costUSD)}${facts.stale ? "+" : ""} (API price)`
-      : null,
-    facts.context ? `context ${contextText(facts)}` : null,
-  ].filter(Boolean);
-  return parts.length > 0 ? parts.join("\n") : null;
 }
 
 /**

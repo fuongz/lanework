@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { app, shell } from "electron";
+import { app, shell, type WebContents } from "electron";
 import type {
   SessionAction,
   SessionCall,
@@ -23,36 +23,67 @@ import {
   type AgentModel,
   ANSWER_MAX,
   ANSWERS_MAX,
+  type AssistantTurn,
   type Awaiting,
   agentOfModel,
   allModels,
+  CONVERSATION_PAGE_TURNS_MAX,
+  CONVERSATION_STATUS_MS,
+  CONVERSATION_WINDOW_BYTES,
+  CONVERSATION_WINDOW_TURNS,
   type ComposerSettings,
   type Conversation,
   type ConversationAgent,
   type ConversationEvent,
+  type ConversationFacts,
+  type ConversationHandoffLinks,
+  type ConversationPage,
+  type ConversationReplay,
+  type ConversationSummary,
   type CustomModel,
+  checkSettings,
   conversationChannels,
+  type EarlierProposal,
   type EngineState,
+  type HandoffTurn,
   type ImagePreview,
   isOpenableUrl,
   isPermission,
   type LinkPreview,
+  limitOver,
   type OutgoingAttachment,
   type PermissionAnswer,
   type PermissionRequest,
   type PowerSettings,
   type SendRequest,
   type Suggestion,
+  type SwitchAgentRequest,
   setClaudeModels,
   setCodexModels,
   setCustomModels,
   setOpenCodeModels,
+  type ToolOutput,
   type Turn,
+  type TurnSession,
+  turnBytes,
+  type UsageLimitsState,
+  webSourcesOf,
+  windowStart,
 } from "../../../shared/conversation";
-import { LEAD_REF_PATTERN } from "../../../shared/orchestration";
+import {
+  LEAD_REF_PATTERN,
+  parseTeamLead,
+  type TeamLead,
+} from "../../../shared/orchestration";
+import {
+  deriveProposals,
+  latestReadyProposal,
+  readConductorEnvelope,
+  readEnvelope,
+} from "../../../shared/orchestration-proposals";
 import { isAgentSessionId, isAgentSessionIdOf } from "../../../shared/terminal";
 import { controlCliPath } from "../../control/install";
-import { broadcast, handle } from "../ipc";
+import { broadcast, handle, hearInMain, sendTo, windowContents } from "../ipc";
 import { setLwkMode } from "../lwk-serve";
 import { notify } from "../notifications";
 import {
@@ -62,22 +93,35 @@ import {
   workerFolderOf,
 } from "../orchestration";
 import { setSessionsEnv } from "../orchestration/engine-tap";
-import { createConductor, teamLeadOf } from "../orchestration/leads";
+import {
+  createConductor,
+  onTeamLeadsChanged,
+  teamLeadOf,
+} from "../orchestration/leads";
 import { conductorMemoryFile } from "../paths";
 import { knownProject, terminalFolder } from "../projects";
 import { accountDir, isSlug } from "../projects/store";
 import {
   bindConductorConversation,
   conductorOfConversation,
+  doneLaunching,
+  launcherOfConversation,
+  managerOf,
+  managerOfConversation,
   nameConversation,
+  noteLaunching,
   registerAgentSession,
+  setRailThreads,
+  setSessionUserAccess,
   settleOpencodeSession,
+  threadsChanged,
 } from "../terminal";
 import { opencodeDataDir } from "../terminal/opencode-sessions";
 import {
   opencodeGoKey,
   opencodeServiceUsage,
 } from "../terminal/opencode-usage";
+import { onCodexReset, usageWindowsOf } from "../terminal/usage";
 import { agentHomeDir } from "../test-seams";
 import { markTurnCut } from "../transcripts/activity";
 import { awaitingNotice, createAwaitingLedger } from "./awaiting";
@@ -85,12 +129,24 @@ import { createAgentCli, createClaudeCli } from "./claude-cli";
 import { createClaudeModels } from "./claude-models";
 import { claudeJsonFor, isClaudeTrusted } from "./claude-trust";
 import { createCodexModels } from "./codex-models";
-import { codexRolloutPath, readCodexConversation } from "./codex-transcript";
+import {
+  codexFacts,
+  codexRolloutPath,
+  latestCodexProposal,
+  readCodexConversation,
+} from "./codex-transcript";
 import { ConductorMemoryStore } from "./conductor-memory";
 import { ConductorSessions } from "./conductor-sessions";
 import type { ConductorStopDeps } from "./conductor-stop";
 import { createEngines } from "./engine";
 import { forkConversation } from "./fork";
+import {
+  buildHandoff,
+  type ChainSession,
+  createHandoffStore,
+  handoffBudget,
+  handoffTitle,
+} from "./handoff";
 import { type ImageScope, openableImage, previewImage } from "./image-preview";
 import { createLinkPreviews } from "./link-preview";
 import { claudePidsOn } from "./live-claude";
@@ -117,7 +173,14 @@ import {
   rankCommands,
   suggestFiles,
 } from "./suggest";
-import { readConversation, transcriptPath } from "./transcript";
+import {
+  claudeFacts,
+  latestClaudeProposal,
+  readConversation,
+  readToolOutput,
+  transcriptPath,
+} from "./transcript";
+import { createUsageLimits } from "./usage-limits";
 
 /**
  * How the composer finds and stops a pty running Claude on a conversation.
@@ -179,6 +242,33 @@ function withLive(turns: Turn[], live: Turn[]): Turn[] {
   return [...kept.filter((turn) => !ids.has(turn.id)), ...live];
 }
 
+/** The most team leads one ask for a latest proposal may carry. */
+const PROPOSAL_LEADS_MAX = 256;
+
+/**
+ * The team leads the page sent with an ask for a latest proposal: each
+ * checked as a lead from the page is, and one that fails left out (its
+ * proposal is then checked against the whole catalog, as the card does
+ * while the list is still being read).
+ *
+ * @throws When `value` is not a list.
+ */
+function proposalLeads(value: unknown): TeamLead[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > PROPOSAL_LEADS_MAX)
+    throw new Error("A list of team leads is required");
+  const out: TeamLead[] = [];
+  for (const lead of value) {
+    const source = (lead as { source?: unknown } | null)?.source;
+    try {
+      out.push(parseTeamLead(lead, source === "repo" ? "repo" : "personal"));
+    } catch {
+      // Not a lead this app wrote: never trusted.
+    }
+  }
+  return out;
+}
+
 /** A conductor's sessions, once the conversation view registered. */
 let sessions: ConductorSessions | null = null;
 
@@ -211,6 +301,8 @@ function ready(): Omit<ConductorStopDeps, "runsOf" | "stopRun"> {
 
 /** The most conversations {@link registerConversation} remembers a conductor of. */
 const CONDUCTOR_SEEN_MAX = 256;
+/** The most permission requests remembered as notified to the person. */
+const NOTIFIED_ASKS_MAX = 500;
 
 /**
  * Where conductor `conductorId` keeps its memory of `project` (FE-128): in
@@ -365,6 +457,250 @@ function queuedOf(args: unknown[]): {
   return { project, conversation, message: args[2] };
 }
 
+/**
+ * A `seq` the page sent to replay from: null for none.
+ *
+ * @throws When it is neither null nor a whole number from 0.
+ */
+function afterOf(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
+    throw new Error("A valid seq is required");
+  return value;
+}
+
+/** How many of a conversation's latest events main keeps to replay. */
+const REPLAY_EVENTS = 128;
+/** How many conversations' events are kept; the longest quiet goes first. */
+const REPLAY_CONVERSATIONS = 32;
+
+/** An event as it goes out: numbered. */
+type Numbered = ConversationEvent & { seq: number };
+
+/**
+ * Where conversation events go: in full to the windows subscribed to their
+ * conversation, as status to the others.
+ *
+ * NOTE: Sent to every window, each `delta` and each `turn` (a whole turn,
+ * structured-cloned per line) of every running conversation reaches the
+ * rail and every window on another chat, only to be filtered there. So
+ * only a window whose page shows the conversation (`subscribe`) gets
+ * those; the rest hear its status, which is all the rail, the island and
+ * the stores use ({@link ConversationEvent}).
+ *
+ * NOTE: Each event is numbered per conversation (`seq`) and the last
+ * {@link REPLAY_EVENTS} are kept, so a page that skipped some (it
+ * resubscribed, or one went missing) is sent just those, not the whole
+ * conversation again; past them it reads the conversation anew.
+ */
+function createConversationStream(channel: string) {
+  const keyOf = (project: string, conversation: string) =>
+    `${project}\0${conversation}`;
+  /** Each conversation's last `seq`. Never dropped: a page may still hold one. */
+  const seqs = new Map<string, number>();
+  /** The last events of the most recently active conversations, oldest first. */
+  const rings = new Map<string, Numbered[]>();
+  /** The pages subscribed to each conversation, each with its count. */
+  const subscribed = new Map<string, Map<WebContents, number>>();
+  /** The conversations each page subscribed to, to let go of it at once. */
+  const byPage = new Map<WebContents, Set<string>>();
+  /** The pages main listens to for going away. */
+  const hooked = new WeakSet<WebContents>();
+  /** What waits to go to the windows not subscribed, per conversation. */
+  const pending = new Map<
+    string,
+    {
+      state?: Numbered;
+      moved?: Numbered;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
+  /** The `engine.state` those windows last heard, per conversation. */
+  const heard = new Map<string, EngineState["state"]>();
+
+  const remember = (key: string, event: Numbered) => {
+    const ring = rings.get(key) ?? [];
+    // NOTE: Re-set, so the Map's order stays most recently active last.
+    rings.delete(key);
+    rings.set(key, ring);
+    // NOTE: One whole turn per turn id: each line of a running turn sends
+    // all of it again, and 128 copies of a long turn are megabytes. An
+    // older copy becomes a `moved` under its own `seq`, so the numbers stay
+    // whole; the newest copy, replayed after it, is what the page keeps.
+    if (event.type === "turn")
+      for (let at = 0; at < ring.length; at++) {
+        const old = ring[at];
+        if (old?.type === "turn" && old.turn.id === event.turn.id)
+          ring[at] = {
+            type: "moved",
+            project: old.project,
+            conversation: old.conversation,
+            seq: old.seq,
+          };
+      }
+    ring.push(event);
+    if (ring.length > REPLAY_EVENTS) ring.shift();
+    if (rings.size > REPLAY_CONVERSATIONS)
+      rings.delete(rings.keys().next().value as string);
+  };
+
+  /** Send to every window but those subscribed to `key`. */
+  const toOthers = (key: string, event: Numbered) => {
+    const pages = subscribed.get(key);
+    for (const contents of windowContents())
+      if (!pages?.has(contents)) sendTo(contents, channel, event);
+  };
+
+  /** Send what waits for `key` now, oldest first; `drop` the state waiting. */
+  const flush = (key: string, drop = false) => {
+    const waiting = pending.get(key);
+    if (!waiting) return;
+    pending.delete(key);
+    clearTimeout(waiting.timer);
+    const out = [drop ? undefined : waiting.state, waiting.moved]
+      .filter((event): event is Numbered => event !== undefined)
+      .sort((a, b) => a.seq - b.seq);
+    for (const event of out) toOthers(key, event);
+  };
+
+  const later = (key: string, slot: "state" | "moved", event: Numbered) => {
+    const waiting = pending.get(key);
+    if (waiting) {
+      waiting[slot] = event;
+      return;
+    }
+    pending.set(key, {
+      [slot]: event,
+      timer: setTimeout(() => flush(key), CONVERSATION_STATUS_MS),
+    });
+  };
+
+  /**
+   * The event's status, to the windows not subscribed.
+   *
+   * NOTE: A change of `engine.state` (running to idle, starting, error) and
+   * a permission asked or answered go at once: the rail's dot, the island
+   * and a notification follow them. A `state` that changes only the queue
+   * waits, and so does a summary of `turn`s and `moved`s (a `moved`: read it
+   * again), at most one of each per {@link CONVERSATION_STATUS_MS}. A
+   * `delta` is never status.
+   */
+  const status = (key: string, event: Numbered) => {
+    switch (event.type) {
+      case "delta":
+        return;
+      case "turn":
+      case "moved":
+        later(key, "moved", {
+          type: "moved",
+          project: event.project,
+          conversation: event.conversation,
+          seq: event.seq,
+        });
+        return;
+      case "state":
+        if (heard.get(key) === event.engine.state) {
+          later(key, "state", event);
+          return;
+        }
+        heard.set(key, event.engine.state);
+        // The state waiting is older than this one: dropped, not sent.
+        flush(key, true);
+        toOthers(key, event);
+        return;
+      default:
+        flush(key);
+        toOthers(key, event);
+    }
+  };
+
+  /** Main's `seq` for `key`, and the events after `after` when it has them. */
+  const replayOf = (key: string, after: number | null): ConversationReplay => {
+    const seq = seqs.get(key) ?? 0;
+    if (after === null || after > seq) return { seq, events: null };
+    if (after === seq) return { seq, events: [] };
+    const ring = rings.get(key) ?? [];
+    const first = ring[0]?.seq;
+    if (first === undefined || first > after + 1) return { seq, events: null };
+    return { seq, events: ring.filter((event) => event.seq > after) };
+  };
+
+  /** Let go of everything `contents` subscribed to. */
+  const forget = (contents: WebContents) => {
+    const keys = byPage.get(contents);
+    byPage.delete(contents);
+    for (const key of keys ?? []) {
+      const pages = subscribed.get(key);
+      pages?.delete(contents);
+      if (pages?.size === 0) subscribed.delete(key);
+    }
+  };
+
+  const hook = (contents: WebContents) => {
+    if (hooked.has(contents)) return;
+    hooked.add(contents);
+    // NOTE: A page that goes away never unsubscribes: a closed window, a
+    // crashed or reloaded renderer; the new page subscribes for itself.
+    // `did-navigate`, not `did-start-navigation`: the window refuses an
+    // untrusted link in `will-navigate`, after a start was already told,
+    // and the page that stays must keep its subscriptions. In-page
+    // (router) moves are `did-navigate-in-page`.
+    contents.once("destroyed", () => forget(contents));
+    contents.on("render-process-gone", () => forget(contents));
+    contents.on("did-navigate", () => forget(contents));
+  };
+
+  return {
+    /** Number `event`, keep it, and send it where it goes; answers it numbered. */
+    publish(event: ConversationEvent): Numbered {
+      const key = keyOf(event.project, event.conversation);
+      const seq = (seqs.get(key) ?? 0) + 1;
+      seqs.set(key, seq);
+      const numbered = { ...event, seq } as Numbered;
+      remember(key, numbered);
+      hearInMain(channel, numbered);
+      for (const contents of subscribed.get(key)?.keys() ?? [])
+        sendTo(contents, channel, numbered);
+      status(key, numbered);
+      return numbered;
+    },
+    /** The conversation's last `seq`, 0 before its first event. */
+    seq: (project: string, conversation: string): number =>
+      seqs.get(keyOf(project, conversation)) ?? 0,
+    subscribe(
+      contents: WebContents,
+      project: string,
+      conversation: string,
+      after: number | null,
+    ): ConversationReplay {
+      const key = keyOf(project, conversation);
+      const pages = subscribed.get(key) ?? new Map<WebContents, number>();
+      pages.set(contents, (pages.get(contents) ?? 0) + 1);
+      subscribed.set(key, pages);
+      const keys = byPage.get(contents) ?? new Set<string>();
+      keys.add(key);
+      byPage.set(contents, keys);
+      hook(contents);
+      return replayOf(key, after);
+    },
+    unsubscribe(contents: WebContents, project: string, conversation: string) {
+      const key = keyOf(project, conversation);
+      const pages = subscribed.get(key);
+      const count = pages?.get(contents) ?? 0;
+      if (!pages || count === 0) return;
+      if (count > 1) {
+        pages.set(contents, count - 1);
+        return;
+      }
+      pages.delete(contents);
+      if (pages.size === 0) subscribed.delete(key);
+      byPage.get(contents)?.delete(key);
+    },
+    replay: (project: string, conversation: string, after: number | null) =>
+      replayOf(keyOf(project, conversation), after),
+  };
+}
+
 /** A checked request as the message an engine sends, or holds. */
 async function outgoingOf(request: SendRequest): Promise<Outgoing> {
   return {
@@ -374,6 +710,186 @@ async function outgoingOf(request: SendRequest): Promise<Outgoing> {
     content: await contentOf(request.text, request.attachments),
     settings: request.settings,
   };
+}
+
+/**
+ * The proposals planned before each windowed conversation's window, kept
+ * while the turns they were read from are the same objects.
+ *
+ * NOTE: Deriving them reads every reply's text before the window, on every
+ * read. A Claude transcript's turns are its fold's own objects, the same
+ * from one read to the next until a line changes them, so the last turn
+ * before the window and the count tell when the answer still holds. Codex's
+ * and OpenCode's turns are read anew each time and never match.
+ */
+const earlierProposals = new Map<
+  string,
+  {
+    last: Turn;
+    count: number;
+    proposals: EarlierProposal[];
+    anchor: Turn[];
+  }
+>();
+
+/** The most of {@link ConversationSummary.anchor}, by `turnBytes`. */
+const ANCHOR_BYTES = CONVERSATION_WINDOW_BYTES / 4;
+
+/**
+ * The turns proposal `id` is read from in `turns`: its planning turn, any
+ * repair of it, and the replies after each, those with their text only.
+ *
+ * @returns Empty past {@link ANCHOR_BYTES}: its card is then shown once
+ *   paged in, as before.
+ */
+function anchorOf(turns: readonly Turn[], id: string): Turn[] {
+  const out: Turn[] = [];
+  let bytes = 0;
+  for (let at = 0; at < turns.length; at++) {
+    const turn = turns[at];
+    if (turn?.role !== "user") continue;
+    const envelope =
+      readEnvelope(turn.text) ?? readConductorEnvelope(turn.text);
+    if (envelope?.id !== id) continue;
+    out.push(turn);
+    bytes += turnBytes(turn);
+    for (let next = at + 1; next < turns.length; next++) {
+      const reply = turns[next];
+      if (reply?.role !== "assistant") break;
+      // `deriveProposals` reads a reply's text and whether it is open.
+      const slim: Turn = {
+        ...reply,
+        blocks: reply.blocks.filter((block) => block.type === "text"),
+      };
+      out.push(slim);
+      bytes += turnBytes(slim);
+    }
+    if (bytes > ANCHOR_BYTES) return [];
+  }
+  return out;
+}
+const EARLIER_PROPOSALS_MAX = 32;
+
+/**
+ * What a chat holding only `turns[start…]` would miss of the rest: see
+ * {@link ConversationSummary}.
+ */
+function summaryOf(
+  conversation: string,
+  turns: readonly Turn[],
+  start: number,
+): ConversationSummary {
+  let conductorContext: string | null = null;
+  let model: string | null = null;
+  for (let at = turns.length - 1; at >= 0; at--) {
+    const turn = turns[at];
+    if (conductorContext === null && turn?.role === "user")
+      conductorContext = readConductorEnvelope(turn.text)?.context ?? null;
+    else if (model === null && turn?.role === "assistant" && turn.model)
+      model = turn.model;
+    if (conductorContext !== null && model !== null) break;
+  }
+  // A planning turn's replies run up to the next prompt: a window cut by
+  // its size alone may start inside them.
+  let end = start;
+  while (end < turns.length && turns[end]?.role === "assistant") end++;
+  const last = turns[end - 1] as Turn;
+  const known = earlierProposals.get(conversation);
+  let proposals: EarlierProposal[];
+  let anchor: Turn[];
+  if (known && known.last === last && known.count === end) {
+    proposals = known.proposals;
+    anchor = known.anchor;
+  } else {
+    // NOTE: Not working, and no leads: only an id, a title and a place are
+    // kept of each, for its run. The newest goes as its turns too
+    // (`anchor`): it may be the conversation's latest proposal, whose card
+    // the chat draws whole, checked against the page's own leads.
+    const before = turns.slice(0, end);
+    const derived = deriveProposals(before, false);
+    proposals = derived.map((proposal) => ({
+      id: proposal.id,
+      title: proposal.title,
+      afterTurn: proposal.afterTurn,
+    }));
+    const newest = derived.at(-1);
+    // A repair of it inside the window is one the page holds already.
+    anchor = newest ? anchorOf(before, newest.id) : [];
+    earlierProposals.delete(conversation);
+    earlierProposals.set(conversation, {
+      last,
+      count: end,
+      proposals,
+      anchor,
+    });
+    if (earlierProposals.size > EARLIER_PROPOSALS_MAX)
+      earlierProposals.delete(earlierProposals.keys().next().value as string);
+  }
+  return { conductorContext, model, proposals, anchor };
+}
+
+/**
+ * How `read` was asked to read: nothing, or `{ full: true }`.
+ *
+ * @throws When it is something else.
+ */
+function readOptions(value: unknown): { full: boolean } {
+  if (value === undefined || value === null) return { full: false };
+  if (typeof value !== "object" || Array.isArray(value))
+    throw new Error("Valid read options are required");
+  const full = (value as { full?: unknown }).full;
+  if (full !== undefined && typeof full !== "boolean")
+    throw new Error("Valid read options are required");
+  return { full: full === true };
+}
+
+/**
+ * A turn's or a tool call's id as the page sent it.
+ *
+ * @throws When it is not a short string.
+ */
+function turnRef(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    !value ||
+    value.length > 256 ||
+    value.includes("\0")
+  )
+    throw new Error("A valid turn is required");
+  return value;
+}
+
+/**
+ * How many user turns a `readBefore` page may hold.
+ *
+ * @throws When it is neither absent nor a whole number in range.
+ */
+function pageLimit(value: unknown): number {
+  if (value === undefined || value === null) return CONVERSATION_WINDOW_TURNS;
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < 1 ||
+    value > CONVERSATION_PAGE_TURNS_MAX
+  )
+    throw new Error("A valid page size is required");
+  return value;
+}
+
+/**
+ * The tool names `readToolCalls` was asked for.
+ *
+ * @throws When they are not 1 to 32 short strings.
+ */
+function toolNames(value: unknown): Set<string> {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > 32 ||
+    value.some((name) => typeof name !== "string" || !name || name.length > 128)
+  )
+    throw new Error("Valid tool names are required");
+  return new Set(value as string[]);
 }
 
 /**
@@ -434,7 +950,10 @@ async function readAny(folder: string, id: string): Promise<Conversation> {
  *
  * @throws When the arguments are not a conversation and a valid path.
  */
-async function imageScope(args: unknown[]): Promise<{
+async function imageScope(
+  args: unknown[],
+  turnsOf: (project: string, conversation: string) => Promise<Turn[]>,
+): Promise<{
   path: string;
   scope: ImageScope;
 }> {
@@ -450,11 +969,13 @@ async function imageScope(args: unknown[]): Promise<{
   )
     throw new Error("A valid path is required");
   const folder = await folderOf(project);
-  const read = await readAny(folder, conversation).catch(() => null);
-  const attachments = (read?.turns ?? []).flatMap((turn) =>
+  // NOTE: A thread's every session: an image attached before a handoff is
+  // still the conversation's own.
+  const turns = await turnsOf(project, conversation).catch(() => []);
+  const attachments = turns.flatMap((turn) =>
     turn.role === "user"
       ? turn.attachments.flatMap((entry) => (entry.path ? [entry.path] : []))
-      : turn.role === "compaction"
+      : turn.role === "compaction" || turn.role === "handoff"
         ? []
         : turn.blocks.flatMap((block) =>
             block.type === "tools"
@@ -526,6 +1047,14 @@ export function registerConversation(
   const store = createSettingsStore(
     join(app.getPath("userData"), "conversation-settings.json"),
   );
+  // Beside the settings: the links old -> new of every handoff made here.
+  const handoffs = createHandoffStore(
+    join(app.getPath("userData"), "conversation-handoffs.json"),
+  );
+  // Read at once: an event's thread is looked up without waiting
+  // (`placeNow`), and the rail folds threads from what is loaded
+  // (`setRailThreads` below).
+  void handoffs.ready().catch(() => undefined);
   const previews = createLinkPreviews({
     dir: join(app.getPath("userData"), "link-previews"),
   });
@@ -646,8 +1175,165 @@ export function registerConversation(
     const conductor = await conductorNow(project, conversation);
     if (conductor) sawConductor(project, conversation, conductor);
   };
+  const stream = createConversationStream(conversationChannels.event);
+
+  // ─── Threads ──────────────────────────────────────────────────────────────
+  //
+  // NOTE: A thread is the chain head -> ... -> newest of native sessions an
+  // in-place handoff (`switchAgent`) joined. The page names it by its
+  // head's id (the first session's) everywhere; main reads it as all its
+  // sessions stitched in order, and sends, stops, answers and reads the
+  // engine of its NEWEST session. An engine only ever knows its own native
+  // session: the id is swapped at this boundary, on the way in (`threadOf`)
+  // and out (`placeNow`), so nothing below it changes.
+
+  /**
+   * Sessions a `switchAgent` is starting, by native id, before their link
+   * is recorded: their first events already belong to the thread.
+   */
+  const joining = new Map<
+    string,
+    {
+      head: string;
+      session: TurnSession;
+      /** The thread with it, head first, as the rail folds it. */
+      rail: { conversation: string; agent: ConversationAgent }[];
+    }
+  >();
+  // NOTE: A session still joining (its link not written yet) is already
+  // its thread's on the rail: its first prompt may list it before then.
+  setRailThreads({
+    chainOf: (id) => joining.get(id)?.rail ?? handoffs.now.chainOf(id),
+  });
+  /** Threads a `switchAgent` is running on, by head: one at a time. */
+  const switching = new Set<string>();
+  const tagOf = (session: ChainSession): TurnSession => ({
+    conversation: session.conversation,
+    agent: session.agent,
+    model: session.model,
+  });
+
+  /**
+   * Where native session `conversation`'s events go: its thread's head,
+   * whether it is the newest session (only its state is the thread's), and
+   * the tag its turns carry; null for a session in no thread.
+   */
+  const placeNow = (
+    conversation: string,
+  ): { head: string; newest: boolean; session: TurnSession } | null => {
+    const starting = joining.get(conversation);
+    if (starting)
+      return { head: starting.head, newest: true, session: starting.session };
+    const chain = handoffs.now.chainOf(conversation);
+    const at = chain.findIndex((entry) => entry.conversation === conversation);
+    const head = chain[0];
+    const me = chain[at];
+    if (!head || !me) return null;
+    return {
+      head: head.conversation,
+      // While a session joins, the one before it is no longer the newest.
+      newest: at === chain.length - 1 && !switching.has(head.conversation),
+      session: tagOf(me),
+    };
+  };
+
+  /**
+   * `event` as the thread's page hears it: named by the head, its turn
+   * tagged; null for a state of a session that is no longer the newest
+   * (its engine closing must not read as the thread's).
+   */
+  const threadEvent = (event: ConversationEvent): ConversationEvent | null => {
+    if (typeof event.conversation !== "string") return event;
+    const place = placeNow(event.conversation);
+    if (!place) return event;
+    if (event.type === "state" && !place.newest) return null;
+    if (event.type === "turn")
+      return {
+        ...event,
+        conversation: place.head,
+        turn: { ...event.turn, session: place.session },
+      };
+    return { ...event, conversation: place.head };
+  };
+
+  /**
+   * The thread page id `id` names: its head, its newest session, and its
+   * sessions head first (empty for a conversation in no thread, whose head
+   * and newest are `id` itself). Any session's id names its thread.
+   */
+  const threadOf = async (
+    project: string,
+    id: string,
+  ): Promise<{ head: string; newest: string; chain: ChainSession[] }> => {
+    const chain = await handoffs.chainOf(project, id);
+    const head = chain[0]?.conversation ?? id;
+    const newest = chain.at(-1)?.conversation ?? id;
+    return { head, newest, chain };
+  };
+  /** A conversation's address from IPC arguments, named by its newest session. */
+  const nativeOf = async (
+    args: unknown[],
+  ): Promise<{ project: string; conversation: string; head: string }> => {
+    const { project, conversation } = conversationOf(args);
+    const thread = await threadOf(project, conversation);
+    return { project, conversation: thread.newest, head: thread.head };
+  };
+  /**
+   * Refuse the user's own call on a thread a conductor started and did not
+   * let them work in (`sessions.access`). Its head and its newest session
+   * are asked: either one may be the session `sessions.start` marked. One
+   * whose conductor is gone is the user's again (`managerOf`).
+   *
+   * NOTE: The page's IPC only. The conductor's `sessions.send` and every
+   * orchestration path reach the engines without passing here.
+   */
+  const assertUserMayAct = async (thread: {
+    head: string;
+    newest: string;
+  }): Promise<void> => {
+    for (const id of new Set([thread.head, thread.newest])) {
+      if (await managerOfConversation(id))
+        throw new Error(
+          "A conductor manages this session: it takes its instructions from the conductor. Ask the conductor, or ask it to give you access.",
+        );
+    }
+  };
+  /**
+   * As {@link nativeOf}, for a call the user makes on the conversation:
+   * refused on a session a conductor manages ({@link assertUserMayAct}).
+   */
+  const userNativeOf = async (
+    args: unknown[],
+  ): Promise<{ project: string; conversation: string; head: string }> => {
+    const native = await nativeOf(args);
+    await assertUserMayAct({ head: native.head, newest: native.conversation });
+    return native;
+  };
+  /**
+   * The native session `id`'s thread sends to and stops, its newest, for a
+   * call the user makes: refused as {@link userNativeOf} is.
+   */
+  const userNewestOf = async (project: string, id: string): Promise<string> => {
+    const thread = await threadOf(project, id);
+    await assertUserMayAct(thread);
+    return thread.newest;
+  };
+  /** A conversation's address from IPC arguments, named by its thread. */
+  const headOf = async (
+    args: unknown[],
+  ): Promise<{ project: string; conversation: string }> => {
+    const { project, conversation } = conversationOf(args);
+    return {
+      project,
+      conversation: (await threadOf(project, conversation)).head,
+    };
+  };
+
   const tell = (event: ConversationEvent) => {
-    broadcast(conversationChannels.event, event);
+    // NOTE: Numbered on the thread's own counter (its head's key), so `seq`
+    // stays monotonic across every session of the thread.
+    const shown = threadEvent(event);
+    if (shown) stream.publish(shown);
     sessions?.onEvent(event);
     if (event.type === "state" && typeof event.conversation === "string")
       void learnConductor(event.project, event.conversation);
@@ -673,13 +1359,16 @@ export function registerConversation(
         awaiting.clear(event.project, event.conversation);
         return;
       }
+      // What waits on the person is the thread's: the island and a
+      // notification open the thread, and its answer goes to the newest.
+      if (!shown) return;
       const asked = awaiting.apply(
-        event,
+        shown,
         () =>
           engines.pending(event.project, event.conversation)?.agent ?? "claude",
       );
-      if (asked && event.type === "permission")
-        void notifyAsked(event.project, event.conversation, asked);
+      if (asked && shown.type === "permission")
+        void notifyAsked(shown.project, shown.conversation, asked);
     });
   };
   /**
@@ -691,6 +1380,8 @@ export function registerConversation(
     conversation: string,
     request: PermissionRequest,
   ): Promise<void> => {
+    const asked = `${project}\0${conversation}\0${request.id}`;
+    if (notifiedAsks.has(asked)) return;
     const { project: found } = await knownProject(project).catch(() => ({
       project: null,
     }));
@@ -703,12 +1394,89 @@ export function registerConversation(
       );
     if (!found || !still?.requests.some((entry) => entry.id === request.id))
       return;
+    // A session its conductor manages waits on that conductor, which is
+    // told itself: the user could not answer it. Not marked: once handed
+    // back ({@link notifyHandedBack}), the user is told.
+    if (await managerOfConversation(conversation)) return;
+    if (notifiedAsks.has(asked)) return;
+    notifiedAsks.add(asked);
+    if (notifiedAsks.size > NOTIFIED_ASKS_MAX)
+      notifiedAsks.delete(notifiedAsks.values().next().value as string);
     await notify({
       kind: "input",
       ...awaitingNotice(still.agent, request),
       target: { kind: "session", slug: found.slug, conversation },
     }).catch(() => {});
   };
+  /**
+   * Requests the person was notified of, by project, conversation and id:
+   * one {@link notifyHandedBack} goes over again is not notified twice.
+   */
+  const notifiedAsks = new Set<string>();
+  /**
+   * Notify the person of what waits on them that a conductor kept until
+   * now: it let them in (`sessions.access`), or it was deleted. Every
+   * window holds the request already (a permission event goes to all of
+   * them), and the island and the page show it once the rail row says
+   * `managed: false`; only the desktop notification was never sent.
+   *
+   * @param project Null for every project.
+   * @param conversation One thread only, named by its head.
+   */
+  const notifyHandedBack = (
+    project: string | null,
+    conversation?: string,
+  ): void => {
+    for (const entry of awaiting.list()) {
+      if (project !== null && entry.project !== project) continue;
+      if (conversation && entry.conversation !== conversation) continue;
+      const native = handoffs.now.newestOf(entry.conversation);
+      for (const request of engines.permissions(entry.project, native))
+        void notifyAsked(entry.project, entry.conversation, request);
+    }
+  };
+  onTeamLeadsChanged((project) => notifyHandedBack(project));
+  // Usage limits: a turn refused for one stops every running turn of that
+  // agent, and an opted-in conversation continues once it resets.
+  /**
+   * The limits' state as the page knows conversations: by thread.
+   *
+   * NOTE: The limits keep native sessions (an engine's turn is what a limit
+   * stops), so each is named by its thread's head here; an opt-in left on
+   * a session the thread has moved on from is not the thread's.
+   */
+  const threadLimits = (state: UsageLimitsState): UsageLimitsState => ({
+    ...state,
+    stopped: state.stopped.map((entry) => ({
+      ...entry,
+      conversation: handoffs.now.headOf(entry.conversation),
+    })),
+    autoContinue: state.autoContinue.flatMap((entry) =>
+      handoffs.now.newestOf(entry.conversation) === entry.conversation
+        ? [{ ...entry, conversation: handoffs.now.headOf(entry.conversation) }]
+        : [],
+    ),
+  });
+  const limits = createUsageLimits({
+    emit: (state) =>
+      broadcast(conversationChannels.usageLimitsEvent, threadLimits(state)),
+    running: (agent) => engines.running(agent),
+    stop: (project, conversation) => engines.stop(project, conversation),
+    send: async (project, conversation, text) => {
+      const settings =
+        engines.settingsOf(conversation) ??
+        (await store.of(conversation)) ??
+        (await store.last());
+      await sendTo(
+        sendRequest({ project, conversation, text, attachments: [], settings }),
+      );
+    },
+    windows: usageWindowsOf,
+    // Beside the settings: a continue planned before a quit still goes.
+    file: join(app.getPath("userData"), "usage-limits.json"),
+  });
+  // A banked reset spent: Codex runs again now, not at the old reset time.
+  onCodexReset(() => limits.lifted("codex"));
   const engines = createEngines({
     cli: claudeCli,
     codexCli: createAgentCli("codex", () =>
@@ -745,6 +1513,7 @@ export function registerConversation(
         if (file && (await markTurnCut(file, agent)))
           tell({ type: "moved", project, conversation });
       })().catch(() => {}),
+    outcome: (outcome) => limits.report(outcome),
   });
 
   sessions = new ConductorSessions({
@@ -757,6 +1526,19 @@ export function registerConversation(
     name: nameConversation,
     register: (project, agent, id, folder, launchedBy) =>
       registerAgentSession(project, agent, id, folder, null, launchedBy),
+    launching: (id, launchedBy) =>
+      launchedBy ? noteLaunching(id, launchedBy) : doneLaunching(id),
+    setUserAccess: setSessionUserAccess,
+    // A request the conductor kept from the user is theirs now: the rail
+    // hears from `setSessionUserAccess`, the desktop notification here.
+    accessChanged: (project, session, userAccess) => {
+      if (userAccess) notifyHandedBack(project, session);
+    },
+    // NOTE: The page's own gate (`assertUserMayAct`), so a request is the
+    // user's or the conductor's to answer, never both or neither.
+    userMayAct: async (id) => !(await managerOfConversation(id)),
+    newestOf: (id) => handoffs.now.newestOf(id),
+    headOf: (id) => handoffs.now.headOf(id),
     isWorkerFolder,
     endpoint: controlEndpoint,
     cliPath: controlCliPath(),
@@ -831,44 +1613,397 @@ export function registerConversation(
     }
   });
 
+  /**
+   * Native session `conversation` of `project` with every turn main holds:
+   * one session of a thread, or a conversation in none.
+   */
+  const readSession = async (
+    project: string,
+    conversation: string,
+  ): Promise<Conversation> => {
+    // A worker of an orchestration run (FE-87) keeps its transcript under
+    // its own worktree, not the project's folder.
+    const folder =
+      workerFolderOf(project, conversation) ?? (await folderOf(project));
+    const agent = await agentOf(folder, conversation);
+    // A conversation started here whose first line the CLI has not
+    // written yet: what its engine holds so far.
+    const pending = engines.pending(project, conversation);
+    if (pending && !agent)
+      return {
+        id: conversation,
+        agent: pending.agent,
+        cwd: folder,
+        branch: null,
+        turns: pending.turns,
+        working: pending.working,
+        card: null,
+        settings: await store.of(conversation),
+        truncated: false,
+      };
+    // NOTE: The settings first, the read last: a Claude read shares its
+    // turns with the fold kept for the next one (`readConversation`), and
+    // nothing may wait between the read and the answer going out, or a
+    // read of new lines would change what this one answers.
+    const settings = await store.of(conversation);
+    const read = await readAny(folder, conversation);
+    // OpenCode's running turn, newer than its database (FE-104).
+    if (agent === "opencode" && pending?.working)
+      return {
+        ...read,
+        turns: withLive(read.turns, pending.turns),
+        working: true,
+        settings,
+      };
+    return { ...read, settings };
+  };
+
+  // NOTE: The same tagged copy of the same turn object, read after read: a
+  // Claude transcript's turns are its fold's own objects until a line
+  // changes them, and `summaryOf` keeps its answer while they are the same.
+  const tagged = new WeakMap<Turn, Turn>();
+  const tag = (turn: Turn, session: TurnSession): Turn => {
+    const known = tagged.get(turn);
+    if (known?.session?.conversation === session.conversation) return known;
+    const out = { ...turn, session } as Turn;
+    tagged.set(turn, out);
+    return out;
+  };
+  const markers = new WeakMap<object, HandoffTurn>();
+  /** The `handoff` turn drawn before session `chain[at]` (at >= 1). */
+  const markerOf = (chain: ChainSession[], at: number): HandoffTurn | null => {
+    const session = chain[at];
+    const link = session?.link;
+    if (!session || !link) return null;
+    const known = markers.get(link);
+    if (known) return known;
+    const side = (entry: ChainSession) => ({
+      conversation: entry.conversation,
+      agent: entry.agent,
+      model: entry.model,
+    });
+    const marker: HandoffTurn = {
+      role: "handoff",
+      id: `handoff:${session.conversation}`,
+      from: chain.slice(0, at).map(side),
+      to: side(session),
+      at: link.at,
+      carried: link.carried,
+      session: tagOf(session),
+    };
+    markers.set(link, marker);
+    return marker;
+  };
+
+  /**
+   * Conversation `conversation` of `project` with every turn main holds: what
+   * `read` answers with `{ full: true }`, and what its window and pages are
+   * cut from.
+   *
+   * For a thread: every session's turns in order, each tagged with its
+   * session, a `handoff` turn before each later session; named by its head,
+   * and its agent, working, settings and the rest its newest session's.
+   */
+  const readWhole = async (
+    project: string,
+    conversation: string,
+  ): Promise<Conversation> => {
+    const { chain } = await threadOf(project, conversation);
+    const newest = chain.at(-1);
+    const head = chain[0];
+    if (!head || !newest) return readSession(project, conversation);
+    const turns: Turn[] = [];
+    let truncated = false;
+    for (let at = 0; at < chain.length - 1; at++) {
+      const session = chain[at] as ChainSession;
+      if (at > 0) {
+        const marker = markerOf(chain, at);
+        if (marker) turns.push(marker);
+      }
+      // NOTE: A session whose transcript is gone (deleted, archived, or a
+      // start that never wrote a line) leaves its marker only: the thread
+      // still reads, without what it said.
+      const read = await readSession(project, session.conversation).catch(
+        () => null,
+      );
+      if (!read) continue;
+      truncated ||= read.truncated;
+      const sessionTag = tagOf(session);
+      for (const turn of read.turns) turns.push(tag(turn, sessionTag));
+    }
+    const marker = markerOf(chain, chain.length - 1);
+    if (marker) turns.push(marker);
+    // NOTE: The newest session last, with nothing awaited after it, as
+    // `readSession` reads its own transcript (see its NOTE).
+    const last = await readSession(project, newest.conversation);
+    const newestTag = tagOf(newest);
+    for (const turn of last.turns) turns.push(tag(turn, newestTag));
+    return {
+      ...last,
+      id: head.conversation,
+      turns,
+      truncated: truncated || last.truncated,
+    };
+  };
+
+  /** Every turn an image badge may name, a thread's every session's. */
+  const imageTurns = async (project: string, conversation: string) =>
+    (await readWhole(project, conversation)).turns;
+
+  // NOTE: The newest turns only, unless asked for all (`windowStart`): the
+  // answer is structured-cloned into the page on every read, after every
+  // turn, and a long conversation's turns are megabytes. The rest comes a
+  // page at a time (`readBefore`), from the same fold.
   handle(
     conversationChannels.read,
     devUrl,
     async (args): Promise<Conversation> => {
       await ready;
+      if (args.length !== 2 && args.length !== 3)
+        throw new Error("A project and a conversation are required");
+      const full = readOptions(args[2]).full;
+      // A thread's id is its head's, and so is its counter.
+      const { project, conversation } = await headOf(args);
+      // Who started it, and whether that conductor keeps the user out now
+      // (`managerOf`, the rule the rail rows carry too): the page knows a
+      // managed session from its first read, before the rail lists it.
+      // Asked before the read: nothing may be awaited after `seq`.
+      const launchedBy = launcherOfConversation(conversation);
+      const managed = (await managerOf(launchedBy)) !== null;
+      const read = await readWhole(project, conversation);
+      // NOTE: Taken once read, with nothing awaited after: every event up to
+      // it went out before this answer (one pipe, in order), so a page drops
+      // a replayed one at or below it that the read already holds.
+      const seq = stream.seq(project, conversation);
+      if (full) return { ...read, earlier: 0, seq, launchedBy, managed };
+      const start = windowStart(read.turns);
+      return start > 0
+        ? {
+            ...read,
+            turns: read.turns.slice(start),
+            earlier: start,
+            summary: summaryOf(conversation, read.turns, start),
+            seq,
+            launchedBy,
+            managed,
+          }
+        : { ...read, earlier: 0, seq, launchedBy, managed };
+    },
+  );
+
+  // A page that shows a conversation takes its events in full; every other
+  // window hears its status only (`createConversationStream`).
+  handle(
+    conversationChannels.subscribe,
+    devUrl,
+    async (args, sender): Promise<ConversationReplay> => {
+      if (args.length !== 3)
+        throw new Error("A project, a conversation and a seq are required");
+      const after = afterOf(args[2]);
+      // A thread's events are all its head's (`tell`).
+      const { project, conversation } = await headOf(args);
+      return stream.subscribe(sender, project, conversation, after);
+    },
+  );
+
+  handle(
+    conversationChannels.unsubscribe,
+    devUrl,
+    async (args, sender): Promise<void> => {
+      if (args.length !== 2)
+        throw new Error("A project and a conversation are required");
+      const { project, conversation } = await headOf(args);
+      stream.unsubscribe(sender, project, conversation);
+    },
+  );
+
+  handle(
+    conversationChannels.replay,
+    devUrl,
+    async (args): Promise<ConversationReplay> => {
+      if (args.length !== 3)
+        throw new Error("A project, a conversation and a seq are required");
+      const after = afterOf(args[2]);
+      const { project, conversation } = await headOf(args);
+      return stream.replay(project, conversation, after);
+    },
+  );
+
+  handle(
+    conversationChannels.readBefore,
+    devUrl,
+    async (args): Promise<ConversationPage> => {
+      await ready;
+      if (args.length !== 3 && args.length !== 4)
+        throw new Error("A project, a conversation and a turn are required");
+      const { project, conversation } = conversationOf(args);
+      const before = turnRef(args[2]);
+      const limit = pageLimit(args[3]);
+      const { turns } = await readWhole(project, conversation);
+      // From the end: the turn asked from is the oldest the page holds,
+      // nearer the end than the start.
+      let end = turns.length - 1;
+      while (end >= 0 && turns[end]?.id !== before) end--;
+      if (end < 0)
+        throw new Error(
+          "That part of the conversation changed. Read it again.",
+        );
+      const start = windowStart(turns, end, limit);
+      return { turns: turns.slice(start, end), earlier: start };
+    },
+  );
+
+  // A summary for a panel that looks through the whole conversation for some
+  // tool calls (the web pages it read): only those go out, not the turns.
+  handle(
+    conversationChannels.readToolCalls,
+    devUrl,
+    async (args): Promise<AssistantTurn[]> => {
+      await ready;
+      if (args.length !== 3)
+        throw new Error("A project, a conversation and tools are required");
+      const { project, conversation } = conversationOf(args);
+      const tools = toolNames(args[2]);
+      const { turns } = await readWhole(project, conversation);
+      const out: AssistantTurn[] = [];
+      for (const turn of turns) {
+        if (turn.role !== "assistant") continue;
+        const calls = turn.blocks.flatMap((block) =>
+          block.type === "tools"
+            ? block.calls.filter((call) => tools.has(call.tool))
+            : [],
+        );
+        if (calls.length)
+          out.push({ ...turn, blocks: [{ type: "tools", calls }] });
+      }
+      return out;
+    },
+  );
+
+  // Small facts of the whole conversation, for a panel that wants only them
+  // (the web pages it read): from the fold `read` keeps, and kept with it.
+  // NOTE: Never the turns over IPC, and for a Claude or Codex transcript
+  // never a read of the file either when nothing was written since.
+  handle(
+    conversationChannels.summary,
+    devUrl,
+    async (args): Promise<ConversationFacts> => {
+      await ready;
       if (args.length !== 2)
         throw new Error("A project and a conversation are required");
       const { project, conversation } = conversationOf(args);
-      // A worker of an orchestration run (FE-87) keeps its transcript under
-      // its own worktree, not the project's folder.
+      // NOTE: A thread's facts are every session's: read stitched, without
+      // the per-transcript fold a lone conversation keeps its answer in.
+      if ((await threadOf(project, conversation)).chain.length)
+        return {
+          web: webSourcesOf((await readWhole(project, conversation)).turns),
+        };
       const folder =
         workerFolderOf(project, conversation) ?? (await folderOf(project));
       const agent = await agentOf(folder, conversation);
-      // A conversation started here whose first line the CLI has not
-      // written yet: what its engine holds so far.
       const pending = engines.pending(project, conversation);
-      if (pending && !agent)
-        return {
-          id: conversation,
-          agent: pending.agent,
-          cwd: folder,
-          branch: null,
-          turns: pending.turns,
-          working: pending.working,
-          card: null,
-          settings: await store.of(conversation),
-          truncated: false,
-        };
-      const read = await readAny(folder, conversation);
-      // OpenCode's running turn, newer than its database (FE-104).
-      if (agent === "opencode" && pending?.working)
-        return {
-          ...read,
-          turns: withLive(read.turns, pending.turns),
-          working: true,
-          settings: await store.of(conversation),
-        };
-      return { ...read, settings: await store.of(conversation) };
+      if (pending && !agent) return { web: webSourcesOf(pending.turns) };
+      switch (agent) {
+        case "opencode": {
+          // No file to fold: the database is read, as `read` does.
+          const read = await readOpenCodeConversation(
+            opencodeData(),
+            folder,
+            conversation,
+          );
+          return {
+            web: webSourcesOf(
+              pending?.working
+                ? withLive(read.turns, pending.turns)
+                : read.turns,
+            ),
+          };
+        }
+        case "codex":
+          return codexFacts(agentHome(), folder, conversation);
+        default:
+          return claudeFacts(agentHome(), folder, conversation);
+      }
+    },
+  );
+
+  handle(
+    conversationChannels.toolOutput,
+    devUrl,
+    async (args): Promise<ToolOutput> => {
+      await ready;
+      if (args.length !== 3)
+        throw new Error("A project, a conversation and a call are required");
+      const { project, conversation } = conversationOf(args);
+      const call = turnRef(args[2]);
+      const folder =
+        workerFolderOf(project, conversation) ?? (await folderOf(project));
+      // NOTE: In a thread the call is one session's: the newest first (the
+      // likeliest), then back. Each is asked of its own transcript.
+      const { chain } = await threadOf(project, conversation);
+      const candidates = chain.length
+        ? chain.map((entry) => entry.conversation).reverse()
+        : [conversation];
+      for (const session of candidates) {
+        // Only a Claude transcript says where a long result lies (`outputCut`).
+        if ((await agentOf(folder, session)) !== "claude") continue;
+        if (candidates.length === 1)
+          return readToolOutput(agentHome(), folder, session, call);
+        const found = await readToolOutput(
+          agentHome(),
+          folder,
+          session,
+          call,
+        ).catch(() => null);
+        if (found) return found;
+      }
+      throw new Error("That tool result is not in the transcript.");
+    },
+  );
+
+  // The rail's dot (FE-95/D4): only the id of the latest proposal that
+  // waits on the user, never the conversation. NOTE: Reads what `read`
+  // answers (a pending start's turns, OpenCode's live ones), but a Claude
+  // transcript from the fold `read` keeps too, and a Codex rollout from its
+  // own fold: the rail asks after every turn of every conductor.
+  handle(
+    conversationChannels.latestProposal,
+    devUrl,
+    async (args): Promise<string | null> => {
+      await ready;
+      if (args.length !== 2 && args.length !== 3)
+        throw new Error("A project and a conversation are required");
+      const { project, conversation } = conversationOf(args);
+      const leads = proposalLeads(args[2]);
+      // NOTE: A thread's proposals may be planned in one session and run in
+      // the next: read stitched (no per-transcript fold for it).
+      if ((await threadOf(project, conversation)).chain.length)
+        return latestReadyProposal(
+          (await readWhole(project, conversation)).turns,
+          leads,
+        );
+      const folder =
+        workerFolderOf(project, conversation) ?? (await folderOf(project));
+      const agent = await agentOf(folder, conversation);
+      const pending = engines.pending(project, conversation);
+      if (pending && !agent) return latestReadyProposal(pending.turns, leads);
+      switch (agent) {
+        case "opencode": {
+          const read = await readOpenCodeConversation(
+            opencodeData(),
+            folder,
+            conversation,
+          );
+          return latestReadyProposal(
+            pending?.working ? withLive(read.turns, pending.turns) : read.turns,
+            leads,
+          );
+        }
+        case "codex":
+          return latestCodexProposal(agentHome(), folder, conversation, leads);
+        default:
+          return latestClaudeProposal(agentHome(), folder, conversation, leads);
+      }
     },
   );
 
@@ -896,43 +2031,451 @@ export function registerConversation(
         throw new Error("A valid conductor is required");
       if (!request.text.trim() && request.attachments.length === 0)
         throw new Error("Write something first.");
-      const folder = await folderOf(request.project);
-      const out = await outgoingOf(request);
-      // The model picks the CLI: Codex and OpenCode name their conversation
-      // themselves.
-      const agent = agentOfModel(request.settings.model);
-      const started =
-        agent !== "claude"
-          ? await engines.startNamed(agent, request.project, folder, out)
-          : {
-              conversation,
-              engine: await engines.start(
-                request.project,
-                conversation,
-                folder,
-                out,
-              ),
-            };
-      // FE-112: listed without a Pull, once its first prompt is read in.
-      await registerAgentSession(
+      // Checked just above: a lead ref, or none.
+      return startNew(request, conductor as string | null);
+    },
+  );
+
+  /**
+   * Start the NEW conversation `request.conversation` names (an id main
+   * just made) with `request` as its first message: the page's start, a
+   * handoff's, and a `switchAgent`'s new session.
+   *
+   * @param conductor Makes it that conductor's own conversation (FE-95).
+   * @param named Told the native id as soon as the CLI named it, before
+   *   anything else is awaited: a session joining a thread is placed in it
+   *   before its next events go out.
+   */
+  async function startNew(
+    request: SendRequest,
+    conductor: string | null,
+    named?: (conversation: string) => void,
+  ): Promise<{ conversation: string; engine: EngineState }> {
+    const folder = await folderOf(request.project);
+    const out = await outgoingOf(request);
+    // The model picks the CLI: Codex and OpenCode name their conversation
+    // themselves.
+    const agent = agentOfModel(request.settings.model);
+    const started =
+      agent !== "claude"
+        ? await engines.startNamed(agent, request.project, folder, out)
+        : {
+            conversation: request.conversation,
+            engine: await engines.start(
+              request.project,
+              request.conversation,
+              folder,
+              out,
+            ),
+          };
+    named?.(started.conversation);
+    // FE-112: listed without a Pull, once its first prompt is read in.
+    await registerAgentSession(
+      request.project,
+      agent,
+      started.conversation,
+      folder,
+    ).catch(() => undefined);
+    if (conductor) {
+      await bindConductorConversation(
         request.project,
         agent,
         started.conversation,
-        folder,
-      ).catch(() => undefined);
-      if (conductor) {
-        await bindConductorConversation(
-          request.project,
-          agent,
-          started.conversation,
-          conductor,
+        conductor,
+      );
+      // Its first state events came before it was bound.
+      sawConductor(request.project, started.conversation, conductor);
+    }
+    return started;
+  }
+
+  /**
+   * What a handoff of `id` carries: its thread's turns (a lone
+   * conversation's own), and who wrote its newest session.
+   *
+   * @throws When the conversation is not in this project.
+   */
+  async function handoffSource(project: string, id: string) {
+    const folder = await folderOf(project);
+    const thread = await threadOf(project, id);
+    const newest = thread.newest;
+    const pending = engines.pending(project, newest);
+    const written = await agentOf(folder, newest);
+    const from = written ?? pending?.agent;
+    if (!from) throw new Error("That conversation is not in this project.");
+    const before = await store.of(newest);
+    const model = engines.settingsOf(newest)?.model ?? before?.model ?? null;
+    // What `read` answers: a pending start's turns, OpenCode's live ones,
+    // and for a thread every session's, stitched.
+    let turns: Turn[];
+    let truncated = false;
+    if (thread.chain.length) {
+      const read = await readWhole(project, id);
+      turns = read.turns;
+      truncated = read.truncated;
+    } else if (pending && !written) turns = pending.turns;
+    else {
+      const read = await readAny(folder, newest);
+      turns =
+        from === "opencode" && pending?.working
+          ? withLive(read.turns, pending.turns)
+          : read.turns;
+      truncated = read.truncated;
+    }
+    // The newest session's model as it runs now, the others' as handed to.
+    const sessions = thread.chain.map((entry) => ({
+      conversation: entry.conversation,
+      agent: entry.agent,
+      model:
+        entry.conversation === newest ? (model ?? entry.model) : entry.model,
+    }));
+    return { folder, thread, from, before, model, turns, truncated, sessions };
+  }
+
+  /**
+   * The settings a handoff's new session runs with, checked.
+   *
+   * @param before The newest session's last settings, for its permission.
+   * @throws When they are not valid settings.
+   */
+  async function handoffSettings(
+    raw: Record<string, unknown>,
+    before: ComposerSettings | null,
+  ): Promise<ComposerSettings> {
+    if (raw.fast !== undefined && typeof raw.fast !== "boolean")
+      throw new Error("Unknown settings");
+    const settings = checkSettings({
+      model: raw.model,
+      effort: raw.effort,
+      fast: raw.fast ?? false,
+      permission:
+        raw.permission ?? before?.permission ?? (await store.last()).permission,
+    });
+    if (!settings) throw new Error("Unknown settings");
+    return settings;
+  }
+
+  // Handoff: continue a conversation in a new one on another agent, its
+  // first message the source's context block and the person's text.
+  // NOTE: Still a NEW conversation of its own, as before `switchAgent`: its
+  // link is no thread's (`thread` unset), so both keep their own rows. Of
+  // a thread, it carries the whole thread and links from its newest session.
+  handle(
+    conversationChannels.handoff,
+    devUrl,
+    async (args): Promise<string> => {
+      await ready;
+      // A model Codex or OpenCode listed since the last read is known now.
+      await codexModels();
+      if (args.length !== 1) throw new Error("A request is required");
+      const raw = (args[0] ?? {}) as Record<string, unknown>;
+      const { project, conversation } = conversationOf([
+        raw.project,
+        raw.conversation,
+      ]);
+      await knowModel(raw.model);
+      // A worker's transcript is in its own worktree, and its lead talks
+      // to it (FE-87): a new conversation in the project's folder is not
+      // its continuation.
+      if (workerFolderOf(project, conversation))
+        throw new Error(
+          "This conversation is a worker of an orchestration run. Hand off its lead instead.",
         );
-        // Its first state events came before it was bound.
-        sawConductor(request.project, started.conversation, conductor);
-      }
-      return started;
+      const target = raw.agent;
+      if (target !== "claude" && target !== "codex" && target !== "opencode")
+        throw new Error("A valid agent is required");
+      const text = raw.text;
+      if (typeof text !== "string" || !text.trim())
+        throw new Error("Write something first.");
+      if (raw.fast !== undefined && typeof raw.fast !== "boolean")
+        throw new Error("Unknown settings");
+      // Continued elsewhere on the user's say: their call to make only in a
+      // session they may work in.
+      await userNewestOf(project, conversation);
+      const source = await handoffSource(project, conversation);
+      const settings = await handoffSettings(raw, source.before);
+      if (agentOfModel(settings.model) !== target)
+        throw new Error(
+          `Pick ${target === "opencode" ? "an" : "a"} ${AGENT_LABELS[target]} model to hand off to.`,
+        );
+      const from = source.thread.newest;
+      // The person's own message and attachments, checked as a send's are
+      // before anything is built on them.
+      const { attachments } = sendRequest({
+        project,
+        conversation: from,
+        text,
+        attachments: raw.attachments ?? [],
+        settings,
+      });
+      const built = buildHandoff(
+        {
+          agent: source.from,
+          conversation: from,
+          model: source.model,
+          turns: source.turns,
+          truncated: source.truncated,
+          ...(source.sessions.length
+            ? { sessions: source.sessions, thread: source.thread.head }
+            : {}),
+        },
+        text,
+        handoffBudget({ text, attachments }),
+      );
+      const request = sendRequest({
+        project,
+        conversation: randomUUID(),
+        text: built.text,
+        attachments,
+        settings,
+      });
+      const started = await startNew(request, null);
+      // Continued on another agent: the old conversation's continue after
+      // its limit resets would run a second agent on the same work.
+      limits.sent(project, from);
+      await handoffs.record({
+        project,
+        from: { conversation: from, agent: source.from, model: source.model },
+        to: {
+          conversation: started.conversation,
+          agent: target,
+          model: settings.model,
+        },
+        at: new Date().toISOString(),
+        carried: built.carried,
+        limit: limitOver(limits.state().limits, source.from, source.model),
+      });
+      // Titled by the person's message, not the context block before it.
+      const title = handoffTitle(text);
+      if (title)
+        await nameConversation(target, started.conversation, title).catch(
+          () => undefined,
+        );
+      return started.conversation;
     },
   );
+
+  // Switch agent: continue a thread on another agent IN PLACE. A new
+  // native session starts with the whole thread's context block and the
+  // person's text, and joins the thread as its newest session; the page
+  // stays on the thread's id (its head's), which this answers.
+  handle(
+    conversationChannels.switchAgent,
+    devUrl,
+    async (args): Promise<string> => {
+      await ready;
+      // A model Codex or OpenCode listed since the last read is known now.
+      await codexModels();
+      if (args.length !== 3)
+        throw new Error("A project, a conversation and a request are required");
+      const { project, conversation } = conversationOf(args);
+      const value = args[2];
+      if (!value || typeof value !== "object" || Array.isArray(value))
+        throw new Error("A request is required");
+      const raw = value as Partial<Record<keyof SwitchAgentRequest, unknown>>;
+      await knowModel(raw.model);
+      // A worker's transcript is in its own worktree, and its lead talks to
+      // it (FE-87): never a thread of the project's folder.
+      if (workerFolderOf(project, conversation))
+        throw new Error(
+          "This conversation is a worker of an orchestration run. Switch its lead instead.",
+        );
+      const text = raw.text;
+      if (typeof text !== "string" || !text.trim())
+        throw new Error("Write something first.");
+      const thread = await threadOf(project, conversation);
+      await assertUserMayAct(thread);
+      const head = thread.head;
+      // NOTE: One switch per thread at a time: two at once would both
+      // start from the same newest session and fork the chain.
+      if (switching.has(head))
+        throw new Error("This conversation is already switching agents.");
+      switching.add(head);
+      /** The sessions placed in the thread before their link was written. */
+      const joined: string[] = [];
+      let done = false;
+      try {
+        const source = await handoffSource(project, conversation);
+        const from = source.thread.newest;
+        // NOTE: Not while its newest session runs a turn (or a terminal
+        // runs it): the new agent would work beside it on the same files.
+        const now = await engines.state(project, from);
+        if (
+          now.state === "running" ||
+          now.state === "starting" ||
+          now.state === "terminal" ||
+          engines.pending(project, from)?.working
+        )
+          throw new Error("Stop the running turn first, then switch agents.");
+        const settings = await handoffSettings(raw, source.before);
+        const target = agentOfModel(settings.model);
+        const { attachments } = sendRequest({
+          project,
+          conversation: from,
+          text,
+          attachments: raw.attachments ?? [],
+          settings,
+        });
+        const sessions = source.sessions.length
+          ? source.sessions
+          : [{ conversation: from, agent: source.from, model: source.model }];
+        const built = buildHandoff(
+          {
+            agent: source.from,
+            conversation: from,
+            model: source.model,
+            turns: source.turns,
+            truncated: source.truncated,
+            sessions,
+            thread: head,
+          },
+          text,
+          handoffBudget({ text, attachments }),
+        );
+        const join = (native: string) => {
+          joined.push(native);
+          joining.set(native, {
+            head,
+            session: {
+              conversation: native,
+              agent: target,
+              model: settings.model,
+            },
+            rail: [
+              ...sessions.map(({ conversation, agent }) => ({
+                conversation,
+                agent,
+              })),
+              { conversation: native, agent: target },
+            ],
+          });
+        };
+        const request = sendRequest({
+          project,
+          conversation: randomUUID(),
+          text: built.text,
+          attachments,
+          settings,
+        });
+        // Claude's id is main's own: its very first event is the thread's.
+        // Codex and OpenCode name theirs, placed as soon as they do.
+        if (target === "claude") join(request.conversation);
+        const started = await startNew(request, null, (native) => {
+          if (!joined.includes(native)) join(native);
+        });
+        await handoffs.record({
+          project,
+          from: { conversation: from, agent: source.from, model: source.model },
+          to: {
+            conversation: started.conversation,
+            agent: target,
+            model: settings.model,
+          },
+          at: new Date().toISOString(),
+          carried: built.carried,
+          limit: limitOver(limits.state().limits, source.from, source.model),
+          thread: true,
+        });
+        done = true;
+        // The settings follow the newest session: a Codex or OpenCode
+        // engine remembers none before it is named.
+        await store.remember(started.conversation, settings);
+        // Continued on another agent: the old session's continue after its
+        // limit resets would run a second agent on the same work.
+        limits.sent(project, from);
+        // NOTE: Nothing addresses the old session any more (every call on
+        // the thread goes to its newest), so its idle engine is let go of
+        // now rather than at the idle limit. Its state is no longer the
+        // thread's (`threadEvent`).
+        void engines.close(project, from).catch(() => undefined);
+        awaiting.clear(project, from);
+        return head;
+      } finally {
+        switching.delete(head);
+        for (const native of joined) joining.delete(native);
+        if (!done) {
+          // The old newest session's state went unheard while it switched.
+          void engines
+            .state(project, thread.newest)
+            .then((engine) =>
+              tell({
+                type: "state",
+                project,
+                conversation: thread.newest,
+                engine,
+              }),
+            )
+            .catch(() => undefined);
+        } else threadsChanged(project);
+      }
+    },
+  );
+
+  handle(
+    conversationChannels.handoffLinks,
+    devUrl,
+    async (args): Promise<ConversationHandoffLinks> => {
+      if (args.length !== 2)
+        throw new Error("A project and a conversation are required");
+      const { project, conversation } = conversationOf(args);
+      const { chain } = await threadOf(project, conversation);
+      if (!chain.length) return handoffs.links(project, conversation);
+      // NOTE: A thread's links to and from other conversations: into its
+      // head, and out of any of its sessions. Its own (in-place) links are
+      // its `handoff` turns, not these.
+      const all = await Promise.all(
+        chain.map((entry) => handoffs.links(project, entry.conversation)),
+      );
+      return {
+        from: all[0]?.from?.thread ? null : (all[0]?.from ?? null),
+        to: all.flatMap((links) => links.to.filter((link) => !link.thread)),
+      };
+    },
+  );
+
+  /**
+   * Send a checked request to an existing conversation: the page's send, and
+   * the continue after a usage limit (`usage-limits.ts`).
+   */
+  async function sendTo(request: SendRequest): Promise<EngineState> {
+    // A worker is the lead's to talk to; a send from here would start a
+    // second engine on its conversation in the project's folder (FE-87).
+    if (workerFolderOf(request.project, request.conversation))
+      throw new Error(
+        "This conversation is a worker of an orchestration run. Message it through its lead.",
+      );
+    const folder = await folderOf(request.project);
+    // NOTE: Only a conversation this folder has: its transcript is where
+    // the CLI keeps this folder's, under the id it was asked for.
+    const agent =
+      (await agentOf(folder, request.conversation)) ??
+      engines.pending(request.project, request.conversation)?.agent;
+    if (!agent) throw new Error("That conversation is not in this project.");
+    // A conversation stays on the CLI that wrote it.
+    if (agentOfModel(request.settings.model) !== agent)
+      throw new Error(
+        `Pick ${agent === "opencode" ? "an" : "a"} ${AGENT_LABELS[agent]} model for this conversation.`,
+      );
+    // FE-112: one Lanework resumes is one it lists. A row the store has is
+    // left as it is.
+    void registerAgentSession(
+      request.project,
+      agent,
+      request.conversation,
+      folder,
+    ).catch(() => undefined);
+    return noted(
+      request.project,
+      request.conversation,
+      engines.send(
+        request.project,
+        request.conversation,
+        folder,
+        await outgoingOf(request),
+        agent,
+      ),
+    );
+  }
 
   handle(
     conversationChannels.send,
@@ -943,51 +2486,54 @@ export function registerConversation(
       await knowModel(
         (args[0] as { settings?: { model?: unknown } } | null)?.settings?.model,
       );
-      const request = sendRequest(args[0]);
-      // A worker is the lead's to talk to; a send from here would start a
-      // second engine on its conversation in the project's folder (FE-87).
-      if (workerFolderOf(request.project, request.conversation))
-        throw new Error(
-          "This conversation is a worker of an orchestration run. Message it through its lead.",
-        );
-      const folder = await folderOf(request.project);
-      // NOTE: Only a conversation this folder has: its transcript is where
-      // the CLI keeps this folder's, under the id it was asked for.
-      const agent =
-        (await agentOf(folder, request.conversation)) ??
-        engines.pending(request.project, request.conversation)?.agent;
-      if (!agent) throw new Error("That conversation is not in this project.");
-      // A conversation stays on the CLI that wrote it.
-      if (agentOfModel(request.settings.model) !== agent)
-        throw new Error(
-          `Pick ${agent === "opencode" ? "an" : "a"} ${AGENT_LABELS[agent]} model for this conversation.`,
-        );
-      // FE-112: one Lanework resumes is one it lists. A row the store has is
-      // left as it is.
-      void registerAgentSession(
-        request.project,
-        agent,
-        request.conversation,
-        folder,
-      ).catch(() => undefined);
-      return noted(
-        request.project,
-        request.conversation,
-        engines.send(
-          request.project,
-          request.conversation,
-          folder,
-          await outgoingOf(request),
-          agent,
-        ),
+      const asked = sendRequest(args[0]);
+      // NOTE: A thread's turn goes to its newest session, the one whose
+      // agent the composer shows (`read` answers its agent and settings).
+      const request = {
+        ...asked,
+        conversation: await userNewestOf(asked.project, asked.conversation),
+      };
+      // The person wrote first: a continue waiting on a usage limit is not
+      // needed any more.
+      limits.sent(request.project, request.conversation);
+      return sendTo(request);
+    },
+  );
+
+  // NOTE: No arguments. The state names projects and conversations only,
+  // never a message of theirs beyond the CLI's limit notice.
+  handle(
+    conversationChannels.usageLimits,
+    devUrl,
+    async (args): Promise<UsageLimitsState> => {
+      if (args.length !== 0) throw new Error("No arguments are accepted");
+      await handoffs.ready();
+      return threadLimits(limits.state());
+    },
+  );
+
+  handle(
+    conversationChannels.setAutoContinue,
+    devUrl,
+    async (args): Promise<UsageLimitsState> => {
+      if (args.length !== 3)
+        throw new Error("A project, a conversation and a boolean are required");
+      if (typeof args[2] !== "boolean")
+        throw new Error("A boolean is required");
+      // The thread's newest session is the one a continue would go to.
+      const { project, conversation } = await userNativeOf(args);
+      return threadLimits(
+        limits.setAutoContinue(project, conversation, args[2]),
       );
     },
   );
 
+  // NOTE: From here, every call on a conversation's engine is made on its
+  // thread's newest session (`nativeOf`): the only one that still runs.
   handle(conversationChannels.stop, devUrl, async (args): Promise<void> => {
     if (args.length !== 2)
       throw new Error("A project and a conversation are required");
-    const { project, conversation } = conversationOf(args);
+    const { project, conversation } = await userNativeOf(args);
     await engines.stop(project, conversation);
   });
 
@@ -997,7 +2543,7 @@ export function registerConversation(
     async (args): Promise<number> => {
       if (args.length !== 2)
         throw new Error("A project and a conversation are required");
-      const { project, conversation } = conversationOf(args);
+      const { project, conversation } = await userNativeOf(args);
       return engines.clearQueue(project, conversation);
     },
   );
@@ -1009,7 +2555,11 @@ export function registerConversation(
       args,
     ): Promise<{ text: string; attachments: OutgoingAttachment[] } | null> => {
       const { project, conversation, message } = queuedOf(args);
-      const taken = engines.takeQueued(project, conversation, message);
+      const taken = engines.takeQueued(
+        project,
+        await userNewestOf(project, conversation),
+        message,
+      );
       return taken
         ? { text: taken.text, attachments: taken.attachments }
         : null;
@@ -1021,7 +2571,13 @@ export function registerConversation(
     devUrl,
     async (args): Promise<boolean> => {
       const { project, conversation, message } = queuedOf(args);
-      return engines.takeQueued(project, conversation, message) !== null;
+      return (
+        engines.takeQueued(
+          project,
+          await userNewestOf(project, conversation),
+          message,
+        ) !== null
+      );
     },
   );
 
@@ -1031,7 +2587,7 @@ export function registerConversation(
     async (args): Promise<void> => {
       if (args.length !== 2)
         throw new Error("A project and a conversation are required");
-      const { project, conversation } = conversationOf(args);
+      const { project, conversation } = await userNativeOf(args);
       engines.resumeQueue(project, conversation);
     },
   );
@@ -1042,16 +2598,19 @@ export function registerConversation(
     async (args): Promise<void> => {
       if (args.length !== 4)
         throw new Error("A conversation, a request and an answer are required");
-      const { project, conversation } = conversationOf(args);
       const id = key(args[2], "request");
-      engines.answer(project, conversation, id, permissionAnswer(args[3]));
+      const answer = permissionAnswer(args[3]);
+      const { project, conversation } = await userNativeOf(args.slice(0, 2));
+      engines.answer(project, conversation, id, answer);
     },
   );
 
   handle(conversationChannels.fork, devUrl, async (args): Promise<string> => {
     if (args.length !== 2)
       throw new Error("A project and a conversation are required");
-    const { project, conversation } = conversationOf(args);
+    // NOTE: Of a thread, its newest session is forked: only its transcript
+    // is the CLI's to copy. The fork is a conversation of its own.
+    const { project, conversation } = await nativeOf(args);
     const folder = await folderOf(project);
     const agent = await agentOf(folder, conversation);
     if (agent === "codex" || agent === "opencode")
@@ -1075,7 +2634,7 @@ export function registerConversation(
     async (args): Promise<EngineState> => {
       if (args.length !== 2)
         throw new Error("A project and a conversation are required");
-      const { project, conversation } = conversationOf(args);
+      const { project, conversation } = await userNativeOf(args);
       await folderOf(project);
       return noted(
         project,
@@ -1088,9 +2647,15 @@ export function registerConversation(
   handle(conversationChannels.close, devUrl, async (args): Promise<void> => {
     if (args.length !== 2)
       throw new Error("A project and a conversation are required");
-    const { project, conversation } = conversationOf(args);
+    const { project, conversation, head } = await nativeOf(args);
+    // A managed session's turn is the conductor's to stop: closing it then
+    // would cut the turn off. Between turns, closing only frees its engine
+    // (the rail does so before Archive or Delete).
+    if (engines.pending(project, conversation)?.working)
+      await assertUserMayAct({ head, newest: conversation });
     await engines.close(project, conversation);
-    awaiting.clear(project, conversation);
+    // What waits on the person is kept by thread (`tell`).
+    awaiting.clear(project, head);
   });
 
   handle(
@@ -1098,20 +2663,31 @@ export function registerConversation(
     devUrl,
     async (args): Promise<string[]> => {
       if (args.length !== 1) throw new Error("A project is required");
-      return engines.alive(key(args[0], "project"));
+      await handoffs.ready();
+      // By thread: a session that continues one is its head to the page.
+      return [
+        ...new Set(
+          engines.alive(key(args[0], "project")).map(handoffs.now.headOf),
+        ),
+      ];
     },
   );
 
   handle(conversationChannels.keep, devUrl, async (args): Promise<void> => {
     if (args.length !== 3 || typeof args[2] !== "boolean")
       throw new Error("A project, a conversation and on or off are required");
-    const { project, conversation } = conversationOf(args.slice(0, 2));
+    const { project, conversation } = await nativeOf(args.slice(0, 2));
     engines.keep(project, conversation, args[2]);
   });
 
   handle(conversationChannels.kept, devUrl, async (args): Promise<string[]> => {
     if (args.length !== 1) throw new Error("A project is required");
-    return engines.kept(key(args[0], "project"));
+    await handoffs.ready();
+    return [
+      ...new Set(
+        engines.kept(key(args[0], "project")).map(handoffs.now.headOf),
+      ),
+    ];
   });
 
   handle(
@@ -1135,9 +2711,10 @@ export function registerConversation(
   handle(conversationChannels.release, devUrl, async (args): Promise<void> => {
     if (args.length !== 2)
       throw new Error("A project and a conversation are required");
-    const { project, conversation } = conversationOf(args);
+    // Released to a terminal, where the user would type into it.
+    const { project, conversation, head } = await userNativeOf(args);
     await engines.release(project, conversation);
-    awaiting.clear(project, conversation);
+    awaiting.clear(project, head);
   });
 
   handle(
@@ -1146,7 +2723,7 @@ export function registerConversation(
     async (args): Promise<EngineState> => {
       if (args.length !== 2)
         throw new Error("A project and a conversation are required");
-      const { project, conversation } = conversationOf(args);
+      const { project, conversation } = await nativeOf(args);
       return noted(project, conversation, engines.state(project, conversation));
     },
   );
@@ -1157,7 +2734,7 @@ export function registerConversation(
     async (args): Promise<PermissionRequest[]> => {
       if (args.length !== 2)
         throw new Error("A project and a conversation are required");
-      const { project, conversation } = conversationOf(args);
+      const { project, conversation } = await nativeOf(args);
       return engines.permissions(project, conversation);
     },
   );
@@ -1239,7 +2816,7 @@ export function registerConversation(
     conversationChannels.image,
     devUrl,
     async (args): Promise<ImagePreview> => {
-      const { path, scope } = await imageScope(args);
+      const { path, scope } = await imageScope(args, imageTurns);
       return previewImage(path, scope);
     },
   );
@@ -1248,7 +2825,7 @@ export function registerConversation(
     conversationChannels.openImage,
     devUrl,
     async (args): Promise<void> => {
-      const { path, scope } = await imageScope(args);
+      const { path, scope } = await imageScope(args, imageTurns);
       const file = await openableImage(path, scope);
       if (!file) throw new Error("The image is not there.");
       const failed = await shell.openPath(file);
@@ -1283,6 +2860,11 @@ export function registerConversation(
     },
   );
 
-  app.on("will-quit", () => engines.killAll());
+  // NOTE: One quit listener for the whole conversation module: main's
+  // modules already hold ten, Node's warning threshold.
+  app.on("will-quit", () => {
+    limits.dispose();
+    engines.killAll();
+  });
   if (!app.isPackaged) process.once("SIGTERM", () => engines.killAll());
 }

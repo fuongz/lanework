@@ -55,6 +55,7 @@ import {
 import { Switch } from "#/components/ui/switch";
 import { cn } from "#/lib/utils";
 import { isModelOffered, usePreferences } from "#/stores/preferences";
+import { handoffAgent } from "./composer.limit";
 import { arrangeModels, useModels } from "./composer.models";
 
 /** A pill in the composer's bottom row. */
@@ -90,9 +91,15 @@ function ModelPanel({
   onPick: (id: string) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [only, setOnly] = useState<ConversationAgent | "favorites">(
-    () => agent ?? agentOfModel(model),
-  );
+  const [only, setOnly] = useState<ConversationAgent | "favorites">(() => {
+    if (agent) return agent;
+    // A panel that leaves the current model's CLI out opens on its first
+    // tab, not an empty one.
+    const of = agentOfModel(model);
+    return exclude.includes(of)
+      ? (AGENTS.find((tab) => !exclude.includes(tab)) ?? of)
+      : of;
+  });
   const tabs = agent ? [agent] : AGENTS.filter((tab) => !exclude.includes(tab));
   const navigate = useNavigate();
   const all = useModels();
@@ -357,6 +364,9 @@ export function ModelMenu({
   auto,
   effortSet = true,
   className,
+  open,
+  onOpenChange,
+  switchable = false,
 }: {
   settings: ComposerSettings;
   /** Only this CLI's models; null offers every CLI's. */
@@ -377,6 +387,15 @@ export function ModelMenu({
   /** False while the effort is the default: the pill says so. */
   effortSet?: boolean;
   className?: string;
+  /** Opened from elsewhere too (the limit tab's Hand off); absent: its own. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /**
+   * Offer every CLI's models though `agent` is set: a conversation's
+   * composer, where a model of another CLI hands the thread off in place on
+   * the next send (`conversation.switchAgent`).
+   */
+  switchable?: boolean;
 }) {
   // Re-drawn when Codex's or OpenCode's list arrives: labels come with it.
   useModels();
@@ -385,8 +404,11 @@ export function ModelMenu({
   const name = automatic
     ? "Auto"
     : (modelName(settings.model) ?? (settings.model || "No model"));
-  // A locked CLI's mark, even for a model its list has not named yet.
-  const kind = agent ?? agentOfModel(settings.model);
+  // The model's CLI: another one's once picked in a switchable menu; a
+  // locked CLI's mark otherwise, even for a model its list has not named yet.
+  const crossing =
+    switchable && agent ? handoffAgent(settings.model, agent) : null;
+  const kind = crossing ?? agent ?? agentOfModel(settings.model);
   // What the model takes: its own efforts, its fast mode if it has one
   // (FE-135/D5). Main sends what this says, however the stored one reads.
   const efforts = modelEfforts(settings.model);
@@ -395,15 +417,20 @@ export function ModelMenu({
   const isFast = settings.fast && hasFast;
   const effortLabel = effortSet ? EFFORT_LABELS[effort] : "Default";
   return (
-    <DropdownMenu>
+    <DropdownMenu
+      open={open}
+      onOpenChange={onOpenChange ? (next) => onOpenChange(next) : undefined}
+    >
       <DropdownMenuTrigger
         disabled={disabled}
-        aria-label={`Model: ${name}, effort ${effortLabel}${isFast ? ", fast" : ""}`}
+        aria-label={`Model: ${name}, effort ${effortLabel}${isFast ? ", fast" : ""}${crossing ? `, hands off to ${AGENT_LABELS[crossing]}` : ""}`}
         className={cn(PILL, className)}
       >
-        {!automatic && <TerminalKindIcon kind={kind} className="size-3.5" />}
-        <span>{name}</span>
-        <span className="text-muted-foreground">{effortLabel}</span>
+        <ModelFace
+          kind={automatic ? null : kind}
+          name={name}
+          effort={effortLabel}
+        />
         {effortSet && effort === "max" && (
           <HugeiconsIcon
             icon={Alert02Icon}
@@ -484,7 +511,9 @@ export function ModelMenu({
           >
             <ModelPanel
               model={settings.model}
-              agent={agent}
+              // NOTE: Every CLI's tabs in a switchable menu: one menu for a
+              // model of this CLI and for handing the thread to another.
+              agent={switchable ? null : agent}
               exclude={exclude}
               // The effort and fast mode follow to what the new model takes,
               // and are only named when they must: a proposal's "Default"
@@ -508,7 +537,38 @@ export function ModelMenu({
   );
 }
 
-/** The thumb's width, in px: the slider's steps are laid out around it. */
+/**
+ * The model pill's face: its CLI's mark, the model's name, its effort muted.
+ *
+ * Shared with the rail's hover card, so a model reads the same in both.
+ */
+export function ModelFace({
+  kind,
+  name,
+  effort,
+  iconClassName = "size-3.5",
+  effortClassName = "text-muted-foreground",
+}: {
+  /** The mark's CLI; null draws none (Auto). */
+  kind: ConversationAgent | null;
+  name: string;
+  /** The effort's label; null when not known. */
+  effort: string | null;
+  iconClassName?: string;
+  effortClassName?: string;
+}) {
+  return (
+    <>
+      {kind && <TerminalKindIcon kind={kind} className={iconClassName} />}
+      <span className="min-w-0 truncate">{name}</span>
+      {effort && (
+        <span className={cn("shrink-0", effortClassName)}>{effort}</span>
+      )}
+    </>
+  );
+}
+
+/** Above a switchable model panel: what another harness's model dod it. */
 const THUMB = 10;
 
 /**
@@ -661,7 +721,8 @@ const PERMISSION_ICONS: Record<Permission, IconSvgElement> = {
   bypassPermissions: SecurityWarningIcon,
 };
 
-function PermissionIcon({
+/** A permission mode's mark, as its pill and menu draw it. */
+export function PermissionIcon({
   permission,
   className,
 }: {

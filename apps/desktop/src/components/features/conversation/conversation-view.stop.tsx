@@ -26,6 +26,8 @@ import { notify } from "#/stores/notify";
  * - With nothing alive the tab closes at once. The menu leaves ⌘W unbound
  *   (`menu.ts`), so the window never closes from it.
  * - The dialog closes by itself when the agent ends on its own meanwhile.
+ * - A session a conductor manages (`managed`) is the conductor's to stop:
+ *   its tab closes at once and its agent keeps going.
  *
  * @returns The dialog to draw.
  */
@@ -34,10 +36,13 @@ export function useStopShortcut({
   project,
   id,
   running,
+  managed = false,
   onClose,
 }: {
   /** Closes the chat's tab. */
   onClose: () => void;
+  /** A conductor manages it without letting the user in: never stopped. */
+  managed?: boolean;
   /** The agent's name, e.g. "OpenCode". */
   label: string;
   project: string | null;
@@ -49,7 +54,7 @@ export function useStopShortcut({
   const alive = useChatEngines((state) =>
     project ? (state.alive[project]?.includes(id) ?? false) : false,
   );
-  const live = running || alive;
+  const live = !managed && (running || alive);
   const [asking, setAsking] = useState(false);
   /** What the dialog said when it opened, kept while it closes. */
   const [wasRunning, setWasRunning] = useState(false);

@@ -55,9 +55,9 @@ var import_node_crypto5 = require("node:crypto");
 var import_node_fs6 = require("node:fs");
 var import_node_os6 = require("node:os");
 var import_node_path9 = require("node:path");
-// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/auth.ts
+
+// node_modules/.bun/@lanework+contracts@0.5.3/node_modules/@lanework/contracts/dist/index.js
 var LOOPBACK_CALLBACK_PATH = "/oauth/callback";
-// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/avatar.ts
 var PROJECT_AVATAR_COLORS = [
   "slate",
   "red",
@@ -204,16 +204,13 @@ function parseProjectAvatar(value) {
       return null;
   }
 }
-// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/boards.ts
 var WORK_ITEM_TYPES = ["epic", "issue", "task"];
 var PRIORITIES = ["low", "medium", "high"];
 var CHECKLIST_SECTIONS = ["decisions", "verify"];
 var STREAM_ROLES = ["research", "implement", "test"];
 var STREAM_ISOLATIONS = ["worktree", "shared"];
-// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/checkpoints.ts
 var CHECKPOINTS_KEPT = 5;
 var CHECKPOINT_MAX_BYTES = 16 * 1024;
-// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/common.ts
 var DEFAULT_API_ORIGIN = "https://api.lanework.dev";
 var AGENT_HEADER = "x-lanework-agent";
 var TOKEN_PREFIXES = {
@@ -241,7 +238,6 @@ function stripUserinfo(remote) {
     return value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/]*@/i, "$1");
   }
 }
-// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/endpoints.ts
 function seg(value) {
   if (value === "" || value === "." || value === "..")
     throw new Error(`Refusing the path segment ${JSON.stringify(value)}.`);
@@ -291,7 +287,6 @@ function withQuery(path, query) {
   const text = query === undefined ? "" : String(query);
   return text ? `${path}?${text}` : path;
 }
-// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/tools/control.ts
 var CONTROL_TOOL_LIMITS = {
   TITLE_MAX: 160,
   PROMPT_MAX: 30000,
@@ -317,7 +312,6 @@ var SCOPES = {
   type: "string[]",
   description: `The write scope: at most ${L.FILES_MAX} project-relative paths; a directory covers what is under it, ["."] the whole checkout, [] edits no file`
 };
-// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/tools/board.ts
 var BOARD_ID = {
   type: "string",
   description: "Workspace id of the board, from `list_boards`."
@@ -695,8 +689,6 @@ var BOARD_TOOLS = [
     required: ["board_id", "card"]
   }
 ];
-
-// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/tools/kit.ts
 var KIT_TOOL_LIMITS = {
   find_files: { default: 50, max: 200 },
   search_text: { default: 50, max: 200 },
@@ -813,7 +805,6 @@ var KIT_TOOLS = [
     required: ["query"]
   }
 ];
-// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/tools/instructions.ts
 var INTRO = "lanework is a Kanban board for AI-driven development. A card is a " + "review checklist: decisions to approve, then verify steps to prove. ";
 var FIND_BOARD = "Every tool needs a board_id and there is no default. A conversation " + "the Lanework app started is told its board_id when it starts: use that " + "one. Otherwise run `git remote get-url origin` and call " + "list_boards({ repo }) with the output as is. Exactly one board: use it. ";
 var NO_BOARD = "None: list_boards without repo and ask which board this repo belongs to, " + "offering also a new one (suggest `owner/name` from the remote); then " + "link_repo their pick, or create_board only if they asked. Linking a board " + "that has another repo MOVES the link. Several, or no remote: ask. Never " + "pick a board by its name. ";
@@ -829,7 +820,6 @@ var RUN_STREAMS = "A card with streams comes back from get_review with dispatch 
 var REVIEW_SHORT = "To review a card with the user: get_review it and ask with your option " + "picker, one single-select question per pick-ONE group (recommended " + "first) and the other decisions as multi-select, at most 4 questions a " + "turn; then call review_card ONCE with exactly what they picked (unpicked " + "offered boxes false, Other text as the note). Never tick a decision they " + "did not pick. Work starts only once it answers ready: true.";
 var BOARD_INSTRUCTIONS = INTRO + FIND_BOARD + NO_BOARD + NEW_CARD + REVIEW_GATE + CHECKPOINT_FLOW + STALE + HAND_OFF + WRITE_STREAMS + RUN_STREAMS + REVIEW_SHORT;
 var BOARD_WORKER_INSTRUCTIONS = INTRO + "This connection serves only the tools for working an existing card; " + "creating, linking or reviewing cards needs the full lanework server. " + FIND_BOARD + "None, several, or no git remote: ask the user. Never pick a board by " + "its name. Do not start a card still in todo with decisions unticked. " + CHECKPOINT_FLOW + HAND_OFF + RUN_STREAMS.trimEnd();
-// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/tools/outputs.ts
 var str = { kind: "string" };
 var num = { kind: "number" };
 var bool = { kind: "boolean" };
@@ -1013,7 +1003,6 @@ var BOARD_TOOL_OUTPUT_SHAPES = {
     review: list(obj({ ...CARD_REF_FIELDS, columnKey: str }))
   })
 };
-// node_modules/.bun/@lanework+contracts@0.5.0/node_modules/@lanework/contracts/src/tools/schema.ts
 function paramSchema(param) {
   const described = (schema) => param.description ? { ...schema, description: param.description } : schema;
   switch (param.type) {
@@ -1062,6 +1051,7 @@ function toolInputSchema(shape) {
     additionalProperties: false
   };
 }
+
 // apps/desktop/electron/main/git/runner.ts
 var import_node_child_process = require("node:child_process");
 var MAX_OUTPUT = 32 * 1024 * 1024;
@@ -1168,7 +1158,9 @@ var everyModel = [
 ];
 var listeners = new Set;
 var TOOL_TEXT_MAX = 16 * 1024;
+var TOOL_OUTPUT_FULL_MAX = 2 * 1024 * 1024;
 var CONVERSATION_READ_MAX = 32 * 1024 * 1024;
+var CONVERSATION_WINDOW_BYTES = 1024 * 1024;
 var PASTE_MAX = 5 * 1024 * 1024;
 var ACRONYMS = new Set([
   "ai",
@@ -1189,6 +1181,16 @@ var PREVIEW_HOSTS = new Set([
   "github.com",
   "www.github.com",
   "gist.github.com"
+]);
+var WEB_SEARCH_TOOLS = new Set([
+  "WebSearch",
+  "web_search",
+  "websearch"
+]);
+var WEB_FETCH_TOOLS = new Set([
+  "WebFetch",
+  "webfetch",
+  "fetch"
 ]);
 
 // apps/desktop/shared/orchestration.ts
@@ -1645,6 +1647,13 @@ async function listenForCallback(input) {
     }
     if (url.searchParams.get("state") !== input.state) {
       res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" }).end(page("Ignored", "That callback did not come from this sign-in."));
+      return;
+    }
+    const error = url.searchParams.get("error");
+    if (error) {
+      const denied = error === "access_denied";
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(denied ? page("Sign-in denied", "Nothing was connected. You can close this tab.") : page("Something went wrong", "The sign-in did not finish."));
+      rejectHit(new Error(denied ? "The sign-in was denied in the browser. Nothing was connected." : `The sign-in failed (${error.slice(0, 64)}).`));
       return;
     }
     const code = url.searchParams.get("code");

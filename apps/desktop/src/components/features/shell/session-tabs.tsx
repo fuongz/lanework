@@ -2,13 +2,22 @@ import { Add01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { Reorder } from "motion/react";
-import { useEffect, useMemo, useRef } from "react";
+import {
+  type ComponentProps,
+  type MouseEvent,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+} from "react";
 import type { AgentSession, TerminalAgent } from "#/../shared/terminal";
 import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
+import { useTeamLeads } from "#/components/shared/conversation/composer";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import { useCloseSessionTab } from "#/hooks/use-close-session-tab";
 import { useOrchestrationRuns } from "#/hooks/use-orchestration-runs";
 import { useProjectKey } from "#/hooks/use-project-key";
+import { leadIcon } from "#/lib/orchestration-prompt";
 import { cn } from "#/lib/utils";
 import { agentKey, useAgentSessions } from "#/stores/agent-sessions";
 import { useSessionTabs } from "#/stores/session-tabs";
@@ -32,9 +41,11 @@ const ACTIVE_CHIP =
 /**
  * The open sessions as tabs, in the window's title bar (FE-144).
  *
- * The project's tabs: opening a chat adds its tab, × or a middle click
- * closes one. Each is a chip, the one on screen white; on a page that is no
- * chat (Issues, Files…) none is. `+` starts a new chat.
+ * The project's tabs: opening a chat shows it in the preview tab (italic),
+ * which the next chat opened replaces; a double click on it, on its rail
+ * row, or a message sent keeps it. × or a middle click closes one. Each is
+ * a chip, the one on screen white; on a page that is no chat (Issues,
+ * Files…) none is. `+` starts a new chat.
  */
 export function SessionTabs() {
   const pathname = useRouterState({
@@ -49,6 +60,10 @@ export function SessionTabs() {
   const navigate = useNavigate();
   const tabs = useSessionTabs((state) => (slug ? state.bySlug[slug] : NONE));
   const open = useSessionTabs((state) => state.open);
+  const show = useSessionTabs((state) => state.show);
+  const preview = useSessionTabs((state) =>
+    slug ? state.preview[slug] : undefined,
+  );
   const closeTab = useCloseSessionTab(slug);
   const reorder = useSessionTabs((state) => state.reorder);
   /** A drag is on, or just ended: the tab's click must not open it. */
@@ -56,6 +71,11 @@ export function SessionTabs() {
   const byProject = useAgentSessions((state) => state.byProject);
   const project = useProjectKey(slug);
   const runs = useOrchestrationRuns(project);
+  const leads = useTeamLeads(project);
+  const leadsById = useMemo(
+    () => new Map((leads?.leads ?? []).map((lead) => [lead.id, lead])),
+    [leads],
+  );
   const live = useAgentSessions((state) => state.live);
   const strip = useRef<HTMLDivElement>(null);
 
@@ -65,10 +85,10 @@ export function SessionTabs() {
   const active =
     match && match[1] !== "new" ? decodeURIComponent(match[1]) : null;
 
-  // Opening a chat, from anywhere, opens its tab.
+  // Opening a chat, from anywhere, shows it in the preview tab.
   useEffect(() => {
-    if (slug && active) open(slug, active);
-  }, [slug, active, open]);
+    if (slug && active) show(slug, active);
+  }, [slug, active, show]);
 
   // A tab another project lists as its own was filed here by the bug above:
   // it goes, as its chat would open as an empty "Claude conversation" here.
@@ -100,7 +120,11 @@ export function SessionTabs() {
    */
   useEffect(() => {
     if (!slug) return;
-    const strip = [...(tabs ?? NONE), ...(fresh ? ["new"] : [])];
+    const strip = [
+      ...(tabs ?? NONE),
+      ...(preview ? [preview] : []),
+      ...(fresh ? ["new"] : []),
+    ];
     const at = strip.indexOf(active ?? (fresh ? "new" : ""));
     const show = (id: string | undefined) => {
       if (!id) return;
@@ -149,7 +173,7 @@ export function SessionTabs() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [slug, tabs, fresh, active, navigate]);
+  }, [slug, tabs, preview, fresh, active, navigate]);
 
   const sessions = useMemo(() => {
     const out = new Map<string, AgentSession>();
@@ -178,6 +202,113 @@ export function SessionTabs() {
 
   if (!slug) return null;
   const shown = tabs ?? NONE;
+  /** One tab's chip: a kept one, draggable, or the preview, in italics. */
+  const chip = (id: string, isPreview: boolean) => {
+    const session = sessions.get(id);
+    const worker = workers.get(id);
+    const selected = id === active;
+    const working = session
+      ? (live[agentKey(session)] ?? session.working)
+      : (worker?.working ?? false);
+    // A conductor's own conversation is named and marked as the conductor,
+    // as its rail row is, not by its first prompt.
+    const lead = session?.conductor ? leadsById.get(session.conductor) : null;
+    const title = lead?.name || session?.title || worker?.title || "Session";
+    const agent = session?.agent ?? worker?.agent;
+    return (
+      <ChipShell
+        preview={isPreview}
+        key={id}
+        value={id}
+        data-tab={id}
+        onDragStart={() => {
+          dragged.current = true;
+        }}
+        onDragEnd={() => {
+          // After the click the release fires, so it opens nothing.
+          window.setTimeout(() => {
+            dragged.current = false;
+          }, 0);
+        }}
+        whileDrag={{ scale: 1.03, zIndex: 20 }}
+        className={cn(
+          // A chip each, the open one white: chips sit on the ground
+          // in a row, apart from the card under them.
+          "group/tab relative flex h-8 max-w-56 min-w-28 shrink-0 items-center rounded-lg border transition-colors duration-150",
+          selected
+            ? ACTIVE_CHIP
+            : // No rim, only a faint fill: the open one is the chip.
+              "text-muted-foreground hover:text-foreground border-transparent bg-foreground/[0.04] hover:bg-rail-hover",
+        )}
+        onAuxClick={(event) => {
+          if (event.button !== 1) return;
+          event.preventDefault();
+          closeTab(id);
+        }}
+      >
+        <Link
+          to="/w/$slug/agents/chat/$conversation"
+          params={{ slug, conversation: id }}
+          role="tab"
+          aria-selected={selected}
+          draggable={false}
+          onClick={(event) => {
+            if (dragged.current) event.preventDefault();
+          }}
+          // A double click keeps it, as an editor's preview tab.
+          onDoubleClick={() => open(slug, id)}
+          title={title}
+          // The room for the × grows in, not at once: the chip is as wide
+          // as its label, so a jump in padding jolted every chip after it.
+          className="flex h-full min-w-0 flex-1 items-center gap-2 px-2.5 text-[13px] outline-none transition-[padding] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] group-focus-within/tab:pr-7 group-hover/tab:pr-7 motion-reduce:transition-none"
+        >
+          <span className="grid size-4 shrink-0 place-items-center">
+            {working ? (
+              <OrbitSpinner className="text-foreground size-3.5" />
+            ) : lead ? (
+              <HugeiconsIcon
+                icon={leadIcon(lead.icon)}
+                className="size-3.5"
+                strokeWidth={1.5}
+                aria-hidden="true"
+              />
+            ) : agent ? (
+              <TerminalKindIcon kind={agent} className="size-3.5" />
+            ) : null}
+          </span>
+          <span
+            className={cn(
+              "truncate",
+              selected && "font-medium",
+              isPreview && "italic",
+            )}
+          >
+            {title}
+          </span>
+        </Link>
+        <button
+          type="button"
+          aria-label={`Close ${title}`}
+          title="Close tab"
+          onClick={() => closeTab(id)}
+          className={cn(
+            // Over the chip's right end, so a chip at rest is padded the same
+            // on both sides; its label makes room while it shows.
+            "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] absolute top-1/2 right-1.5 grid size-5 -translate-y-1/2 place-items-center rounded-md transition-opacity duration-150",
+            // Under the pointer only, as the chips in the mock show none.
+            "opacity-0 group-hover/tab:opacity-100 focus-visible:opacity-100",
+          )}
+        >
+          <HugeiconsIcon
+            icon={Cancel01Icon}
+            className="size-3"
+            strokeWidth={2}
+            aria-hidden="true"
+          />
+        </button>
+      </ChipShell>
+    );
+  };
 
   return (
     <div className="session-tabs flex h-full min-w-0 items-center gap-1.5 self-stretch">
@@ -198,95 +329,10 @@ export function SessionTabs() {
           onReorder={(order) => reorder(slug, order)}
           className="flex h-full items-center gap-1.5"
         >
-          {shown.map((id) => {
-            const session = sessions.get(id);
-            const worker = workers.get(id);
-            const selected = id === active;
-            const working = session
-              ? (live[agentKey(session)] ?? session.working)
-              : (worker?.working ?? false);
-            const title = session?.title || worker?.title || "Session";
-            const agent = session?.agent ?? worker?.agent;
-            return (
-              <Reorder.Item
-                as="div"
-                key={id}
-                value={id}
-                data-tab={id}
-                onDragStart={() => {
-                  dragged.current = true;
-                }}
-                onDragEnd={() => {
-                  // After the click the release fires, so it opens nothing.
-                  window.setTimeout(() => {
-                    dragged.current = false;
-                  }, 0);
-                }}
-                whileDrag={{ scale: 1.03, zIndex: 20 }}
-                className={cn(
-                  // A chip each, the open one white: chips sit on the ground
-                  // in a row, apart from the card under them.
-                  "group/tab relative flex h-8 max-w-56 min-w-28 shrink-0 items-center rounded-lg border transition-colors duration-150",
-                  selected
-                    ? ACTIVE_CHIP
-                    : // No rim, only a faint fill: the open one is the chip.
-                      "text-muted-foreground hover:text-foreground border-transparent bg-foreground/[0.04] hover:bg-rail-hover",
-                )}
-                onAuxClick={(event) => {
-                  if (event.button !== 1) return;
-                  event.preventDefault();
-                  closeTab(id);
-                }}
-              >
-                <Link
-                  to="/w/$slug/agents/chat/$conversation"
-                  params={{ slug, conversation: id }}
-                  role="tab"
-                  aria-selected={selected}
-                  draggable={false}
-                  onClick={(event) => {
-                    if (dragged.current) event.preventDefault();
-                  }}
-                  title={title}
-                  // The room for the × grows in, not at once: the chip is as wide
-                  // as its label, so a jump in padding jolted every chip after it.
-                  className="flex h-full min-w-0 flex-1 items-center gap-2 px-2.5 text-[13px] outline-none transition-[padding] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] group-focus-within/tab:pr-7 group-hover/tab:pr-7 motion-reduce:transition-none"
-                >
-                  <span className="grid size-4 shrink-0 place-items-center">
-                    {working ? (
-                      <OrbitSpinner className="text-foreground size-3.5" />
-                    ) : agent ? (
-                      <TerminalKindIcon kind={agent} className="size-3.5" />
-                    ) : null}
-                  </span>
-                  <span className={cn("truncate", selected && "font-medium")}>
-                    {title}
-                  </span>
-                </Link>
-                <button
-                  type="button"
-                  aria-label={`Close ${title}`}
-                  title="Close tab"
-                  onClick={() => closeTab(id)}
-                  className={cn(
-                    // Over the chip's right end, so a chip at rest is padded the same
-                    // on both sides; its label makes room while it shows.
-                    "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] absolute top-1/2 right-1.5 grid size-5 -translate-y-1/2 place-items-center rounded-md transition-opacity duration-150",
-                    // Under the pointer only, as the chips in the mock show none.
-                    "opacity-0 group-hover/tab:opacity-100 focus-visible:opacity-100",
-                  )}
-                >
-                  <HugeiconsIcon
-                    icon={Cancel01Icon}
-                    className="size-3"
-                    strokeWidth={2}
-                    aria-hidden="true"
-                  />
-                </button>
-              </Reorder.Item>
-            );
-          })}
+          {shown.map((id) => chip(id, false))}
         </Reorder.Group>
+        {/* Not draggable: it is no kept tab until a double click keeps it. */}
+        {preview && !shown.includes(preview) && chip(preview, true)}
         {fresh && (
           <div
             data-tab="new"
@@ -351,5 +397,52 @@ export function SessionTabs() {
         />
       </button>
     </div>
+  );
+}
+
+/**
+ * A tab chip's shell: a `Reorder.Item` for a kept tab, so it drags; a plain
+ * one for the preview, which is in no reorder group.
+ */
+function ChipShell({
+  preview,
+  value,
+  className,
+  children,
+  onAuxClick,
+  onDragStart,
+  onDragEnd,
+  whileDrag,
+  "data-tab": dataTab,
+}: {
+  preview: boolean;
+  value: string;
+  className: string;
+  children: ReactNode;
+  onAuxClick: (event: MouseEvent<HTMLElement>) => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  whileDrag: ComponentProps<typeof Reorder.Item>["whileDrag"];
+  "data-tab": string;
+}) {
+  if (preview)
+    return (
+      <div className={className} onAuxClick={onAuxClick} data-tab={dataTab}>
+        {children}
+      </div>
+    );
+  return (
+    <Reorder.Item
+      as="div"
+      value={value}
+      data-tab={dataTab}
+      className={className}
+      onAuxClick={onAuxClick}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      whileDrag={whileDrag}
+    >
+      {children}
+    </Reorder.Item>
   );
 }

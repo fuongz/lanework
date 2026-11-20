@@ -42,11 +42,12 @@ import {
 import {
   claudeSubagentGoing,
   claudeWorking,
-  codexWorking,
+  codexTurnOpen,
   cutOffAt,
   lastActivity,
   STALE_MS,
   SUBAGENT_STALE_MS,
+  type SubagentMeta,
   turnTail,
 } from "../transcripts/activity";
 import {
@@ -222,10 +223,96 @@ function typed(text: unknown): string | null {
   });
 }
 
-/** The last whole lines of `file`, of a file `size` bytes long. */
-async function tailOf(file: string, size: number): Promise<Line[]> {
+/** The end of a transcript, as one pass read it. */
+export interface TailRead {
+  /** Where the bytes begin. */
+  start: number;
+  /** The bytes, up to the file's `size` when read; null when not kept. */
+  buffer: Buffer | null;
+  /** The whole lines of them. */
+  lines: Line[];
+}
+
+/** Tails kept: the sub-agents of a few busy conversations, and their own. */
+const TAILS_MAX = 96;
+/** By file, with the `size` and `mtimeMs` they were read at. */
+const tails = new Map<
+  string,
+  { size: number; mtimeMs: number; read: TailRead }
+>();
+
+/**
+ * The last whole lines of `file`, of a file `size` bytes long as of
+ * `mtimeMs`.
+ *
+ * NOTE: A write is followed by several reads of the same 64 KB end (the
+ * ingest, the working check, and each sub-agent's again), and a sub-agent's
+ * is the same for as long as it sits still. The read is kept by file and
+ * valid for the same `size` and `mtimeMs` only: any write changes one or the
+ * other, and the next asker reads anew. Asking with `buffer` keeps the bytes
+ * too, for a reader that wants more than lines (`lastCardIn`); the sub-agents
+ * leave them out, as there are many.
+ *
+ * @param mtimeMs What `size` was stat'ed with; without it nothing is kept.
+ */
+export async function tailOf(
+  file: string,
+  size: number,
+  mtimeMs?: number,
+  { buffer = false }: { buffer?: boolean } = {},
+): Promise<Line[]> {
+  return (await tailReadOf(file, size, mtimeMs, buffer)).lines;
+}
+
+/** {@link tailOf}, with the bytes it was made of, when asked to keep them. */
+export async function tailReadOf(
+  file: string,
+  size: number,
+  mtimeMs?: number,
+  buffer = false,
+): Promise<TailRead> {
+  const kept = tails.get(file);
+  if (
+    kept &&
+    mtimeMs !== undefined &&
+    kept.size === size &&
+    kept.mtimeMs === mtimeMs &&
+    (!buffer || kept.read.buffer)
+  ) {
+    tails.delete(file);
+    tails.set(file, kept);
+    return kept.read;
+  }
   const start = Math.max(0, size - CHUNK);
-  return lines(await readRange(file, start, CHUNK), { head: start === 0 });
+  const bytes = await readBytes(file, start, size - start);
+  const read: TailRead = {
+    start,
+    buffer: buffer ? bytes : null,
+    lines: lines(bytes.toString("utf8"), { head: start === 0 }),
+  };
+  if (mtimeMs !== undefined) {
+    tails.delete(file);
+    tails.set(file, { size, mtimeMs, read });
+    if (tails.size > TAILS_MAX)
+      tails.delete(tails.keys().next().value as string);
+  }
+  return read;
+}
+
+/** Up to `length` bytes of `file` from byte `start`. */
+async function readBytes(
+  file: string,
+  start: number,
+  length: number,
+): Promise<Buffer> {
+  const handle = await open(file, "r");
+  try {
+    const bytes = Buffer.alloc(length);
+    const { bytesRead } = await handle.read(bytes, 0, length, start);
+    return bytes.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
 }
 
 /** An mtime as the store keeps it: whole ms, so it compares equal again. */
@@ -375,46 +462,125 @@ async function claudeSubagents(
     .slice(0, SUBAGENT_LIMIT);
   return Promise.all(
     newest.map(async ({ sub, file, info }) => {
-      const meta = (await readFile(
+      const look = await subagentLook(
         join(folder, `agent-${sub}.meta.json`),
-        "utf8",
-      )
+        file,
+        info,
+      );
+      const { description, agentType, head } = look;
+      const described = description ? tidy(description) : null;
+      // No meta: what it was asked, its first line.
+      const title = described ?? head ?? "Sub-agent";
+      // A background one may go on long after its conversation went quiet.
+      const recent = now - info.mtimeMs <= SUBAGENT_STALE_MS;
+      const tail = recent ? await tailOf(file, info.size, info.mtimeMs) : [];
+      return {
+        id: sub,
+        title,
+        type: typeof agentType === "string" && agentType ? agentType : null,
+        updatedAt: info.mtime.toISOString(),
+        working:
+          recent &&
+          (await claudeSubagentGoing(file, {
+            mtimeMs: info.mtimeMs,
+            tail,
+            meta: async () => look,
+          })),
+      };
+    }),
+  );
+}
+
+/**
+ * What a sub-agent's `.meta.json` and first line say it was asked, and how it
+ * was started (the same fields the working check reads, so it need not read
+ * the file again).
+ */
+export interface SubagentLook extends SubagentMeta {
+  description: string | null;
+  agentType: unknown;
+  /** Its first prompt, read only when there is no description. */
+  head: string | null;
+}
+
+/** By sub-agent transcript, with what each was read at. */
+const looks = new Map<
+  string,
+  { metaSize: number; metaMtimeMs: number; look: SubagentLook; size: number }
+>();
+/** Most sub-agents remembered: a few busy conversations' worth. */
+const LOOKS_MAX = 256;
+
+/**
+ * What sub-agent `file` was asked and is, from its `.meta.json` (or, with
+ * none, from its first line).
+ *
+ * NOTE: A meta file is written once, when the sub-agent starts, yet each pass
+ * over its conversation read every one of up to {@link SUBAGENT_LIMIT} again.
+ * It is kept by path and read again only when its own `size` or `mtimeMs`
+ * differs; a missing one is told by its stat alone, so it is found once it
+ * appears. A first line that says nothing yet is looked for again once the
+ * transcript grows, and a meta that does not parse is read again.
+ *
+ * @param info The transcript's stat.
+ */
+export async function subagentLook(
+  metaFile: string,
+  file: string,
+  info: Stats,
+): Promise<SubagentLook> {
+  const meta = await stat(metaFile).catch(() => null);
+  const known = looks.get(file);
+  // No file at all is a state of its own: -1 never equals a real one.
+  const metaSize = meta?.size ?? -1;
+  const metaMtimeMs = meta?.mtimeMs ?? -1;
+  if (
+    known &&
+    known.metaSize === metaSize &&
+    known.metaMtimeMs === metaMtimeMs &&
+    (known.look.description || known.look.head || known.size === info.size)
+  )
+    return known.look;
+  const read = meta
+    ? ((await readFile(metaFile, "utf8")
         .then((text) => JSON.parse(text) as unknown)
         .catch(() => null)) as {
         description?: unknown;
         agentType?: unknown;
-      } | null;
-      const described =
-        typeof meta?.description === "string" && meta.description.trim()
-          ? tidy(meta.description)
-          : null;
-      // No meta: what it was asked, its first line.
-      const title =
-        described ??
-        lines(await readRange(file, 0, CHUNK).catch(() => ""), { head: true })
-          .filter((line) => line.type === "user")
-          .map((line) =>
-            typed((line.message as { content?: unknown })?.content),
-          )
-          .find(Boolean) ??
-        "Sub-agent";
-      // A background one may go on long after its conversation went quiet.
-      const recent = now - info.mtimeMs <= SUBAGENT_STALE_MS;
-      const tail = recent ? await tailOf(file, info.size) : [];
-      return {
-        id: sub,
-        title,
-        type:
-          typeof meta?.agentType === "string" && meta.agentType
-            ? meta.agentType
-            : null,
-        updatedAt: info.mtime.toISOString(),
-        working:
-          recent &&
-          (await claudeSubagentGoing(file, { mtimeMs: info.mtimeMs, tail })),
-      };
-    }),
-  );
+        toolUseId?: unknown;
+        requestShape?: unknown;
+      } | null)
+    : null;
+  const description =
+    typeof read?.description === "string" && read.description.trim()
+      ? read.description
+      : null;
+  const head = description
+    ? null
+    : (lines(await readRange(file, 0, CHUNK).catch(() => ""), { head: true })
+        .filter((line) => line.type === "user")
+        .map((line) => typed((line.message as { content?: unknown })?.content))
+        .find(Boolean) ?? null);
+  const look = {
+    description,
+    agentType: read?.agentType,
+    head,
+    toolUseId: typeof read?.toolUseId === "string" ? read.toolUseId : null,
+    background: read?.requestShape === "background",
+  };
+  // A meta that is there but unreadable (being written) is read again.
+  if (!meta || read) {
+    looks.delete(file);
+    looks.set(file, {
+      metaSize,
+      metaMtimeMs,
+      look,
+      size: info.size,
+    });
+    if (looks.size > LOOKS_MAX)
+      looks.delete(looks.keys().next().value as string);
+  }
+  return look;
 }
 
 /**
@@ -491,7 +657,9 @@ export async function ingestClaude(
     : (next.prompt ?? next.imagePrompt ?? null);
   // Nothing was ever asked in it: a CLI opened and closed, nothing to resume.
   if (!title) return SKIP;
-  const tail = await tailOf(file, state.size);
+  // NOTE: Kept with its bytes: the working check and the card of the settled
+  // write that follows read this same end (`agent-activity.ts`).
+  const tail = await tailOf(file, state.size, state.mtimeMs, { buffer: true });
   // A turn cut off with its process reads from the cut on (`cutOffAt`).
   const working =
     now - state.mtimeMs <= STALE_MS &&
@@ -695,7 +863,7 @@ async function codexSpawned(
   now: number,
 ): Promise<AgentSubagent> {
   const recent = now - info.mtimeMs <= STALE_MS;
-  const tail = recent ? await tailOf(file, info.size) : [];
+  const tail = recent ? await tailOf(file, info.size, info.mtimeMs) : [];
   const task =
     role.task ??
     lines(await readRange(file, 0, META_CHUNK), { head: true })
@@ -707,7 +875,7 @@ async function codexSpawned(
     title: [role.nickname, task].filter(Boolean).join(": ") || "Sub-agent",
     type: role.role,
     updatedAt: lastActivity(tail, "codex") ?? info.mtime.toISOString(),
-    working: recent && codexWorking(tail),
+    working: recent && (await codexTurnOpen(file, info.size, tail)),
   };
 }
 
@@ -777,13 +945,15 @@ export async function ingestCodex(
   const title = named ? tidy(named) : next.prompt;
   if (!title) return SKIP;
   const size = Math.max(info.size, end);
-  const tail = await tailOf(file, size);
+  const tail = await tailOf(file, size, info.mtimeMs);
   // A turn cut off with its process reads from the cut on (`cutOffAt`).
   const working =
     now - info.mtimeMs <= STALE_MS &&
-    codexWorking(
+    (await codexTurnOpen(
+      file,
+      size,
       cutOffAt(file, size) === null ? tail : await turnTail(file, size),
-    );
+    ));
   next.updatedAt =
     lastActivity(tail, "codex") ?? next.updatedAt ?? info.mtime.toISOString();
   next.live = working;

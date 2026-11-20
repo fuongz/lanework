@@ -4,8 +4,9 @@
 // NOTE: A leaf over `./jsonl` and `./journal` (FE-80, AM-03). The rail's session list and the
 // background tasks both ask it, and asking `agent-sessions.ts` made the two
 // import each other. Node only, no Electron.
-import { stat } from "node:fs/promises";
+import { open, stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
+import { isLaneworkEnvelope } from "../../../shared/conversation";
 import { readJournal } from "./journal";
 import {
   CHUNK,
@@ -26,7 +27,7 @@ import {
 export function cliTagged(text: unknown): boolean {
   if (typeof text !== "string") return false;
   const start = text.trimStart();
-  return start.startsWith("<") && !start.startsWith("<lanework_");
+  return start.startsWith("<") && !isLaneworkEnvelope(start);
 }
 
 /**
@@ -54,6 +55,11 @@ export function claudeWorking(tail: Line[]): boolean {
       continue;
     }
     if (line.type === "assistant") {
+      // NOTE: An API error (a usage limit, an overload) ends the turn, and
+      // the CLI writes no closing system line after it: read on to the
+      // prompt, the turn looked like it was still working.
+      if (line.isApiErrorMessage === true || typeof line.error === "string")
+        return false;
       const stop = (line.message as { stop_reason?: unknown } | undefined)
         ?.stop_reason;
       // `end_turn` alone is not the end: the closing system line follows it.
@@ -391,6 +397,14 @@ export function subagentPlace(
 
 /** Whether a Codex task is open: `task_started` with no end after it. */
 export function codexWorking(tail: Line[]): boolean {
+  return codexTurnIn(tail) ?? false;
+}
+
+/**
+ * The newest Codex turn marker in `tail`: true for `task_started`, false for
+ * its end, null when the lines hold none.
+ */
+function codexTurnIn(tail: Line[]): boolean | null {
   for (let at = tail.length - 1; at >= 0; at--) {
     const line = tail[at] as Line;
     if (line.type !== "event_msg") continue;
@@ -398,7 +412,119 @@ export function codexWorking(tail: Line[]): boolean {
     if (kind === "task_started") return true;
     if (kind === "task_complete" || kind === "turn_aborted") return false;
   }
-  return false;
+  return null;
+}
+
+/**
+ * Codex's turn markers as a rollout writes them, each with what it says.
+ *
+ * NOTE: Matched as bytes. Inside a JSON string every `"` is escaped, so a
+ * tool's output that quotes a marker can never match it.
+ */
+const CODEX_MARKERS: readonly (readonly [Buffer, boolean])[] = [
+  [Buffer.from('"payload":{"type":"task_started"'), true],
+  [Buffer.from('"payload":{"type":"task_complete"'), false],
+  [Buffer.from('"payload":{"type":"turn_aborted"'), false],
+];
+/** Bytes two steps of a scan share, so a marker across them is seen. */
+const MARKER_OVERLAP =
+  Math.max(...CODEX_MARKERS.map(([bytes]) => bytes.length)) - 1;
+/** How much of a rollout one step of the backward scan reads. */
+const SCAN_STEP = 1024 * 1024;
+
+/**
+ * Per rollout, what the backward scan last found: how far the file had been
+ * read, from where, and the newest marker's word (null: none at all).
+ */
+const codexTurns = new Map<
+  string,
+  { size: number; from: number; working: boolean | null }
+>();
+/** The most rollouts remembered; the oldest go first. */
+const CODEX_TURNS_MAX = 256;
+
+/** Remember what `file`'s turn read as, up to `size`. */
+function keepCodexTurn(
+  file: string,
+  size: number,
+  from: number,
+  working: boolean | null,
+) {
+  codexTurns.delete(file);
+  codexTurns.set(file, { size, from, working });
+  if (codexTurns.size > CODEX_TURNS_MAX)
+    codexTurns.delete(codexTurns.keys().next().value as string);
+}
+
+/**
+ * The newest turn marker in bytes `[from, size)` of `file`, read backward
+ * step by step, or null when there is none.
+ */
+async function codexMarkerBefore(
+  file: string,
+  from: number,
+  size: number,
+): Promise<boolean | null> {
+  if (size <= from) return null;
+  const handle = await open(file, "r");
+  try {
+    const buffer = Buffer.alloc(Math.min(SCAN_STEP, size - from));
+    let end = size;
+    while (end > from) {
+      const start = Math.max(from, end - SCAN_STEP);
+      const { bytesRead } = await handle.read(buffer, 0, end - start, start);
+      const chunk = buffer.subarray(0, bytesRead);
+      let newest = -1;
+      let working: boolean | null = null;
+      for (const [bytes, says] of CODEX_MARKERS) {
+        const at = chunk.lastIndexOf(bytes);
+        if (at > newest) {
+          newest = at;
+          working = says;
+        }
+      }
+      if (working !== null) return working;
+      if (start === from) break;
+      end = start + MARKER_OVERLAP;
+    }
+    return null;
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Whether a Codex rollout's turn is open, past what its last lines show.
+ *
+ * NOTE: {@link codexWorking} reads a {@link CHUNK} tail, and one tool output
+ * (a generated image, as base64) is a line of megabytes: a turn still at work
+ * then shows no marker there and read idle (FE-163). With none in `tail`, the
+ * file is searched backward as bytes for the newest. What was found is kept
+ * by file, so the next write only searches what was added since; a cut-off
+ * turn ({@link cutOffAt}) is searched from the cut on.
+ *
+ * @param tail The file's last lines, as `size` bytes long, from no earlier
+ *   than its cut, if it has one ({@link turnTail}).
+ */
+export async function codexTurnOpen(
+  file: string,
+  size: number,
+  tail: Line[],
+): Promise<boolean> {
+  const from = cutOffAt(file, size) ?? 0;
+  const seen = codexTurnIn(tail);
+  if (seen !== null) {
+    keepCodexTurn(file, size, from, seen);
+    return seen;
+  }
+  const kept = codexTurns.get(file);
+  // Kept for this file as it is now: shorter, or another cut, is read anew.
+  const usable = kept && kept.from === from && kept.size <= size;
+  const lo = usable ? Math.max(from, kept.size - MARKER_OVERLAP) : from;
+  const found = await codexMarkerBefore(file, lo, size);
+  const working = found ?? (usable ? kept.working : null);
+  keepCodexTurn(file, size, from, working);
+  return working ?? false;
 }
 
 /** Whether a user line is a local command (`/model`, `!ls`), not a prompt. */
@@ -465,19 +591,30 @@ export const STALE_MS = 10 * 60_000;
 /**
  * Whether the newest turn of `file` really ended.
  *
+ * NOTE: `known` is the file's mtime and its last {@link CHUNK} as lines, for
+ * a caller that has just read them through the ingest's shared tail cache
+ * (`tailReadOf`): the file is then neither stat'ed nor read again. The lines
+ * are only read here, never reordered, as the cache hands out the same array
+ * to every asker.
+ *
+ * @param known The file's mtime and last lines, when the caller has them.
  * @returns false for an interruption, a missing file or a stale run.
  */
 export async function transcriptCompleted(
   file: string,
   agent: "claude" | "codex",
+  known?: { mtimeMs: number; tail: Line[] },
 ): Promise<boolean> {
   try {
-    const info = await stat(file);
-    if (Date.now() - info.mtimeMs > STALE_MS) return false;
-    const start = Math.max(0, info.size - CHUNK);
-    const tail = lines(await readRange(file, start, CHUNK), {
-      head: start === 0,
-    });
+    const info = known ? undefined : await stat(file);
+    // NOTE: Stale is told before any read, as it always was.
+    if (Date.now() - (known?.mtimeMs ?? info?.mtimeMs ?? 0) > STALE_MS)
+      return false;
+    const start = Math.max(0, (info?.size ?? 0) - CHUNK);
+    const held =
+      known?.tail ??
+      lines(await readRange(file, start, CHUNK), { head: start === 0 });
+    const tail = [...held];
     if (agent === "codex") {
       for (const line of tail.reverse()) {
         if (line.type !== "event_msg") continue;
@@ -576,8 +713,11 @@ export async function markTurnCut(
   try {
     const { size } = await stat(file);
     const tail = await turnTail(file, size);
-    if (!(agent === "codex" ? codexWorking(tail) : claudeWorking(tail)))
-      return false;
+    const working =
+      agent === "codex"
+        ? await codexTurnOpen(file, size, tail)
+        : claudeWorking(tail);
+    if (!working) return false;
     cuts.delete(file);
     cuts.set(file, size);
     if (cuts.size > CUTS_MAX) cuts.delete(cuts.keys().next().value as string);
@@ -621,7 +761,9 @@ export async function transcriptWorking(
     const info = await stat(file);
     if (Date.now() - info.mtimeMs > STALE_MS) return false;
     const tail = await turnTail(file, info.size);
-    return agent === "codex" ? codexWorking(tail) : claudeWorking(tail);
+    return agent === "codex"
+      ? await codexTurnOpen(file, info.size, tail)
+      : claudeWorking(tail);
   } catch {
     return false;
   }
@@ -650,9 +792,13 @@ const META_MAX = 64 * 1024;
  * What a Claude sub-agent's `.meta.json` says of how it was started: the
  * call that spawned it, and whether in the background.
  */
-async function subagentMeta(
-  file: string,
-): Promise<{ toolUseId: string | null; background: boolean }> {
+export interface SubagentMeta {
+  toolUseId: string | null;
+  background: boolean;
+}
+
+/** {@link SubagentMeta} read straight from the file, uncached. */
+async function subagentMeta(file: string): Promise<SubagentMeta> {
   const meta = record(
     await readRange(file.replace(/\.jsonl$/, ".meta.json"), 0, META_MAX)
       .then((text) => JSON.parse(text) as unknown)
@@ -692,11 +838,22 @@ function lastWord(tail: Line[], fallback: number): number {
  * NOTE: A workflow run that ended ends its agents too. That is the run's
  * status, which its caller has: this does not read it.
  *
- * @param known Its file's mtime and last lines, when the caller has them.
+ * NOTE: `known` lets a caller that already holds what this reads hand it
+ * over: the file's mtime and last lines from the ingest's shared tail cache
+ * (`tailReadOf`), and `meta` from its sub-agent cache (`subagentLook`). `meta`
+ * is a function so that it is only asked for where the file is read here:
+ * never for a workflow's agent. Without them this reads them itself.
+ *
+ * @param known Its file's mtime and last lines, and how it was started, when
+ *   the caller has them.
  */
 export async function claudeSubagentGoing(
   file: string,
-  known?: { mtimeMs: number; tail: Line[] },
+  known?: {
+    mtimeMs: number;
+    tail: Line[];
+    meta?: () => Promise<SubagentMeta>;
+  },
 ): Promise<boolean> {
   try {
     let mtimeMs = known?.mtimeMs;
@@ -714,7 +871,7 @@ export async function claudeSubagentGoing(
     if (!sub || !place) return age <= STALE_MS;
     if (place.run) return !(await readJournal(place.run)).results.has(sub);
     const [meta, ends] = await Promise.all([
-      subagentMeta(file),
+      known?.meta ? known.meta() : subagentMeta(file),
       claudeSubagentEnds(place.conversation),
     ]);
     if (!meta.background && !ends.background.has(sub) && age > STALE_MS)

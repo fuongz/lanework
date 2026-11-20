@@ -6,6 +6,7 @@ import {
   isAgentSessionIdOf,
   isTerminalAgent,
   type TerminalAgent,
+  userMayActOn,
 } from "#/../shared/terminal";
 import { StatusPing } from "#/components/shared/agents/status-ping";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
@@ -106,6 +107,9 @@ export function LaunchedSessionCard({
       : false,
   );
   const working = !awaiting && (live ?? listed?.working ?? false);
+  // Only the conductor's say lets the user answer it; one not listed yet
+  // was just started, without access unless told otherwise.
+  const forYou = listed ? userMayActOn(listed) : false;
   const title = listed?.title || session.title;
   return (
     <button
@@ -117,7 +121,7 @@ export function LaunchedSessionCard({
         })
       }
       title={`Open “${title}”`}
-      aria-label={`Open “${title}”${awaiting ? ", waiting for you" : working ? ", working" : ""}`}
+      aria-label={`Open “${title}”${awaiting ? (forYou ? ", waiting for you" : ", waiting") : working ? ", working" : ""}`}
       className="group/launched border-border hover:bg-foreground/[0.03] flex max-w-full min-w-0 items-center gap-2.5 self-start rounded-xl border px-3 py-2 text-left text-[13px] transition-colors"
     >
       <span className="relative flex shrink-0">
@@ -136,7 +140,7 @@ export function LaunchedSessionCard({
       </span>
       {awaiting && (
         <span className="text-destructive shrink-0 text-xs">
-          Waiting for you
+          {forYou ? "Waiting for you" : "Waiting"}
         </span>
       )}
       <HugeiconsIcon

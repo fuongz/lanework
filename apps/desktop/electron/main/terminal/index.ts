@@ -33,15 +33,19 @@ import {
   isAgentSessionIdOf,
   isBoardId,
   isCardBrief,
+  isManaged,
   isTerminalAgent,
   isTerminalKind,
   type ListeningPort,
+  type SessionLauncher,
   type SubagentTranscript,
+  TERMINAL_AGENTS,
   TERMINAL_LIMITS,
   type TerminalAgent,
   type TerminalCommand,
   type TerminalSession,
   terminalChannels,
+  userMayAct,
 } from "../../../shared/terminal";
 import {
   openSessionStore,
@@ -50,6 +54,7 @@ import {
 } from "../../session-store";
 import { assertTrustedSender, broadcast, handle } from "../ipc";
 import { workerFolderOf } from "../orchestration";
+import { isTeamLeadKept, onTeamLeadsChanged } from "../orchestration/leads";
 import { appHomeDir, sessionStorePath } from "../paths";
 import {
   knownProject,
@@ -103,6 +108,7 @@ import {
 import { runOpencode } from "./opencode-cli";
 import { listPorts, stopPort } from "./ports";
 import { readSubagentTranscript, subagentRequest } from "./subagent-transcript";
+import { foldThreads, type RailThreads } from "./thread-rail";
 import { codexCli, codexDirs, registerUsage } from "./usage";
 
 let host: UtilityProcess | null = null;
@@ -372,7 +378,7 @@ export async function registerAgentSession(
   id: string,
   folder?: string | null,
   source?: string | null,
-  launchedBy?: { conductor: string; project: string } | null,
+  launchedBy?: SessionLauncher | null,
 ): Promise<void> {
   if (!isAgentSessionIdOf(agent, id))
     throw new Error("A valid conversation is required");
@@ -487,6 +493,124 @@ export async function bindConductorConversation(
     id: conductor,
     project,
   });
+}
+
+/**
+ * Let the user work in session `id` a conductor started, or take that back
+ * (`sessions.access`). The rail hears at once.
+ *
+ * @returns False when the store has no such session a conductor started.
+ */
+export function setSessionUserAccess(
+  agent: TerminalAgent,
+  id: string,
+  userAccess: boolean,
+): boolean {
+  if (!isAgentSessionIdOf(agent, id)) return false;
+  const sessions = sessionStore();
+  const key = sessionKey(agent, id);
+  if (!sessions.setUserAccess(key, userAccess)) return false;
+  const project = sessions.getSession(key)?.project;
+  if (project) touchRail(project);
+  return true;
+}
+
+/**
+ * The conductor that started conversation `id` with `sessions.start`, and
+ * whether the user may work in it; null for one the user started.
+ *
+ * NOTE: By id alone: the page names a conversation without its agent, and
+ * Claude's and Codex's ids share a shape, so each agent's key is tried.
+ */
+function launcherOf(id: string): SessionLauncher | null {
+  const starting = launching.get(id);
+  if (starting) return starting;
+  const sessions = sessionStore();
+  for (const agent of TERMINAL_AGENTS) {
+    if (!isAgentSessionIdOf(agent, id)) continue;
+    const launchedBy = sessions.getSession(sessionKey(agent, id))?.launchedBy;
+    if (launchedBy) return launchedBy;
+  }
+  return null;
+}
+
+/**
+ * Sessions a conductor is starting, by id, until the store has their row.
+ *
+ * NOTE: The store hears of a started session once its first turn is under
+ * way. Until then the user was let in: the composer showed while that turn
+ * ran, and main took the user's send and Stop.
+ */
+const launching = new Map<string, SessionLauncher>();
+
+/** A conductor starts session `id`: it is managed from now on. */
+export function noteLaunching(id: string, launchedBy: SessionLauncher): void {
+  launching.set(id, launchedBy);
+}
+
+/** Session `id` is in the store now, or never started: forget it here. */
+export function doneLaunching(id: string): void {
+  launching.delete(id);
+}
+
+/** Who started conversation `id`, whatever access it gives: for the page. */
+export function launcherOfConversation(id: string): SessionLauncher | null {
+  return launcherOf(id);
+}
+
+/**
+ * The conductor that keeps the user out of a session it started, or null
+ * when the user may act on it: send to it, stop it, answer its permissions.
+ *
+ * NOTE: A session whose conductor is gone is the user's again: nobody is
+ * left to let them in, and the rail lists it under Agents once more. A
+ * conductor that cannot be looked up still counts.
+ */
+export async function managerOf(
+  launchedBy: SessionLauncher | null | undefined,
+): Promise<SessionLauncher | null> {
+  if (!launchedBy || launchedBy.userAccess) return null;
+  const kept = await isTeamLeadKept(
+    launchedBy.project,
+    launchedBy.conductor,
+  ).catch(() => true);
+  return isManaged(launchedBy, () => kept) ? launchedBy : null;
+}
+
+/**
+ * `rows` with `managed` on each a conductor started, by the rule
+ * {@link managerOf} gates the user's calls with: the page shows or hides
+ * its controls by it, never by `launchedBy` alone. Each conductor is
+ * looked up once.
+ */
+async function withManaged(rows: AgentSession[]): Promise<AgentSession[]> {
+  const kept = new Map<string, Promise<boolean>>();
+  const keptOf = (launcher: SessionLauncher) => {
+    const key = `${launcher.project}\0${launcher.conductor}`;
+    let found = kept.get(key);
+    if (!found) {
+      found = isTeamLeadKept(launcher.project, launcher.conductor).catch(
+        () => true,
+      );
+      kept.set(key, found);
+    }
+    return found;
+  };
+  return Promise.all(
+    rows.map(async (row) => {
+      const launcher = row.launchedBy;
+      if (!launcher) return row;
+      const isKept = userMayAct(launcher) || (await keptOf(launcher));
+      return { ...row, managed: isManaged(launcher, () => isKept) };
+    }),
+  );
+}
+
+/** {@link managerOf} the session conversation `id` names. */
+export function managerOfConversation(
+  id: string,
+): Promise<SessionLauncher | null> {
+  return managerOf(launcherOf(id));
 }
 
 /**
@@ -656,10 +780,52 @@ function railOf(listed: AgentSession[], now = Date.now()): AgentSession[] {
   return out;
 }
 
+/**
+ * The threads the conversation view joined (`conversation.switchAgent`),
+ * once it registered: injected, so this feature never imports that one.
+ */
+let railThreads: RailThreads | null = null;
+
+/** Tell the rail how sessions are joined into threads. */
+export function setRailThreads(threads: RailThreads | null): void {
+  railThreads = threads;
+}
+
+/** A thread of `project` changed: its rail lists it again. */
+export function threadsChanged(project: string): void {
+  touchRail(movedProjectTarget(project) ?? project);
+}
+
+/** One stored row as the rail lists it; null when gone or archived. */
+function railRowOf(agent: TerminalAgent, id: string): AgentSession | null {
+  const row = sessionStore().getSession(sessionKey(agent, id));
+  if (!row || row.archivedAt !== null) return null;
+  return {
+    id: row.id,
+    agent: row.agent,
+    title: row.name ?? row.cliTitle,
+    cliTitle: row.cliTitle,
+    updatedAt: row.updatedAt,
+    pinnedAt: row.pinnedAt,
+    conductor: row.conductor?.id ?? null,
+    working: row.working,
+    card: row.card,
+    subagents: row.subagents,
+    background: row.background,
+    ...(row.launchedBy ? { launchedBy: row.launchedBy } : {}),
+  };
+}
+
 /** `project`'s rows as the store has them, before {@link railOf}. */
 function storedRail(project: string): AgentSession[] {
   // Twice the limit: rows nothing was typed in yet take no place on it.
-  return sessionStore().listRail(project, AGENT_SESSION_LIMIT * 2);
+  // NOTE: One row per thread: a session that continues one in place is
+  // its head's row, never its own (`foldThreads`).
+  return foldThreads(
+    sessionStore().listRail(project, AGENT_SESSION_LIMIT * 2),
+    railThreads,
+    railRowOf,
+  );
 }
 
 /**
@@ -676,7 +842,7 @@ async function agentSessionsOf(project: string): Promise<AgentSession[]> {
   const folder = await terminalFolder(project);
   if (!folder) return [];
   watchProject(project, folder);
-  return railOf(storedRail(project));
+  return withManaged(railOf(storedRail(project)));
 }
 
 /** `project`'s listed conversations as `agent:id`; none when unreadable. */
@@ -1103,6 +1269,12 @@ export async function killTerminal(id: string): Promise<void> {
 
 /** Register the terminal's IPC handlers and the prompt before quitting. */
 export function registerTerminal(devUrl?: string): void {
+  // A conductor deleted hands its sessions back to the user (`managerOf`):
+  // the rail lists them again, now `managed: false`.
+  onTeamLeadsChanged((project) => {
+    for (const each of project === null ? [...watching.keys()] : [project])
+      touchRail(each);
+  });
   // Claude's and Codex's limits: their IPC, and the poll that starts now so
   // Claude's are known before the footer first asks.
   registerUsage(devUrl, {
@@ -1153,6 +1325,12 @@ export function registerTerminal(devUrl?: string): void {
         const row = sessionStore().getSession(sessionKey(kind, resume));
         if (!row || row.project !== project || row.archivedAt !== null)
           throw new Error("That conversation is not in this project.");
+        // A terminal is the user typing into it: a session a conductor
+        // started is the conductor's until it lets the user in.
+        if (await managerOf(row.launchedBy))
+          throw new Error(
+            "A conductor manages this session. Ask it to give you access first.",
+          );
       }
       const card = args.length === 6 ? await cardFor(project, args[5]) : null;
       if (card && (kind === "shell" || resume !== undefined))

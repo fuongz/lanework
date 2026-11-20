@@ -21,6 +21,7 @@ import {
   useState,
 } from "react";
 import {
+  AGENT_LABELS,
   type CommandSource,
   type ComposerSettings,
   type ConversationAgent,
@@ -69,6 +70,7 @@ import {
   type ChipSpec,
 } from "./composer.editor";
 import { known, looked, remember } from "./composer.known";
+import { handoffAgent, LimitTab, useUsageLimit } from "./composer.limit";
 import { AttachMenu, ModelMenu, PermissionMenu } from "./composer.menus";
 import { QuotesTab } from "./composer.quotes";
 
@@ -441,6 +443,11 @@ export const Composer = forwardRef<
      * Null on a new conversation, where the model picked picks the CLI.
      */
     agent?: ConversationAgent | null;
+    /**
+     * The conversation's id, for its usage-limit tab and auto-continue.
+     * Absent on the new-conversation page: no tab.
+     */
+    conversation?: string;
     settings: ComposerSettings;
     onSettings: (next: Partial<ComposerSettings>) => void;
     working: boolean;
@@ -478,6 +485,17 @@ export const Composer = forwardRef<
      * and goes as written.
      */
     onClear?: () => void;
+    /**
+     * Hand the thread to another CLI in place: the model menu offers every
+     * CLI's models, and once one of another CLI than `agent` is picked
+     * (`settings.model`), the next message goes here instead of `onSend`.
+     * Absent, or with no `agent`: the menu keeps to `agent`'s models.
+     */
+    onHandoff?: (handoff: {
+      text: string;
+      attachments: OutgoingAttachment[];
+      names: { name: string; image: boolean; size?: number }[];
+    }) => Promise<boolean>;
   }
 >(function Composer(
   {
@@ -487,6 +505,7 @@ export const Composer = forwardRef<
     corner,
     project,
     agent = null,
+    conversation,
     settings,
     onSettings,
     working,
@@ -497,6 +516,7 @@ export const Composer = forwardRef<
     onEditLastQueued,
     onOrchestrate,
     onClear,
+    onHandoff,
   },
   ref,
 ) {
@@ -514,6 +534,25 @@ export const Composer = forwardRef<
   const [dragging, setDragging] = useState(false);
   /** What the next message quotes, in order. */
   const [quotes, setQuotes] = useState<Quote[]>([]);
+  const canHandoff = Boolean(onHandoff && agent);
+  /**
+   * The CLI the next message hands the thread to: the picked model's, when
+   * it is not the conversation's own.
+   *
+   * NOTE: Derived from the model, not kept apart: one Model menu picks both
+   * a model of this CLI and another's, and picking this CLI's again stays.
+   */
+  const handingTo = canHandoff ? handoffAgent(settings.model, agent) : null;
+  const [modelMenu, setModelMenu] = useState(false);
+  // NOTE: The limit of the CLI the next message goes to: a model of another
+  // one picked to hand off is not stopped by this one's limit.
+  const sendsOn = handingTo ?? agent;
+  const usage = useUsageLimit(
+    project,
+    conversation ?? null,
+    sendsOn,
+    settings.model,
+  );
   const [suggest, setSuggest] = useState<{
     kind: Kind;
     start: number;
@@ -1023,7 +1062,18 @@ export const Composer = forwardRef<
     // What is sent names each attachment where its chip is; the draft kept
     // to restore on a failure keeps the chips.
     const plain = withoutMarks(text, attachments);
-    const raw = onOrchestrate ? orchestrateRequest(plain) : null;
+    // A handoff's message goes as typed: `/orchestrate` plans here, on this
+    // chat's CLI, never in the session the handoff starts.
+    const handing = handingTo !== null;
+    // NOTE: Main refuses a handoff while the thread's newest session runs a
+    // turn (`switchAgent`): said where the message is, which stays typed.
+    if (handing && working && agent) {
+      setError(
+        `${AGENT_LABELS[agent]} is still working. Stop it or wait for its turn to end, then send to hand off to ${AGENT_LABELS[handingTo]}.`,
+      );
+      return;
+    }
+    const raw = onOrchestrate && !handing ? orchestrateRequest(plain) : null;
     const split = raw === null ? null : splitLead(raw);
     if (split && !split.request) {
       setError(
@@ -1073,9 +1123,15 @@ export const Composer = forwardRef<
         ...(file.size === undefined ? {} : { size: file.size }),
       }));
       ok =
-        request !== null && onOrchestrate
-          ? await onOrchestrate(request, outgoing, names, teamLead)
-          : await onSend(`${quoted}${plain.trim()}`, outgoing, names);
+        handing && onHandoff
+          ? await onHandoff({
+              text: `${quoted}${plain.trim()}`,
+              attachments: outgoing,
+              names,
+            })
+          : request !== null && onOrchestrate
+            ? await onOrchestrate(request, outgoing, names, teamLead)
+            : await onSend(`${quoted}${plain.trim()}`, outgoing, names);
     } catch {
       setError("Could not send. Your message has been restored.");
     }
@@ -1199,10 +1255,36 @@ export const Composer = forwardRef<
         ? "send"
         : "mic";
   const reduceMotion = useReducedMotion() ?? false;
+  // The menu goes with the row it hangs from: closed, not reopened later.
+  useEffect(() => {
+    if (suspended || dictating) setModelMenu(false);
+  }, [suspended, dictating]);
 
   return (
     <>
+      {sendsOn && (
+        <LimitTab
+          agent={sendsOn}
+          limit={usage.limit}
+          reset={usage.reset}
+          autoContinue={usage.autoContinue}
+          canResume={usage.canResume}
+          canSnooze={usage.canSnooze}
+          onAutoContinue={(on) => void usage.setAutoContinue(on)}
+          onSnooze={() => {
+            void usage.snooze().then((snoozed) => {
+              if (snoozed) field.current?.focus();
+            });
+          }}
+          stacked={quotes.length > 0}
+          // NOTE: Hand off is the Model menu: another harness's model picked
+          // there sends the next message in place.
+          onHandOff={canHandoff ? () => setModelMenu(true) : undefined}
+        />
+      )}
       <QuotesTab
+        // Under the limit tab: one stack, rounded on top only.
+        className={sendsOn && usage.limit ? "rounded-t-none" : undefined}
         quotes={quotes}
         onRemove={(key) => {
           setQuotes((previous) =>
@@ -1485,7 +1567,13 @@ export const Composer = forwardRef<
                         render={
                           <button
                             type="button"
-                            aria-label={working ? "Queue message" : "Send"}
+                            aria-label={
+                              handingTo
+                                ? `Send in ${AGENT_LABELS[handingTo]}`
+                                : working
+                                  ? "Queue message"
+                                  : "Send"
+                            }
                             disabled={sending}
                             onClick={() => void send()}
                             className={cn(GLASS, "disabled:opacity-50")}
@@ -1499,7 +1587,11 @@ export const Composer = forwardRef<
                         />
                       </TooltipTrigger>
                       <TooltipContent className="gap-3">
-                        {working ? "Queue" : "Send"}
+                        {handingTo
+                          ? `Send in ${AGENT_LABELS[handingTo]}`
+                          : working
+                            ? "Queue"
+                            : "Send"}
                         <Kbd>↵</Kbd>
                       </TooltipContent>
                     </Tooltip>
@@ -1533,6 +1625,9 @@ export const Composer = forwardRef<
                   settings={settings}
                   agent={agent}
                   onChange={onSettings}
+                  open={modelMenu}
+                  onOpenChange={setModelMenu}
+                  switchable={canHandoff}
                 />
                 <PermissionMenu
                   permission={settings.permission}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 import type { ConductorStopPreview } from "#/../shared/conductor-sessions";
 import type { OrchestrationRun, TeamLead } from "#/../shared/orchestration";
@@ -8,7 +8,6 @@ import {
 } from "#/components/features/orchestration/orchestration-panel.store";
 import { liveRun, useOrchestrationRuns } from "#/hooks/use-orchestration-runs";
 import { conductorConversation } from "#/lib/conductors";
-import { deriveProposals } from "#/lib/orchestration-prompt";
 import { agentKey, useAgentSessions } from "#/stores/agent-sessions";
 import { awaitingKey, useAwaiting } from "#/stores/awaiting";
 import { useChatEngines } from "#/stores/chat-engines";
@@ -109,11 +108,12 @@ function useWaitingPermissions(project: string): ReadonlySet<string> {
 
 /**
  * The conductor conversations whose latest proposal waits on the user:
- * read from their transcripts, on mount and whenever one goes idle.
+ * asked of main, on mount and whenever one goes idle.
  *
- * NOTE: Only conductors' own conversations are read, a handful at most, and
- * only when a turn ends: the proposal is the transcript's (FE-87), kept
- * nowhere else.
+ * NOTE: Main answers only the proposal's id (`latestProposal`), never the
+ * conversation: the proposal is the transcript's (FE-87), kept nowhere
+ * else, and reading the whole transcript over IPC for one id cost a full
+ * parse and copy of up to 32 MB per conductor per turn.
  */
 function useWaitingProposals(
   project: string,
@@ -125,6 +125,12 @@ function useWaitingProposals(
   // Each conversation's latest ready proposal id, or null.
   const [latest, setLatest] = useState<Record<string, string | null>>({});
   const key = conversations.join(",");
+  // NOTE: Read through a ref, never a dependency: a list that changes
+  // identity (a caller that builds it each render) re-read every transcript
+  // on every render, and each answer rendered again (an idle main at 95%
+  // CPU). A lead edited since is read with the next idle turn.
+  const leadsRef = useRef(leads);
+  leadsRef.current = leads;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `key` stands for the list.
   useEffect(() => {
     const surface = window.desktop?.conversation;
@@ -132,16 +138,16 @@ function useWaitingProposals(
     let gone = false;
     const read = (id: string) =>
       surface
-        .read(project, id)
-        .then((conversation) => {
+        .latestProposal(project, id, leadsRef.current)
+        .then((value) => {
           if (gone) return;
-          const ready = deriveProposals(conversation.turns, false, leads).at(
-            -1,
+          // The same answer keeps the same object: a new one renders the
+          // rail again, which must not be what asks for the next read.
+          setLatest((current) =>
+            id in current && current[id] === value
+              ? current
+              : { ...current, [id]: value },
           );
-          setLatest((current) => ({
-            ...current,
-            [id]: ready?.status === "ready" ? ready.id : null,
-          }));
         })
         .catch(() => {});
     for (const id of conversations) void read(id);
@@ -158,7 +164,7 @@ function useWaitingProposals(
       gone = true;
       off();
     };
-  }, [project, key, leads]);
+  }, [project, key]);
   return useMemo(() => {
     const waiting = new Set<string>();
     for (const [id, proposal] of Object.entries(latest)) {
@@ -186,17 +192,15 @@ export function useConductorStatuses(
   const permissions = useWaitingPermissions(project);
   const awaiting = useAwaiting((state) => state.byKey);
 
+  // NOTE: Keyed on the ids, not the list: `conversations` follows `own`, so
+  // a list built afresh each render must not make a new one each render.
+  const ids = conductors.map((conductor) => conductor.id).join("\n");
   const own = useMemo(() => {
     const out: Record<string, string | null> = {};
-    for (const conductor of conductors)
-      out[conductor.id] = conductorConversation(
-        sessions,
-        started,
-        project,
-        conductor.id,
-      );
+    for (const id of ids ? ids.split("\n") : [])
+      out[id] = conductorConversation(sessions, started, project, id);
     return out;
-  }, [conductors, sessions, started, project]);
+  }, [ids, sessions, started, project]);
   const conversations = useMemo(
     () => Object.values(own).filter((id): id is string => id !== null),
     [own],

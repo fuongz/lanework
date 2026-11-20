@@ -21,6 +21,7 @@ import {
   type ConversationEvent,
   conversationChannels,
   type DesktopConversationApi,
+  type UsageLimitsState,
 } from "../../shared/conversation";
 import {
   attentionChannels,
@@ -270,8 +271,27 @@ const handoff: DesktopHandoffApi = {
  * becomes a flag.
  */
 const conversation: DesktopConversationApi = {
-  read: (project, id) =>
-    ipcRenderer.invoke(conversationChannels.read, project, id),
+  // NOTE: `options` only when given: main counts the arguments.
+  read: (project, id, options) =>
+    options === undefined
+      ? ipcRenderer.invoke(conversationChannels.read, project, id)
+      : ipcRenderer.invoke(conversationChannels.read, project, id, options),
+  readBefore: (project, id, before, limit) =>
+    ipcRenderer.invoke(
+      conversationChannels.readBefore,
+      project,
+      id,
+      before,
+      limit ?? null,
+    ),
+  readToolCalls: (project, id, tools) =>
+    ipcRenderer.invoke(conversationChannels.readToolCalls, project, id, tools),
+  summary: (project, id) =>
+    ipcRenderer.invoke(conversationChannels.summary, project, id),
+  toolOutput: (project, id, call) =>
+    ipcRenderer.invoke(conversationChannels.toolOutput, project, id, call),
+  latestProposal: (project, id, leads) =>
+    ipcRenderer.invoke(conversationChannels.latestProposal, project, id, leads),
   start: (request) => ipcRenderer.invoke(conversationChannels.start, request),
   send: (request) => ipcRenderer.invoke(conversationChannels.send, request),
   stop: (project, id) =>
@@ -336,6 +356,36 @@ const conversation: DesktopConversationApi = {
   pathForFile: (file) => webUtils.getPathForFile(file),
   onEvent: (listener) =>
     subscribe<ConversationEvent>(conversationChannels.event, listener),
+  subscribe: (project, id, after) =>
+    ipcRenderer.invoke(
+      conversationChannels.subscribe,
+      project,
+      id,
+      after ?? null,
+    ),
+  unsubscribe: (project, id) =>
+    ipcRenderer.invoke(conversationChannels.unsubscribe, project, id),
+  replay: (project, id, after) =>
+    ipcRenderer.invoke(conversationChannels.replay, project, id, after),
+  usageLimits: () => ipcRenderer.invoke(conversationChannels.usageLimits),
+  setAutoContinue: (project, id, on) =>
+    ipcRenderer.invoke(conversationChannels.setAutoContinue, project, id, on),
+  onUsageLimits: (listener) =>
+    subscribe<UsageLimitsState>(
+      conversationChannels.usageLimitsEvent,
+      listener,
+    ),
+  handoff: (request) =>
+    ipcRenderer.invoke(conversationChannels.handoff, request),
+  handoffLinks: (project, id) =>
+    ipcRenderer.invoke(conversationChannels.handoffLinks, project, id),
+  switchAgent: (project, thread, request) =>
+    ipcRenderer.invoke(
+      conversationChannels.switchAgent,
+      project,
+      thread,
+      request,
+    ),
 };
 
 /** The agent CLIs on this machine: versions, accounts and updates. */

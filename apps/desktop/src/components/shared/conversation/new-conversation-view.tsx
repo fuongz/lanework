@@ -37,6 +37,7 @@ import { useBoard } from "#/stores/board";
 import { conductorMemory, withLiveContext } from "#/stores/conductor-context";
 import { handSentMessage } from "#/stores/conversation-sends";
 import { useNewChats } from "#/stores/new-chats";
+import { useSessionTabs } from "#/stores/session-tabs";
 import {
   BoardPicks,
   ConductorPicks,
@@ -182,6 +183,8 @@ export function NewConversationPage({
         ...(conductor ? { conductor: conductor.id } : {}),
       });
       end(project, conversation);
+      // Started working: its tab is kept, not a preview.
+      useSessionTabs.getState().open(slug, conversation);
       handSentMessage(JSON.stringify([slug, conversation]), {
         key: "first",
         since: null,

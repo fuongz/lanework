@@ -11,8 +11,10 @@ import {
   workflowCounts,
 } from "#/components/shared/agents/background-tasks";
 import { useBackgroundTasks } from "#/components/shared/agents/use-background-tasks";
+import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import { cn } from "#/lib/utils";
 import { subagentKey, useAgentSessions } from "#/stores/agent-sessions";
+import { useConductorSessions } from "./conductor-sessions.list";
 
 interface CapsuleRow {
   key: string;
@@ -170,21 +172,30 @@ function Capsule({
  * Its sub-agents, background shells and monitors, and each workflow run with
  * its agents (FE-01/D3): the ones still running, and those of the current
  * prompt once done. Hidden when there are none.
+ *
+ * On a conductor's chat, also the sessions it started (FE-128) while one
+ * works or waits, or that ended since the last prompt: the Agents rail hides
+ * them, and this keeps them in sight under the conversation, not only in the
+ * Sessions panel.
  */
 export function JobCapsules({
   slug,
   project,
   session,
   since,
+  conductor = null,
 }: {
   slug: string;
   project: string;
   session: AgentSession | undefined;
+  /** The conductor whose chat this is, by id; null on any other chat. */
+  conductor?: string | null;
   /** When the last prompt was sent, ISO: older finished jobs are not shown. */
   since: string | null;
 }) {
   const navigate = useNavigate();
   const live = useAgentSessions((state) => state.live);
+  const { sessions: started } = useConductorSessions(project, conductor);
   // Read for a Claude conversation on screen whatever its listing counted:
   // the listing skips a quiet transcript it never read (FE-111/D2).
   const { tasks } = useBackgroundTasks(
@@ -217,7 +228,16 @@ export function JobCapsules({
   );
   const workflows = shown.filter((task) => task.workflow !== null);
 
-  if (subagents.length === 0 && jobs.length === 0 && workflows.length === 0)
+  const launched = started.filter(
+    (entry) => entry.activity !== "idle" || recent(entry.session.updatedAt),
+  );
+
+  if (
+    subagents.length === 0 &&
+    jobs.length === 0 &&
+    workflows.length === 0 &&
+    launched.length === 0
+  )
     return null;
 
   const openTask = (task: BackgroundTask) =>
@@ -228,8 +248,41 @@ export function JobCapsules({
 
   const going = subagents.filter((entry) => entry.working).length;
   const runningJobs = jobs.filter((task) => task.status === "running").length;
+  const busy = launched.filter((entry) => entry.activity !== "idle").length;
   return (
     <div className="flex max-h-72 flex-col gap-2 overflow-y-auto">
+      {launched.length > 0 && (
+        <Capsule
+          title="Sessions"
+          meta={
+            busy > 0
+              ? `${busy} of ${launched.length} working`
+              : `${launched.length} session${launched.length === 1 ? "" : "s"}`
+          }
+          rows={launched.map(({ session: started, activity }) => ({
+            key: started.id,
+            label: started.title,
+            value:
+              activity === "awaiting"
+                ? "waiting for you"
+                : activity === "working"
+                  ? "working"
+                  : "done",
+            running: activity !== "idle",
+            icon: (
+              <TerminalKindIcon
+                kind={started.agent}
+                className="size-3 shrink-0 opacity-60"
+              />
+            ),
+            onOpen: () =>
+              void navigate({
+                to: "/w/$slug/agents/chat/$conversation",
+                params: { slug, conversation: started.id },
+              }),
+          }))}
+        />
+      )}
       {subagents.length > 0 && (
         <Capsule
           title="Sub-agents"

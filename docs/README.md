@@ -19,6 +19,7 @@ Start with the row that fits you. Every page is short and links onward.
 - [How Lanework works](architecture/overview.md): the app, the board, the agents and how they connect.
 - [Lanework Kit](architecture/lanework-kit.md): code search for agents, on `lwk`.
 - [Dictation](architecture/dictation.md): speech to text in the composer.
+- [Handoff](architecture/handoff.md): continuing a chat on another agent, and the context it carries.
 
 ## Standards
 

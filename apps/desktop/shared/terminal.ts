@@ -130,6 +130,69 @@ export function isCardBrief(value: unknown): value is CardBrief {
 }
 
 /**
+ * The conductor that started a session with `sessions.start` (FE-128), the
+ * project it did so in, and whether the user may work in it.
+ */
+export interface SessionLauncher {
+  conductor: string;
+  project: string;
+  /**
+   * The user may send to it, stop it and answer its permissions. False by
+   * default: the session is the conductor's, and the user sees it
+   * read-only. Only that conductor changes it (`sessions.access`).
+   */
+  userAccess: boolean;
+}
+
+/**
+ * Whether the user may act on a session: send to it, stop it, answer its
+ * permissions. Every session but one a conductor started without granting
+ * access.
+ */
+export function userMayAct(
+  launchedBy: SessionLauncher | null | undefined,
+): boolean {
+  return !launchedBy || launchedBy.userAccess;
+}
+
+/**
+ * Whether a conductor keeps the user out of a session: it started the
+ * session, has not let them in, and is still one of the project's
+ * conductors (`kept`). This is the one rule main gates the user's calls
+ * with (`managerOf`) and sends the page as `managed`.
+ *
+ * NOTE: A session whose conductor is gone is the user's again: nobody is
+ * left to let them in, or to answer what it asks.
+ */
+export function isManaged(
+  launchedBy: SessionLauncher | null | undefined,
+  kept: (launcher: SessionLauncher) => boolean,
+): boolean {
+  return !!launchedBy && !userMayAct(launchedBy) && kept(launchedBy);
+}
+
+/**
+ * Whether the user may act on a session as the page has it (a rail row, a
+ * conversation read): main's `managed` when it says, else what
+ * `launchedBy` alone says. Every control the page shows or hides for a
+ * conductor's session (Allow/Deny, the composer, Stop, the island, the
+ * read-only notice) asks this, so none of them disagrees with main.
+ *
+ * NOTE: Without `managed` the conductor is taken to be kept, as main takes
+ * one it cannot look up: a control shown that main refuses is worse than
+ * one shown a moment late.
+ */
+export function userMayActOn(
+  session:
+    | { launchedBy?: SessionLauncher | null; managed?: boolean }
+    | null
+    | undefined,
+): boolean {
+  if (typeof session?.managed === "boolean") return !session.managed;
+  return userMayAct(session?.launchedBy);
+}
+
+/**
  * One conversation an agent's CLI kept on disk for a project's folder.
  *
  * What the rail's Agents group lists, and what a click resumes.
@@ -162,9 +225,21 @@ export interface AgentSession {
   /**
    * The conductor that started it with `sessions.start` (FE-128), and the
    * project it did so in. Such a session is the conductor's own: the rail
-   * hides it from Agents. Absent for any session the user started.
+   * hides it from Agents. Absent for any session the user started. Without
+   * `userAccess`, the user sees it read-only ({@link userMayAct}).
    */
-  launchedBy?: { conductor: string; project: string };
+  launchedBy?: SessionLauncher;
+  /**
+   * Main's word on whether `launchedBy`'s conductor keeps the user out now
+   * ({@link isManaged}): set on every row with `launchedBy`. False once that
+   * conductor is gone. Read through {@link userMayActOn}.
+   */
+  managed?: boolean;
+  /**
+   * The agents a thread ran on, oldest first, each once: set only when an
+   * in-place handoff joined sessions of more than one agent into this row.
+   */
+  agents?: TerminalAgent[];
   /**
    * Whether its agent is thinking or working right now: a turn is open in
    * the transcript.

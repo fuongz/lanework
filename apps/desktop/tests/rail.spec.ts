@@ -345,8 +345,11 @@ test("at its narrowest the rail keeps every label on one line, and a ghost butto
     expect((await search.boundingBox())?.height ?? 99).toBeLessThan(32);
     const label = search.getByText("Search", { exact: true });
     expect((await label.boundingBox())?.height ?? 99).toBeLessThan(20);
-    // ⌘K steps aside so the word can stay.
-    await expect(search.locator("kbd")).toBeHidden();
+    // The word stays whole: ⌘K steps aside first (a size container) when the
+    // row is too narrow for both.
+    expect(
+      await label.evaluate((node) => node.scrollWidth <= node.clientWidth),
+    ).toBe(true);
     for (const name of ["Issues", "Settings"]) {
       const row = page.getByRole("link", { name: new RegExp(`^${name}`) });
       expect((await row.boundingBox())?.height ?? 99, name).toBeLessThan(32);
@@ -373,14 +376,15 @@ test("one hover background slides from row to row, and fades once the pointer le
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
     const hover = page.locator(".app-sidebar").getByTestId("rail-hover");
-    const rail = page.getByRole("navigation", { name: "Repository" });
+    const rail = page.getByRole("navigation", { name: "Project" });
     const top = async (locator: ReturnType<Page["locator"]>) =>
       Math.round((await locator.boundingBox())?.y ?? -1);
     const opacity = () =>
       hover.evaluate((node) => Number(getComputedStyle(node).opacity));
 
-    const changes = rail.getByRole("link", { name: /^Changes/ });
-    const history = rail.getByRole("link", { name: "History" });
+    // NOTE: Two neighbouring rows: the Project group's Issues and Files.
+    const changes = rail.getByRole("link", { name: /^Issues/ });
+    const history = rail.getByRole("link", { name: "Files", exact: true });
     await changes.hover();
     await expect.poll(() => top(hover)).toBe(await top(changes));
     await expect.poll(opacity).toBe(1);
@@ -454,22 +458,12 @@ test("shared hover follows project, settings, select, filter and issue rows", as
       page.getByRole("option", { name: "Alpha", exact: true }),
     ).toBeHidden();
 
-    await follow(page.getByRole("link", { name: /FE-01 Card number 1/ }));
-    await follow(page.getByRole("link", { name: /FE-02 Card number 2/ }));
+    // A row reads title first, its id under it.
+    await follow(page.getByRole("link").filter({ hasText: "FE-01" }));
+    await follow(page.getByRole("link").filter({ hasText: "FE-02" }));
 
-    await page.getByRole("combobox", { name: "Group by" }).click();
-    await follow(page.getByRole("option", { name: "Status", exact: true }));
-    const selectHover = await follow(
-      page.getByRole("option", { name: "Priority", exact: true }),
-    );
-    await page.keyboard.press("ArrowDown");
-    await expect
-      .poll(() =>
-        selectHover.evaluate((node) => Number(getComputedStyle(node).opacity)),
-      )
-      .toBe(0);
-    await page.keyboard.press("Escape");
-
+    // NOTE: The list has no Group by select any more; the filter's own
+    // listbox below still covers the select-style hover.
     await page.getByRole("button", { name: "Filter", exact: true }).click();
     await follow(page.getByRole("menuitem", { name: "Status", exact: true }));
     await follow(page.getByRole("option", { name: "To-Do", exact: true }));
@@ -494,7 +488,11 @@ test("shared hover follows project, settings, select, filter and issue rows", as
     await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
 
-    await page.getByRole("link", { name: "Settings", exact: true }).click();
+    // The rail's Settings row carries its shortcut: "Settings ⌘,".
+    await page
+      .getByTestId("sidebar")
+      .getByRole("link", { name: /^Settings/ })
+      .click();
     await follow(page.getByRole("link", { name: "Account", exact: true }));
     await follow(page.getByRole("link", { name: "Appearance", exact: true }));
     await page.mouse.move(900, 400);
@@ -593,14 +591,13 @@ test("folded, the rail keeps every destination as an icon — named, lit when op
       "New issue",
       "Search",
       "Issues",
-      "Changes",
-      "History",
+      "Commits",
       "Settings",
     ];
     const ys: number[] = [];
     for (const name of names) {
       const slot = rail.getByRole(
-        /^(Issues|Changes|History|Settings)$/.test(name) ? "link" : "button",
+        /^(Issues|Commits|Settings)$/.test(name) ? "link" : "button",
         { name, exact: true },
       );
       await expect(slot).toBeVisible();
@@ -629,10 +626,10 @@ test("folded, the rail keeps every destination as an icon — named, lit when op
     // V2: a slot goes where its row does, and the open page is lit.
     const issues = rail.getByRole("link", { name: "Issues", exact: true });
     await expect(issues).toHaveAttribute("aria-current", "page");
-    const history = rail.getByRole("link", { name: "History", exact: true });
-    await history.click();
-    await expect.poll(() => page.url()).toContain("/w/alpha/history");
-    await expect(history).toHaveAttribute("aria-current", "page");
+    const commits = rail.getByRole("link", { name: "Commits", exact: true });
+    await commits.click();
+    await expect.poll(() => page.url()).toContain("/w/alpha/changes");
+    await expect(commits).toHaveAttribute("aria-current", "page");
     await expect(issues).not.toHaveAttribute("aria-current", "page");
 
     // Named on hover, with the shortcut.

@@ -28,6 +28,8 @@ const QUOTA_SCAN = 1024 * 1024;
 const QUOTA_CANDIDATES = 40;
 /** Of those, the most read before giving up on one that reported usage. */
 const QUOTA_FILES = 5;
+/** Rollouts whose last report is kept; a few more than are ever weighed. */
+const QUOTA_KEPT = 16;
 /** Goals asked for at once: a rail lists 20 conversations, plus its pinned. */
 const GOALS_MAX = 200;
 /** What of an objective crosses to the page; Codex's has no limit. */
@@ -104,6 +106,12 @@ function codexQuotaOf(tail: Line[], at: string): CodexQuota | null {
   return null;
 }
 
+/** The usage each rollout last reported, by file, at the `size` and mtime. */
+const quotas = new Map<
+  string,
+  { size: number; mtimeMs: number; quota: CodexQuota | null }
+>();
+
 /**
  * The account's usage as the newest Codex turn on this machine reported it
  * (FE-41/D1): the last `token_count` of the rollout written last.
@@ -131,17 +139,31 @@ export async function readCodexQuota(home: string): Promise<CodexQuota | null> {
     .sort((a, b) => b.info.mtimeMs - a.info.mtimeMs)
     .slice(0, QUOTA_FILES);
   for (const { file, info } of newest) {
+    // NOTE: What a rollout last reported is a function of its bytes alone, and
+    // the page asks on every settled write: a rollout that has not grown (same
+    // size and mtime) is answered from the last read, a null one included,
+    // which would otherwise read back up to QUOTA_SCAN again.
+    const known = quotas.get(file);
+    if (known && known.size === info.size && known.mtimeMs === info.mtimeMs) {
+      if (known.quota) return known.quota;
+      continue;
+    }
     try {
+      let quota: CodexQuota | null = null;
       // Its end first; further back only when nothing there said.
       for (const span of [TAIL, QUOTA_SCAN]) {
         const start = Math.max(0, info.size - span);
         const tail = lines(await readRange(file, start, info.size - start), {
           head: start === 0,
         });
-        const quota = codexQuotaOf(tail, info.mtime.toISOString());
-        if (quota) return quota;
-        if (start === 0) break;
+        quota = codexQuotaOf(tail, info.mtime.toISOString());
+        if (quota || start === 0) break;
       }
+      quotas.delete(file);
+      quotas.set(file, { size: info.size, mtimeMs: info.mtimeMs, quota });
+      if (quotas.size > QUOTA_KEPT)
+        quotas.delete(quotas.keys().next().value as string);
+      if (quota) return quota;
     } catch {
       // Gone, or being rotated: the next one.
     }

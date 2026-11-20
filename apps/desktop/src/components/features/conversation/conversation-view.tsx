@@ -8,7 +8,7 @@ import {
   SecurityCheckIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import {
   Fragment,
   useCallback,
@@ -24,6 +24,7 @@ import {
   agentOfModel,
   type CompactionTurn,
   type ComposerSettings,
+  type ConversationAgent,
   DEFAULT_SETTINGS,
   mentionsAsNames,
   type OutgoingAttachment,
@@ -33,7 +34,7 @@ import {
   type UserTurn,
 } from "#/../shared/conversation";
 import { canLead } from "#/../shared/orchestration";
-import type { AgentSession } from "#/../shared/terminal";
+import { type AgentSession, userMayActOn } from "#/../shared/terminal";
 import { PermissionStack } from "#/components/features/conversation/permission-stack";
 import { ContextButton } from "#/components/shared/agents/conversation-facts";
 import { RenameAgentDialog } from "#/components/shared/agents/rename-agent-dialog";
@@ -74,6 +75,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
+import { Skeleton } from "#/components/ui/skeleton";
 import { TooltipProvider } from "#/components/ui/tooltip";
 import { useCloseSessionTab } from "#/hooks/use-close-session-tab";
 import { useOrchestrationRuns } from "#/hooks/use-orchestration-runs";
@@ -98,6 +100,7 @@ import {
   useConversationSends,
 } from "#/stores/conversation-sends";
 import { useNewChats } from "#/stores/new-chats";
+import { useSessionTabs } from "#/stores/session-tabs";
 import {
   AwaitingProposal,
   LeadRuns,
@@ -116,6 +119,13 @@ import {
   useSessionsPanel,
 } from "./conductor-sessions";
 import { useClearConversation } from "./conversation-view.clear";
+import {
+  drawnTurns,
+  useAnchoredTurns,
+  useEarlierRuns,
+} from "./conversation-view.earlier";
+import { HandoffLine, useHandoffLinks } from "./conversation-view.handoff";
+import { ManagedNotice } from "./conversation-view.managed";
 import { RollingText } from "./conversation-view.rolling";
 import { useStopShortcut } from "./conversation-view.stop";
 import { FileOpenerProvider } from "./file-opener";
@@ -187,7 +197,30 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     delta,
     permissions,
     setEngine,
+    resync,
+    earlier,
+    loadingEarlier,
+    loadEarlier: loadEarlierPage,
   } = useConversation(project, id);
+  // NOTE: A thread is named by its head everywhere (main names its events,
+  // its rail row and its limits so); a link to a later session of it (an
+  // older handoff's "Continued in", a notification of before) reads the
+  // whole thread but hears none of its events. Main's read answers the
+  // head's id: the page moves there, in place of this entry.
+  // Only a thread's read moves it (its turns carry their session): any
+  // other answers the id it was asked, however main spells it.
+  const headId =
+    conversation?.turns.some((turn) => turn.session) && conversation.id
+      ? conversation.id
+      : null;
+  useEffect(() => {
+    if (headId && headId !== id)
+      void navigate({
+        to: "/w/$slug/agents/chat/$conversation",
+        params: { slug, conversation: headId },
+        replace: true,
+      });
+  }, [headId, id, navigate, slug]);
   // The CLI whose conversation it is — Claude Code or Codex — once read.
   const agent = conversation?.agent ?? null;
   const label = AGENT_LABELS[agent ?? "claude"];
@@ -221,11 +254,11 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
         params: { slug, conversation: asWorker.run.lead },
       });
   };
+  // NOTE: By id alone: a thread's row keeps its head's agent (main folds
+  // it so), while `agent` is its newest session's.
   const listed = useAgentSessions((state) =>
     project && agent
-      ? state.byProject[project]?.find(
-          (entry) => entry.agent === agent && entry.id === id,
-        )
+      ? state.byProject[project]?.find((entry) => entry.id === id)
       : undefined,
   );
   // NOTE: The agent as known, not a fabricated default: main checks the
@@ -256,14 +289,20 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   // other one's model.
   // The model its last answer came from: what a conversation begun outside
   // the app (OpenCode's TUI) last ran on, when it has no settings here.
+  // NOTE: Main's answer when no turn held names one: the read sends the
+  // newest turns only (`Conversation.summary`).
+  // NOTE: For a thread, its NEWEST session's: the search stops at the last
+  // handoff marker, whose target is that session, so an older session's
+  // model on another agent never reads as the last run.
   const ranOn = useMemo(() => {
     const turns = conversation?.turns ?? [];
     for (let at = turns.length - 1; at >= 0; at--) {
       const turn = turns[at];
       if (turn?.role === "assistant" && turn.model) return turn.model;
+      if (turn?.role === "handoff") return turn.to.model;
     }
-    return null;
-  }, [conversation?.turns]);
+    return conversation?.summary?.model ?? null;
+  }, [conversation?.turns, conversation?.summary]);
   useEffect(() => {
     if (!loaded || settings || !agent) return;
     // NOTE: A model this CLI cannot run falls to its default, which for
@@ -406,6 +445,9 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       });
   }, [tab, navigate, slug]);
   const working = running || (conversation?.working ?? false);
+  // The newest proposal planned before the window main sent, read from its
+  // own turns, which are never drawn (`useAnchoredTurns`).
+  const { planned, anchored } = useAnchoredTurns(turns, conversation?.summary);
   // `/orchestrate` (FE-87): its planning prompt and proposal JSON stay out of
   // what is drawn; `turns` itself keeps them so sends still match on landing.
   const orchestration = useOrchestration({
@@ -413,11 +455,16 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     lead: id,
     // OpenCode never leads (FE-105/D5): no planning turn it would be refused.
     leadAgent: canLead(agent) ? agent : null,
-    turns,
+    turns: planned,
     working,
     send: (text, attachments, names) => send(text, attachments, names),
   });
-  const shown = orchestration.turns;
+  const shown = useMemo(
+    () => drawnTurns(orchestration.turns, anchored),
+    [orchestration.turns, anchored],
+  );
+  // Older proposals' runs: kept in their place, and titled.
+  const earlierRuns = useEarlierRuns(orchestration, conversation?.summary);
   // FE-120: what came before the latest compaction is out of the model's
   // context; it stays in the chat, dimmer.
   const compactedBefore = useMemo(() => {
@@ -425,6 +472,24 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       if (shown[at]?.role === "compaction") return at;
     return -1;
   }, [shown]);
+  // What came before it also starts folded away; "Load earlier turns" brings
+  // back one compaction's worth at a time. Folded again in another chat.
+  // NOTE: One control for both: it unfolds what the page holds first, and
+  // once nothing held is folded, reads the page of turns before them from
+  // main (the read sends only the newest). A page read is shown whole, its
+  // own compactions too (`count` past every fold).
+  const compactions = useMemo(
+    () => shown.flatMap((turn, at) => (turn.role === "compaction" ? [at] : [])),
+    [shown],
+  );
+  const [unfolded, setUnfolded] = useState({ id, count: 0 });
+  const revealed = unfolded.id === id ? unfolded.count : 0;
+  /** The first turn drawn: a compaction's divider, or the very first. */
+  const firstShown = compactions[compactions.length - 1 - revealed] ?? 0;
+  const visible = useMemo(
+    () => (firstShown > 0 ? shown.slice(firstShown) : shown),
+    [shown, firstShown],
+  );
   const awaiting = useAwaitingProposal(orchestration);
   // A settled run, after the reply that proposed it (FE-134).
   const runsInPlace = useRunsInPlace(orchestration);
@@ -432,6 +497,40 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   // listing (or the start that is ahead of it) and the leads are read.
   const startedFor = useNewChats((state) => state.started[id]?.conductor);
   const conductorId = listed?.conductor ?? startedFor ?? null;
+  // Whether the rail's listing of this project has been read: until then a
+  // session cannot be told from one a conductor started.
+  const listingRead = useAgentSessions((state) =>
+    project ? state.byProject[project] !== undefined : false,
+  );
+  // The conductor that started this session (FE-128), when one did.
+  // NOTE: By conductor alone, as its Sessions panel lists them.
+  // The rail's row when listed (it follows access changes live), else what
+  // main's read said: a session a conductor just started is not listed yet,
+  // and its first turn showed the composer.
+  const launchedBy = listed?.launchedBy ?? conversation?.launchedBy ?? null;
+  const launcherId = launchedBy?.conductor ?? null;
+  const launcher =
+    !conductorId && launcherId
+      ? (orchestration.leads?.find((entry) => entry.id === launcherId) ?? null)
+      : null;
+  // Read-only, as a worker is, until its conductor lets the user in
+  // (`sessions.access`). Main refuses the same calls, so this only keeps
+  // controls off the screen that would fail. One whose conductor is gone is
+  // the user's again: main says which (`managed`), on the rail's row when
+  // it carries the launch, else on its read, by the rule it gates with.
+  const managed = !userMayActOn(listed?.launchedBy ? listed : conversation);
+  const readOnly = Boolean(asWorker) || managed;
+  /**
+   * Whether the breadcrumb's place (Sessions, Conductors, which conductor)
+   * is known: the conversation read, the listing read, and the team leads
+   * read when a conductor is in it.
+   *
+   * NOTE: Drawn before that, it flashed "Sessions" and then "Conductors".
+   */
+  const placeKnown =
+    conversation !== null &&
+    listingRead &&
+    (!(conductorId || launcherId) || orchestration.leads !== null);
   const conductor = conductorId
     ? (orchestration.leads?.find((entry) => entry.id === conductorId) ?? null)
     : null;
@@ -487,7 +586,8 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   const [showDown, setShowDown] = useState(false);
   const anchors = useRef(new Map<string, HTMLElement>());
   const [current, setCurrent] = useState<string | null>(null);
-  const entries = useMemo(() => promptLines(shown), [shown]);
+  // Only the turns drawn: a folded one has no place to jump to.
+  const entries = useMemo(() => promptLines(visible), [visible]);
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
 
@@ -517,6 +617,34 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   /** When the reader last touched the scroller: wheel, key, touch, pointer. */
   const touched = useRef(0);
 
+  /**
+   * The distance from the scroller's end when earlier turns were asked for:
+   * they go in above, and what was on screen stays where it was.
+   */
+  const keepFromEnd = useRef<number | null>(null);
+  const canLoadEarlier = firstShown > 0 || earlier > 0;
+  const loadEarlier = () => {
+    if (loadingEarlier) return;
+    const node = scroller.current;
+    keepFromEnd.current = node ? node.scrollHeight - node.scrollTop : null;
+    if (firstShown > 0) {
+      setUnfolded({ id, count: revealed + 1 });
+      return;
+    }
+    setUnfolded({ id, count: Number.POSITIVE_INFINITY });
+    loadEarlierPage();
+  };
+  /** The first turn drawn: earlier turns came in when it changes. */
+  const topTurn = visible[0]?.id ?? null;
+  // NOTE: A page read from main lands a moment after the click: the place
+  // is kept once it is in (`loadingEarlier` back to false), not before.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: placed again only when earlier turns came in.
+  useLayoutEffect(() => {
+    const node = scroller.current;
+    if (keepFromEnd.current === null || !node || loadingEarlier) return;
+    node.scrollTop = node.scrollHeight - keepFromEnd.current;
+    keepFromEnd.current = null;
+  }, [topTurn, loadingEarlier]);
   const toBottom = useCallback((smooth: boolean) => {
     const box = scroller.current;
     if (!box) return;
@@ -624,8 +752,9 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                 )
                 .finally(() => setForking(false));
             },
-      // A worker has no composer to reply into (FE-91/U18).
-      onReply: asWorker
+      // A worker has no composer to reply into (FE-91/U18), nor has a
+      // session a conductor manages.
+      onReply: readOnly
         ? undefined
         : (text) => composer.current?.quote(text, "reply"),
       onAnswer: answer,
@@ -642,7 +771,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       agent,
       label,
       setActionError,
-      asWorker,
+      readOnly,
     ],
   );
 
@@ -674,7 +803,11 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
               live,
               agent,
               roots.primary,
-              lastConductorContext(turns),
+              // Main's answer when the window holds no conductor turn.
+              lastConductorContext(
+                turns,
+                conversation?.summary?.conductorContext ?? null,
+              ),
               memory,
               roots.others,
             ),
@@ -699,6 +832,8 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     ]);
     atBottom.current = true;
     requestAnimationFrame(() => toBottom(true));
+    // A message sent keeps the chat's tab: it is no preview any more.
+    useSessionTabs.getState().open(slug, id);
     try {
       const next = await surface.send({
         project,
@@ -732,6 +867,95 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     }
   };
 
+  /**
+   * The agent a `switchAgent` just moved the thread to, until a read of the
+   * thread says so: the composer counts the thread as on it meanwhile.
+   *
+   * NOTE: Without it, a message sent before that read would read as one more
+   * handoff, as the picked model is still another agent's than the read's.
+   */
+  const [switchedTo, setSwitchedTo] = useState<ConversationAgent | null>(null);
+  useEffect(() => {
+    if (switchedTo && agent === switchedTo) setSwitchedTo(null);
+  }, [agent, switchedTo]);
+
+  /**
+   * The message continues the thread on the picked model's agent IN PLACE
+   * (`switchAgent`): a new native session joins it, the chat stays on this
+   * page, and a Context handoff divider marks where.
+   */
+  const handoff = async ({
+    text,
+    attachments,
+    names,
+  }: {
+    text: string;
+    attachments: OutgoingAttachment[];
+    names: { name: string; image: boolean; size?: number }[];
+  }): Promise<boolean> => {
+    const surface = window.desktop?.conversation;
+    if (!project || !surface || !settings) return false;
+    setActionError(null);
+    const to = agentOfModel(settings.model);
+    // NOTE: Main refuses a switch while the newest session runs a turn; said
+    // here before anything is sent, and the message stays in the composer.
+    if (running) {
+      setActionError(
+        `${label} is still working. Stop it or wait for its turn to end, then send to hand off to ${AGENT_LABELS[to]}.`,
+      );
+      return false;
+    }
+    const key = `s${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    setSent((previous) => [
+      ...previous,
+      {
+        key,
+        text,
+        since: lastUser,
+        attachments: names.map((entry) => ({
+          name: entry.name,
+          mediaType: entry.image ? "image/*" : "text/plain",
+          path: null,
+          ...(entry.size === undefined ? {} : { size: entry.size }),
+        })),
+        expect:
+          previous.filter((e) => e.expect !== null && !landed(e)).length + 1,
+      },
+    ]);
+    atBottom.current = true;
+    requestAnimationFrame(() => toBottom(true));
+    try {
+      // NOTE: No auto-continue to turn off: an opt-in left on the session
+      // the thread moves on from is not the thread's any more (main).
+      useSessionTabs.getState().open(slug, id);
+      await surface.switchAgent(project, id, {
+        model: settings.model,
+        effort: settings.effort,
+        fast: settings.fast,
+        permission: settings.permission,
+        text,
+        attachments,
+      });
+      setSwitchedTo(to);
+      // NOTE: The new session's first Codex or OpenCode events may have come
+      // under its own id, before the thread knew it: read the thread and its
+      // engine again rather than wait for the next event.
+      resync();
+      return true;
+    } catch (caught) {
+      setSent((previous) => previous.filter((entry) => entry.key !== key));
+      setActionError(
+        ipcMessage(caught, `Could not hand off to ${AGENT_LABELS[to]}.`),
+      );
+      return false;
+    }
+  };
+  // Old <-> new, as the handoffs to a NEW conversation recorded them (an
+  // older app's): read again as turns land.
+  // NOTE: An in-place handoff (`thread`) is drawn by its marker turn among
+  // the thread's turns, never as a link to a chat of its own.
+  const links = useHandoffLinks(project, id, turns.length);
+
   const stop = () => {
     if (!project) return;
     void window.desktop?.conversation
@@ -748,6 +972,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     project,
     id,
     running,
+    managed,
     onClose: closeThisTab,
   });
 
@@ -913,12 +1138,15 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
           )}
           {/* A breadcrumb (FE-144): the tabs above say which session, this
               says where it sits. A worker has Back to its lead instead. */}
-          {!asWorker && (
+          {!asWorker && !placeKnown && (
+            <Skeleton className="h-4 w-24 shrink-0 rounded" />
+          )}
+          {!asWorker && placeKnown && (
             <>
               {/* Where it sits in the rail: a conductor's own chat under
                   Conductors, any other under Sessions. */}
               <span className="text-muted-foreground shrink-0 text-[14px] leading-5">
-                {conductor ? "Conductors" : "Sessions"}
+                {conductor || launcher ? "Conductors" : "Sessions"}
               </span>
               <span
                 aria-hidden="true"
@@ -926,6 +1154,32 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
               >
                 /
               </span>
+              {/* NOTE: A session a conductor started (FE-128) is hidden from
+                  the rail: its conductor is the way back, so it is a step of
+                  the breadcrumb, not a dead end under Sessions. */}
+              {launcher && (
+                <>
+                  <Link
+                    to="/w/$slug/conductors/$lead"
+                    params={{ slug, lead: launcher.id }}
+                    className="text-muted-foreground hover:text-foreground flex min-w-0 shrink items-center gap-1.5 text-[14px] leading-5 transition-colors"
+                  >
+                    <HugeiconsIcon
+                      icon={leadIcon(launcher.icon)}
+                      className="size-3.5 shrink-0"
+                      strokeWidth={1.5}
+                      aria-hidden="true"
+                    />
+                    <span className="truncate">{launcher.name}</span>
+                  </Link>
+                  <span
+                    aria-hidden="true"
+                    className="text-muted-foreground/60 shrink-0 text-[14px] leading-5"
+                  >
+                    /
+                  </span>
+                </>
+              )}
             </>
           )}
           {working ? (
@@ -1002,7 +1256,9 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                   ref={content}
                   className="mx-auto flex w-full max-w-[920px] min-w-0 flex-col gap-6 px-10 pt-6 pb-10"
                 >
-                  {conversation?.truncated && (
+                  {/* Only once every page is in: before that, its start is
+                      only further up. */}
+                  {conversation?.truncated && earlier === 0 && (
                     <Alert>
                       <HugeiconsIcon icon={Alert02Icon} strokeWidth={1.8} />
                       <AlertDescription>
@@ -1055,7 +1311,38 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                         project={project}
                         conversation={id}
                       >
-                        {shown.map((turn, index) => (
+                        {links.from && !links.from.thread && project && (
+                          <HandoffLine
+                            slug={slug}
+                            project={project}
+                            handoff={links.from}
+                            side="from"
+                          />
+                        )}
+                        {canLoadEarlier && (
+                          <div className="flex w-full min-w-0 items-center gap-3">
+                            <span
+                              aria-hidden="true"
+                              className="bg-border h-px flex-1"
+                            />
+                            <button
+                              type="button"
+                              onClick={loadEarlier}
+                              disabled={loadingEarlier}
+                              aria-busy={loadingEarlier}
+                              className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/40 flex h-6 shrink-0 items-center rounded-md px-1 text-xs font-medium transition-colors outline-none focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-60 motion-reduce:transition-none"
+                            >
+                              {loadingEarlier
+                                ? "Loading earlier turns…"
+                                : "Load earlier turns"}
+                            </button>
+                            <span
+                              aria-hidden="true"
+                              className="bg-border h-px flex-1"
+                            />
+                          </div>
+                        )}
+                        {visible.map((turn, index) => (
                           <Fragment key={turn.id}>
                             <TurnView
                               turn={turn}
@@ -1065,7 +1352,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                               handlers={handlers}
                               forking={forking}
                               anchor={anchor}
-                              compacted={index < compactedBefore}
+                              compacted={firstShown + index < compactedBefore}
                             />
                             <RunsAfterTurn
                               slug={slug}
@@ -1093,6 +1380,18 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                             pending="Sending…"
                           />
                         ))}
+                        {project &&
+                          links.to
+                            .filter((entry) => !entry.thread)
+                            .map((entry) => (
+                              <HandoffLine
+                                key={`${entry.to.conversation}:${entry.at}`}
+                                slug={slug}
+                                project={project}
+                                handoff={entry}
+                                side="to"
+                              />
+                            ))}
                         {thinking && (
                           <WorkingLine
                             label={
@@ -1105,7 +1404,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                         )}
                         <OrchestrationPanel
                           slug={slug}
-                          orchestration={orchestration}
+                          orchestration={earlierRuns.panel}
                         />
                       </FileOpenerProvider>
                     </ConductorNames.Provider>
@@ -1162,6 +1461,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                     project={project}
                     session={listed}
                     since={lastPromptAt}
+                    conductor={conductorId}
                   />
                 )}
                 {/* NOTE: Claude's question stands where the prompt is typed, the
@@ -1170,7 +1470,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
               survives. */}
                 {/* A proposal waiting for Approve stands here too, above the
               prompt, so it is never scrolled away (FE-95). */}
-                {awaiting && !asWorker && (
+                {awaiting && !readOnly && (
                   <div className="max-h-[50vh] overflow-y-auto rounded-xl shadow-xs">
                     <AwaitingProposal
                       orchestration={orchestration}
@@ -1178,7 +1478,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                     />
                   </div>
                 )}
-                {!asWorker && (
+                {!readOnly && (
                   <PermissionStack
                     requests={asking}
                     agent={label}
@@ -1198,7 +1498,10 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                     , which answers its questions and reviews its work.
                   </p>
                 )}
-                {project && settings && !asWorker && (
+                {!asWorker && managed && (
+                  <ManagedNotice slug={slug} conductor={launcher} />
+                )}
+                {project && settings && !readOnly && (
                   <SelectionActions
                     root={content}
                     onAsk={(text, question) => {
@@ -1211,7 +1514,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                     }
                   />
                 )}
-                {project && settings && !asWorker && (
+                {project && settings && !readOnly && (
                   <div className={asking.length ? "hidden" : "flex flex-col"}>
                     <MessageQueue
                       lead={
@@ -1236,7 +1539,9 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                       draftKey={id}
                       corner={<ContextButton facts={facts} />}
                       project={project}
-                      agent={agent}
+                      agent={switchedTo ?? agent}
+                      conversation={id}
+                      onHandoff={handoff}
                       settings={settings}
                       onSettings={(next) =>
                         setSettings((previous) =>
@@ -1286,7 +1591,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                   conductor && (
                     <LeadRuns
                       slug={slug}
-                      orchestration={orchestration}
+                      orchestration={earlierRuns.lead}
                       frame={(count, rows) => (
                         <PanelSection>
                           <PanelGroup

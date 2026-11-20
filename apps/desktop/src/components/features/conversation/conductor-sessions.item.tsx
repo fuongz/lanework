@@ -6,7 +6,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import type { AgentSession } from "#/../shared/terminal";
+import { type AgentSession, userMayActOn } from "#/../shared/terminal";
 import { StatusPing } from "#/components/shared/agents/status-ping";
 import { StopGlyph } from "#/components/shared/common/stop-glyph";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
@@ -45,7 +45,9 @@ function SessionMark({
  * panel, on its row and on its details alike.
  *
  * The Agents rail hides these sessions, so their Stop lives here. A second
- * press confirms while it works: a turn is cut off by Stop.
+ * press confirms while it works: a turn is cut off by Stop. None on a
+ * session its conductor did not let the user work in: stopping it is the
+ * conductor's call, and main refuses it.
  */
 function SessionActions({
   session,
@@ -100,7 +102,7 @@ function SessionActions({
           />
         </button>
       )}
-      {alive && (
+      {alive && userMayActOn(session) && (
         <button
           type="button"
           onClick={stop}
@@ -150,7 +152,7 @@ export function SessionItem({
       <button
         type="button"
         onClick={onSelect}
-        aria-label={`“${title}”${awaiting ? ", waiting for you" : working ? ", working" : ""}: show its details`}
+        aria-label={`“${title}”${awaiting ? (userMayActOn(session) ? ", waiting for you" : ", waiting") : working ? ", working" : ""}: show its details`}
         className="hover:bg-foreground/[0.03] focus-visible:ring-accent-brand flex h-8 min-w-0 flex-1 items-center gap-2.5 ps-3 pe-1.5 text-left text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-inset"
       >
         <SessionMark session={session} activity={activity} />
@@ -162,7 +164,8 @@ export function SessionItem({
         </span>
         {awaiting ? (
           <span className="text-destructive shrink-0 text-xs">
-            Waiting for you
+            {/* Only the conductor's say lets the user answer it. */}
+            {userMayActOn(session) ? "Waiting for you" : "Waiting"}
           </span>
         ) : (
           <span className="text-muted-foreground shrink-0 text-xs tabular-nums">

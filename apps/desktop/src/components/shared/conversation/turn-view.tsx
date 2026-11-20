@@ -23,6 +23,7 @@ import type {
   Turn,
   UserTurn,
 } from "#/../shared/conversation";
+import { splitHandoffText } from "#/../shared/conversation";
 import type { LeadIcon } from "#/../shared/orchestration";
 import {
   FileOpenerContext,
@@ -54,6 +55,7 @@ import { AttachmentPreview } from "./composer.attachments";
 import { useKnown } from "./composer.known";
 import { AssistantActions, UserActions } from "./turn-view.actions";
 import { CompactionDivider } from "./turn-view.compaction";
+import { HandoffDivider } from "./turn-view.handoff";
 import {
   LaunchedSessionCard,
   launchedSessions,
@@ -814,6 +816,13 @@ export const TurnView = memo(
           <CompactionDivider turn={turn} />
         </div>
       );
+    // A thread's marker between two of its sessions (`switchAgent`).
+    if (turn.role === "handoff")
+      return (
+        <div data-turn={turn.id} className={dim}>
+          <HandoffDivider turn={turn} />
+        </div>
+      );
     if (turn.role === "user")
       return (
         <div
@@ -871,6 +880,16 @@ export const TurnView = memo(
       return (
         a.turn.summary === b.turn.summary && a.turn.taskId === b.turn.taskId
       );
+    // NOTE: Its id names the session it opened, but a model is only learnt
+    // once that session answers, and a read may join more sources to it.
+    if (a.turn.role === "handoff" && b.turn.role === "handoff") {
+      const after = b.turn.from;
+      return (
+        a.turn.to.model === b.turn.to.model &&
+        a.turn.from.length === after.length &&
+        a.turn.from.every((side, at) => side.model === after[at]?.model)
+      );
+    }
     return false;
   },
 );
@@ -878,7 +897,9 @@ export const TurnView = memo(
 function UserTurnView({ turn }: { turn: UserTurn }) {
   return (
     <UserBubble
-      text={turn.text}
+      // A handoff's first message: the person's words, not the context block
+      // carried ahead of them (the Context handoff divider stands above it).
+      text={splitHandoffText(turn.text)?.message ?? turn.text}
       attachments={turn.attachments}
       time={clock(turn.at)}
     />
@@ -908,7 +929,9 @@ export function promptLines(turns: Turn[]): PromptLine[] {
     }
     out.push({
       id: turn.id,
-      prompt: firstLine(turn.text) || "(attachment)",
+      prompt:
+        firstLine(splitHandoffText(turn.text)?.message ?? turn.text) ||
+        "(attachment)",
       reply: said[0] ?? "",
       more: said[1] ?? "",
     });

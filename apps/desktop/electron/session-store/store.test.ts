@@ -115,6 +115,24 @@ describe("open + migrate", () => {
     }
   });
 
+  test("4 gives the sessions conductors started before 3 the user's access", () => {
+    const store = open(join(home, "access-4.db"));
+    store.upsertSession(session(41));
+    store.upsertSession(session(42));
+    const launched = sessionKey("claude", uuid(41));
+    const own = sessionKey("claude", uuid(42));
+    store.setLaunchedBy(launched, {
+      conductor: "lead",
+      project: "proj-a",
+      userAccess: false,
+    });
+    // As a file migrated to 3 before 4 existed: every launch locked.
+    store.db.exec("PRAGMA user_version = 3");
+    assert.equal(migrate(store.db), SCHEMA_VERSION);
+    assert.equal(store.getSession(launched)?.launchedBy?.userAccess, true);
+    assert.equal(store.getSession(own)?.launchedBy, null);
+  });
+
   test("the rail's query reads the covering index only", () => {
     const store = open(join(home, "plan.db"));
     const plan = store.db
@@ -129,6 +147,22 @@ describe("open + migrate", () => {
       .join("\n");
     assert.match(plan, /COVERING INDEX agent_session_rail/);
     assert.doesNotMatch(plan, /TEMP B-TREE/);
+  });
+
+  test("the rail's index covers the launch columns too", () => {
+    const store = open(join(home, "plan-launch.db"));
+    const plan = store.db
+      .prepare(
+        `EXPLAIN QUERY PLAN SELECT key, launched_by_conductor, launched_by_project, launched_user_access
+          FROM agent_session
+          WHERE project = ? AND archived_at IS NULL
+            AND pinned_at IS NULL AND conductor_id IS NULL
+          ORDER BY updated_at DESC LIMIT ?`,
+      )
+      .all("proj-a", 20)
+      .map((row) => String(row.detail))
+      .join("\n");
+    assert.match(plan, /COVERING INDEX agent_session_rail/);
   });
 });
 
@@ -233,6 +267,38 @@ describe("upsert", () => {
     );
     assert.equal(
       store.setConductor(sessionKey("claude", uuid(9)), null),
+      false,
+    );
+  });
+
+  test("a conductor's session keeps whether the user may work in it", () => {
+    const store = open(join(home, "access.db"));
+    store.upsertSession(session(1));
+    store.upsertSession(session(2));
+    const launched = sessionKey("claude", uuid(1));
+    const own = sessionKey("claude", uuid(2));
+    store.setLaunchedBy(launched, {
+      conductor: "lead",
+      project: "proj-a",
+      userAccess: false,
+    });
+    assert.deepEqual(store.getSession(launched)?.launchedBy, {
+      conductor: "lead",
+      project: "proj-a",
+      userAccess: false,
+    });
+    assert.equal(store.setUserAccess(launched, true), true);
+    assert.equal(store.getSession(launched)?.launchedBy?.userAccess, true);
+    const row = store.listRail("proj-a").find((entry) => entry.id === uuid(1));
+    assert.equal(row?.launchedBy?.userAccess, true);
+    // A CLI write never resets it.
+    store.upsertSession(session(1, { cliTitle: "renamed by the CLI" }));
+    assert.equal(store.getSession(launched)?.launchedBy?.userAccess, true);
+    // The user's own session has no conductor to let them in: nothing set.
+    assert.equal(store.setUserAccess(own, false), false);
+    assert.equal(store.getSession(own)?.launchedBy, null);
+    assert.equal(
+      store.setUserAccess(sessionKey("claude", uuid(9)), true),
       false,
     );
   });

@@ -22,7 +22,10 @@ import {
 import type { MachineRecord } from "../electron/main/auth/store";
 import { writeFolders } from "../electron/main/projects/store";
 import { claudeProjectDir } from "../electron/main/terminal/agent-sessions";
-import { conversationChannels } from "../shared/conversation";
+import {
+  CONVERSATION_WINDOW_TURNS,
+  conversationChannels,
+} from "../shared/conversation";
 import type { Project } from "../shared/projects";
 import type { DesktopTerminalApi } from "../shared/terminal";
 import { claudeRowName } from "./agent-fixtures";
@@ -575,9 +578,8 @@ test("V5: a Claude conversation opens as a chat, sends a prompt and switches to 
       .click();
     await expect(page).toHaveURL(new RegExp(`/agents/chat/${CHAT_ID}$`));
     const chat = page.getByRole("region", { name: `Claude — ${TITLE}` });
-    await expect(
-      page.locator('[data-slot="window-titlebar"]').getByRole("heading"),
-    ).toHaveText(TITLE);
+    // NOTE: The chat names itself in its own header, not the titlebar.
+    await expect(chat.getByRole("heading", { level: 1 })).toHaveText(TITLE);
     for (const prompt of [
       "Why does the login test flake on CI?",
       "Where is the upstream fix discussed?",
@@ -605,14 +607,12 @@ test("V5: a Claude conversation opens as a chat, sends a prompt and switches to 
       name: "Read login.spec.ts, ran a command",
     });
     await expect(group).toHaveAttribute("aria-expanded", "false");
-    await expect(
-      chat.getByRole("button", {
-        name: "bun run test -- login --repeat-each 20",
-      }),
-    ).toHaveCount(0);
+    // NOTE: A shell call is named by its program ("Ran bun"), as t3code's.
+    const call = chat.getByRole("button", { name: /^Ran bun\b/ });
+    await expect(call).toHaveCount(0);
     await group.click();
     await expect(group).toHaveAttribute("aria-expanded", "true");
-    const call = chat.getByRole("button", { name: /--repeat-each 20/ });
+
     await expect(call).toBeVisible();
     // A call opens to its input and its output.
     await call.click();
@@ -816,11 +816,14 @@ test("V6: a long conversation stays responsive", async () => {
     const opened = Date.now() - started;
     console.log(`V6: ${PROMPTS * 2} turns, last reply in view in ${opened} ms`);
     expect(opened).toBeLessThan(5_000);
+    // NOTE: Main sends only the newest window of turns; older ones page in
+    // by "Load earlier turns", so the page never holds all 600 at once.
+    const WINDOW = CONVERSATION_WINDOW_TURNS * 2;
     const turns = page.locator("[data-turn]");
-    await expect(turns).toHaveCount(PROMPTS * 2);
+    await expect(turns).toHaveCount(WINDOW);
 
-    // An early turn, marked — it must be the same element after a re-read.
-    const early = "long-a-2";
+    // An early turn of the window, marked — the same element after a re-read.
+    const early = `long-a-${PROMPTS - CONVERSATION_WINDOW_TURNS + 2}`;
     await page.evaluate((id) => {
       const node = document.querySelector(`[data-turn="${id}"]`);
       if (!node) throw new Error(`no turn ${id}`);
@@ -831,8 +834,10 @@ test("V6: a long conversation stays responsive", async () => {
     // One more turn written: main's watcher re-reads, the turn appears.
     await appendTurn(transcript, repo);
     const appended = chat.getByText("The appended reply.", { exact: true });
-    await expect(turns).toHaveCount(PROMPTS * 2 + 2, { timeout: 10_000 });
-    await expect(appended).toBeAttached();
+    await expect(appended).toBeAttached({ timeout: 10_000 });
+    const held = await turns.count();
+    expect(held).toBeGreaterThanOrEqual(WINDOW);
+    expect(held).toBeLessThanOrEqual(WINDOW + 2);
     expect(
       await page.evaluate((id) => {
         const node = document.querySelector(`[data-turn="${id}"]`);
@@ -852,8 +857,16 @@ test("V6: a long conversation stays responsive", async () => {
         node.scrollTop = 0;
       });
     await expect(
-      chat.getByText("Question number 1", { exact: true }),
+      chat.getByText(
+        `Question number ${PROMPTS - CONVERSATION_WINDOW_TURNS + 2}`,
+        { exact: true },
+      ),
     ).toBeInViewport();
+    // Older turns page in on demand, and the reader keeps their place.
+    const earlier = chat.getByRole("button", { name: "Load earlier turns" });
+    await expect(earlier).toBeVisible();
+    await earlier.click();
+    await expect.poll(() => turns.count()).toBeGreaterThan(held);
     await expect(down).toBeVisible();
     await down.click();
     await expect(appended).toBeInViewport();

@@ -60,6 +60,7 @@ import type { ConversationEngine } from "./conversation-engine";
 import {
   boardHint,
   CONTROL_ROLE_ENV,
+  claudeConductorAllowArgs,
   claudeMcpArgs,
   controlMcpFor,
   isConductorTurn,
@@ -70,7 +71,32 @@ import {
 } from "./mcp-args";
 import { OpenCodeEngine, type OpenCodeEngineDeps } from "./opencode-engine";
 import { Held, type Outgoing, sameSettings } from "./queue";
-import { buildTurns, inputText, type Line } from "./transcript";
+import {
+  buildTurns,
+  inputText,
+  type Line,
+  type TurnFold,
+  turnFold,
+} from "./transcript";
+import {
+  claudeScopeOf,
+  claudeWindowOf,
+  type TurnFailure,
+  type TurnOutcome,
+} from "./usage-limits";
+
+/**
+ * How long streamed text waits to be sent with what streams after it.
+ *
+ * NOTE: The CLI streams a `text_delta` per token, and one IPC event per
+ * token was one render of the chat per token. Held this long, a line of
+ * text goes in a few events. Anything else the engine tells flushes first
+ * (`emit`), so the text keeps its place before the turn that holds it.
+ */
+const DELTA_FLUSH_MS = 50;
+
+/** The longest line of stream output kept while it waits for its newline. */
+const LINE_MAX = 64 * 1024 * 1024;
 
 /** What the engines need from main; `spawn` is a test seam. */
 interface EngineDeps {
@@ -85,7 +111,7 @@ interface EngineDeps {
   emit: (event: ConversationEvent) => void;
   /**
    * How long an engine may sit idle before its process ends, or null for
-   * never: Settings → Power saver (FE-126). Absent, 30 minutes.
+   * never: Settings → Power saver (FE-126). Absent, 5 minutes.
    */
   idleLimit?: () => number | null;
   /** The id of a live pty running Claude on this conversation, or null. */
@@ -128,6 +154,11 @@ interface EngineDeps {
     folder: string,
     conversation: string,
   ) => void;
+  /**
+   * How each turn ended, for main to read a usage limit from. Not told for a
+   * turn the person (or a limit) stopped.
+   */
+  outcome?: (outcome: TurnOutcome) => void;
 }
 
 /**
@@ -144,6 +175,9 @@ interface EngineDeps {
  * A `guarded` lead (its run active or paused, FE-136/D1) starts without its
  * edit tools: it delegates instead.
  *
+ * A `conductor`'s process with the control tools runs its safe ones without
+ * asking (`claudeConductorAllowArgs`).
+ *
  * @throws When the settings are off the lists or `id` is not a session id.
  */
 export function engineArgs(
@@ -156,6 +190,7 @@ export function engineArgs(
   guarded = false,
   controlMcp: string | null = null,
   kitMcp: KitMcp | null = null,
+  conductor = false,
 ): string[] {
   const settings = checkSettings(value);
   if (!settings || !isAgentSessionId(id)) throw new Error("Unknown settings");
@@ -191,6 +226,7 @@ export function engineArgs(
   // BE-01: what this process may ask of the app, fixed for its life.
   if (hint) args.push("--append-system-prompt", hint);
   if (guarded) args.push("--disallowedTools", [...WRITE_TOOLS].join(","));
+  if (conductor && controlMcp) args.push(...claudeConductorAllowArgs());
   return args;
 }
 
@@ -320,8 +356,27 @@ class Engine implements ConversationEngine {
   controls = new Map<string, Control>();
   /** The running turn's lines, for `turn` events. */
   rows: Line[] = [];
+  /**
+   * {@link rows} folded into turns as each comes.
+   *
+   * NOTE: Folded once per line, so a `turn` event rebuilds only the turn the
+   * line touched, not every turn of the lines kept (`emitLast`).
+   */
+  fold: TurnFold;
   stderr = "";
-  buffer = "";
+  /**
+   * The stdout read after its last newline: the start of a line still being
+   * written, in the pieces it came in.
+   *
+   * NOTE: Pieces, joined once its newline comes: a tool result can be
+   * megabytes on one line, and a string grown and searched again with every
+   * 64 KB chunk cost the square of its length.
+   */
+  partial: string[] = [];
+  partialLength = 0;
+  /** Streamed text not sent yet, and the timer that sends it. */
+  delta = "";
+  deltaTimer: ReturnType<typeof setTimeout> | null = null;
   /** Resolves when the current child exits. */
   exited: Promise<void> = Promise.resolve();
   /**
@@ -340,6 +395,19 @@ class Engine implements ConversationEngine {
    * restarts the process first.
    */
   guarded = false;
+  /**
+   * The last `rate_limit_event` the CLI wrote: which window the account is
+   * in and whether it refuses turns. Read when a turn fails.
+   */
+  rateLimit: {
+    rejected: boolean;
+    window: ReturnType<typeof claudeWindowOf>;
+    /** The model family a per-model cap names; null for the account's. */
+    scope: string | null;
+    resetsAt: number | null;
+  } | null = null;
+  /** The running turn's API error kind (`rate_limit`, …), if it had one. */
+  apiError: string | null = null;
 
   constructor(
     readonly project: string,
@@ -354,6 +422,7 @@ class Engine implements ConversationEngine {
     public fresh = false,
   ) {
     this.named = Promise.resolve(conversation);
+    this.fold = turnFold(folder);
   }
 
   /** Main names a Claude conversation itself: known from the start. */
@@ -394,6 +463,8 @@ class Engine implements ConversationEngine {
   }
 
   emit(event: Record<string, unknown> & { type: ConversationEvent["type"] }) {
+    // Text streamed before this event goes before it.
+    if (event.type !== "delta") this.flushDelta();
     const full = {
       ...event,
       project: this.project,
@@ -475,8 +546,8 @@ class Engine implements ConversationEngine {
     };
     const env = agentEnv(cli.env, target);
     // FE-155: the conductor tools only on a conductor's process.
-    if (conductor && env[SESSIONS_ENV.token])
-      env[CONTROL_ROLE_ENV] = "conductor";
+    const asConductor = conductor && Boolean(env[SESSIONS_ENV.token]);
+    if (asConductor) env[CONTROL_ROLE_ENV] = "conductor";
     const guarded = leadGuarded(target);
     // FE-158: this build's lwk for the kit, unless its backend is ts.
     const kit = kitMcpFor();
@@ -496,6 +567,7 @@ class Engine implements ConversationEngine {
         guarded,
         controlMcpFor(env),
         kit,
+        asConductor,
       ),
       { cwd: this.folder, env, stdio: ["pipe", "pipe", "pipe"] },
     );
@@ -505,7 +577,8 @@ class Engine implements ConversationEngine {
     this.starting = true;
     this.stopping = false;
     this.error = null;
-    this.buffer = "";
+    this.partial = [];
+    this.partialLength = 0;
     this.stderr = "";
     let done: () => void = () => {};
     this.exited = new Promise((resolve) => {
@@ -522,6 +595,8 @@ class Engine implements ConversationEngine {
     });
     const exit = (code: number | null, signal: string | null) => {
       if (this.child !== child) return done();
+      // What streamed before the exit is told before it.
+      this.flushDelta();
       this.child = null;
       this.applied = null;
       this.starting = false;
@@ -545,7 +620,7 @@ class Engine implements ConversationEngine {
       this.reclaim = false;
       this.posted = false;
       this.busy = false;
-      this.rows = [];
+      this.clearRows();
       // A turn the CLI died in wrote no end: recorded as cut off.
       safely(() =>
         this.deps.processEnded?.(
@@ -565,14 +640,25 @@ class Engine implements ConversationEngine {
     });
   }
 
-  /** Take a chunk of stdout and handle every whole line in it. */
+  /**
+   * Take a chunk of stdout and handle every whole line in it.
+   *
+   * NOTE: Scanned by index: slicing the rest off after each line copied the
+   * chunk's tail once per line it held.
+   */
   read(chunk: string): void {
-    this.buffer += chunk;
+    let from = 0;
     for (;;) {
-      const at = this.buffer.indexOf("\n");
+      const at = chunk.indexOf("\n", from);
       if (at < 0) break;
-      const text = this.buffer.slice(0, at);
-      this.buffer = this.buffer.slice(at + 1);
+      let text = chunk.slice(from, at);
+      from = at + 1;
+      if (this.partialLength > 0) {
+        this.partial.push(text);
+        text = this.partial.join("");
+        this.partial = [];
+        this.partialLength = 0;
+      }
       if (!text.trim()) continue;
       let line: Record<string, unknown>;
       try {
@@ -586,8 +672,15 @@ class Engine implements ConversationEngine {
         // One odd line never stops the stream.
       }
     }
+    if (from < chunk.length) {
+      this.partial.push(from === 0 ? chunk : chunk.slice(from));
+      this.partialLength += chunk.length - from;
+    }
     // A runaway line without a newline is not ours.
-    if (this.buffer.length > 64 * 1024 * 1024) this.buffer = "";
+    if (this.partialLength > LINE_MAX) {
+      this.partial = [];
+      this.partialLength = 0;
+    }
   }
 
   /** One line of the CLI's stream-json output. */
@@ -638,7 +731,22 @@ class Engine implements ConversationEngine {
           typeof delta.text === "string" &&
           !line.parent_tool_use_id
         )
-          this.emit({ type: "delta", text: delta.text });
+          this.queueDelta(delta.text);
+        return;
+      }
+      case "rate_limit_event": {
+        const info = (line.rate_limit_info ?? {}) as Record<string, unknown>;
+        const resets = info.resetsAt;
+        this.rateLimit = {
+          rejected: info.status === "rejected",
+          window: claudeWindowOf(info.rateLimitType),
+          scope: claudeScopeOf(info.rateLimitType),
+          // NOTE: Unix SECONDS, as in the status line's `rate_limits`.
+          resetsAt:
+            typeof resets === "number" && Number.isFinite(resets)
+              ? resets * 1000
+              : null,
+        };
         return;
       }
       case "control_request":
@@ -674,6 +782,9 @@ class Engine implements ConversationEngine {
         // too, so a worker's write guard sees it before the tool runs.
         if (line.type === "assistant") this.tellWrites(line);
         if (line.parent_tool_use_id) return;
+        // An API error the CLI turned into a message carries its kind.
+        if (line.type === "assistant" && typeof line.error === "string")
+          this.apiError = line.error;
         // A message written to the CLI, taken in.
         if (line.isReplay === true) this.inflight.shift();
         this.starting = false;
@@ -695,6 +806,8 @@ class Engine implements ConversationEngine {
           }),
         );
         this.tellAuth(line.is_error === true ? text : null);
+        // Before `onResult`: it forgets the turn's lines this reads.
+        this.tellOutcome(line.is_error === true ? text : null);
         this.onResult();
         return;
       }
@@ -725,24 +838,109 @@ class Engine implements ConversationEngine {
       });
   }
 
+  /**
+   * Tell main how the turn ended, for a usage limit (see `usage-limits.ts`).
+   *
+   * A stopped turn is not told: its `result` says nothing of the account,
+   * and a limit stopping it must not read as a turn that went through.
+   *
+   * @param failed The failed turn's words, or null when it went through.
+   */
+  tellOutcome(failed: string | null): void {
+    const apiError = this.apiError;
+    this.apiError = null;
+    if (this.stopping || !this.deps.outcome) return;
+    let failure: TurnFailure | null = null;
+    if (failed !== null) {
+      // The API error's own message is a line of the turn, not always the
+      // `result`'s text: both are read, and nothing else the agent wrote.
+      const said = [
+        failed,
+        ...this.rows
+          .filter(
+            (row) =>
+              row.type === "assistant" &&
+              (typeof row.error === "string" || row.isApiErrorMessage === true),
+          )
+          .map(assistantText),
+      ]
+        .filter(Boolean)
+        .join("\n");
+      const info = this.rateLimit;
+      const rejected = Boolean(
+        info?.rejected &&
+          (info.resetsAt === null || info.resetsAt > Date.now()),
+      );
+      failure = {
+        text: said,
+        limited: rejected,
+        throttled: apiError === "rate_limit",
+        window: rejected ? (info?.window ?? null) : null,
+        resetsAt: rejected ? (info?.resetsAt ?? null) : null,
+        scope: rejected ? (info?.scope ?? null) : null,
+      };
+    }
+    const outcome: TurnOutcome = {
+      agent: "claude",
+      project: this.project,
+      conversation: this.conversation,
+      model: this.applied?.model ?? null,
+      failure,
+    };
+    safely(() => this.deps.outcome?.(outcome));
+  }
+
   /** Keep a line of the running turn, stamped when the stream did not. */
   push(line: Record<string, unknown>): void {
     const row: Line = { ...line };
     if (typeof row.timestamp !== "string")
       row.timestamp = new Date().toISOString();
     this.rows.push(row);
+    this.fold.push(row);
   }
 
-  /** Tell the page the turn the kept lines end on. */
+  /** Forget the running turn's lines, and their fold. */
+  clearRows(): void {
+    this.rows = [];
+    this.fold = turnFold(this.folder);
+  }
+
+  /** Hold streamed text, to be sent with what follows it (`DELTA_FLUSH_MS`). */
+  queueDelta(text: string): void {
+    this.delta += text;
+    this.deltaTimer ??= setTimeout(() => this.flushDelta(), DELTA_FLUSH_MS);
+  }
+
+  /** Send the streamed text held, in one `delta` event. */
+  flushDelta(): void {
+    if (this.deltaTimer) clearTimeout(this.deltaTimer);
+    this.deltaTimer = null;
+    if (!this.delta) return;
+    const text = this.delta;
+    this.delta = "";
+    this.emit({ type: "delta", text });
+  }
+
+  /**
+   * Tell the page the turn the kept lines end on.
+   *
+   * NOTE: The fold's last turn, never all of them built again per line. An
+   * assistant turn goes as a copy, open: the fold's own stays as the next
+   * line finds it. Its blocks are shared, which is safe because the event
+   * is copied as it is sent (`webContents.send`) and main's listeners keep
+   * no turn.
+   */
   emitLast(): void {
-    const turns: Turn[] = buildTurns(this.rows, this.folder);
-    const last = turns.at(-1);
+    const last = this.fold.peek().at(-1);
     if (!last) return;
     if (last.role === "assistant") {
       // A thinking-only line has nothing to draw yet.
       if (last.blocks.length === 0) return;
-      last.open = true;
-      last.endedAt = null;
+      this.emit({
+        type: "turn",
+        turn: { ...last, open: true, endedAt: null } satisfies Turn,
+      });
+      return;
     }
     this.emit({ type: "turn", turn: last });
   }
@@ -882,9 +1080,11 @@ class Engine implements ConversationEngine {
    * The work goes on while messages written to the CLI are still to run.
    */
   onResult(): void {
+    // The turn ended: all it streamed is told now.
+    this.flushDelta();
     if (this.settleTimer) clearTimeout(this.settleTimer);
     this.settleTimer = null;
-    this.rows = [];
+    this.clearRows();
     this.dropPermissions();
     if (this.reclaim && this.inflight.length) {
       // Stopped: what the CLI would run next waits again instead.
@@ -1010,6 +1210,11 @@ class Engine implements ConversationEngine {
     this.busy = true;
     this.posted = false;
     this.error = null;
+    // NOTE: What the last turn's `rate_limit_event` said is not this turn's:
+    // a refusal kept from it would read a later, unrelated failure (a
+    // network error) as the limit again.
+    this.rateLimit = null;
+    this.apiError = null;
     // No process yet: it boots first.
     if (!this.child) this.starting = true;
     this.emitState();
@@ -1051,7 +1256,7 @@ class Engine implements ConversationEngine {
       this.busy = true;
       this.error = null;
       this.deps.remember(this.conversation, out.settings);
-      this.rows = [];
+      this.clearRows();
       this.post(out);
       this.posted = true;
       this.emitState();
@@ -1136,8 +1341,21 @@ const STOP_SETTLE_MS = 5000;
  */
 const CLOSE_STOP_MS = STOP_SETTLE_MS + 500;
 
-/** The idle limit when no setting gives one (FE-125). */
-const IDLE_REAP_MS = 30 * 60_000;
+/**
+ * The idle limit when no setting gives one (FE-125).
+ *
+ * NOTE: Each idle CLI holds a few hundred MB, so this is short. The setting
+ * (Settings → Power saver) beats it whenever it is present.
+ */
+const IDLE_REAP_MS = 5 * 60_000;
+
+/**
+ * How many idle CLIs may stay warm at once; past it the least recently used
+ * one's process ends, as an idle reap does (invisible: the next message
+ * resumes the session). Running, permission-waiting and kept chats are not
+ * counted.
+ */
+const WARM_ENGINE_CAP = 3;
 
 /**
  * `LANEWORK_ENGINE_IDLE_MS`: an idle limit that beats the setting, to check
@@ -1217,6 +1435,9 @@ export function createEngines(input: EngineDeps) {
   const lastSettings = new Map<string, ComposerSettings>();
   // When each conversation's engine last said anything, by key (FE-125).
   const lastActive = new Map<string, number>();
+  // The same, but only ever moved by the engine itself, never by the sweep:
+  // the order the warm-engine cap evicts in.
+  const lastUsed = new Map<string, number>();
   // Chats kept running past the idle limit, by key, until stopped (FE-126).
   const kept = new Set<string>();
   // Engines whose idle process is being ended, until it has.
@@ -1224,7 +1445,10 @@ export function createEngines(input: EngineDeps) {
   const deps: EngineDeps = {
     ...input,
     emit: (event) => {
-      lastActive.set(keyOf(event.project, event.conversation), Date.now());
+      const at = Date.now();
+      const key = keyOf(event.project, event.conversation);
+      lastActive.set(key, at);
+      lastUsed.set(key, at);
       input.emit(event);
     },
     remember: (conversation, settings) => {
@@ -1247,6 +1471,7 @@ export function createEngines(input: EngineDeps) {
     codexLanework: deps.codexLanework,
     codexInstructions: deps.codexInstructions,
     processEnded: deps.processEnded,
+    outcome: deps.outcome,
   });
   const opencodeDeps = (): OpenCodeEngineDeps => ({
     service:
@@ -1254,6 +1479,7 @@ export function createEngines(input: EngineDeps) {
       (() => Promise.reject(new Error("OpenCode is not available."))),
     emit: deps.emit,
     remember: deps.remember,
+    outcome: deps.outcome,
   });
   const keyOf = (project: string, conversation: string) =>
     `${project}\0${conversation}`;
@@ -1622,6 +1848,30 @@ export function createEngines(input: EngineDeps) {
       );
     },
 
+    /**
+     * Every conversation, in every project, whose engine runs a turn of
+     * `agent` now: what a usage limit stops.
+     */
+    running(agent: ConversationAgent): {
+      project: string;
+      conversation: string;
+      model: string | null;
+    }[] {
+      return [...engines.values()]
+        .filter((engine) => engine.agent === agent && engine.busy)
+        .flatMap((engine) =>
+          engine.conversation
+            ? [
+                {
+                  project: engine.project,
+                  conversation: engine.conversation,
+                  model: lastSettings.get(engine.conversation)?.model ?? null,
+                },
+              ]
+            : [],
+        );
+    },
+
     /** The conversations of `project` whose engine process is alive. */
     alive(project: string): string[] {
       return [...engines.values()]
@@ -1707,35 +1957,70 @@ export function createEngines(input: EngineDeps) {
     engine.held.length === 0 &&
     engine.permissions.size === 0;
 
-  /** End the process of every engine idle past the limit (FE-125, FE-126). */
+  /**
+   * End an idle engine's process: as `release`, the next send makes a fresh
+   * engine that resumes the session, and waits on `reaping` meanwhile.
+   *
+   * NOTE: Called in the same tick as the `reapable` check, so a send cannot
+   * slip in between and find the engine busy halfway through its halt.
+   */
+  function end(key: string, engine: ConversationEngine): void {
+    const done = engine
+      .halt()
+      .catch(() => {})
+      .then(() => {
+        reaping.delete(engine);
+        lastActive.delete(key);
+        lastUsed.delete(key);
+        if (engines.get(key) === engine) engines.delete(key);
+        engine.emitState();
+      });
+    reaping.set(engine, done);
+  }
+
+  /**
+   * End the process of every engine idle past the limit (FE-125, FE-126),
+   * then of the least recently used idle ones past {@link WARM_ENGINE_CAP}.
+   */
   function sweep(): void {
     const now = Date.now();
     const limit =
       IDLE_OVERRIDE_MS ?? (deps.idleLimit ? deps.idleLimit() : IDLE_REAP_MS);
+    // Idle engines that stay warm after the time pass, with when they last
+    // said anything.
+    const warm: [key: string, engine: ConversationEngine][] = [];
     for (const [key, engine] of engines) {
       if (reaping.has(engine)) continue;
       if (!reapable(engine) || limit === null || kept.has(key)) {
         lastActive.set(key, now);
+        // NOTE: Only an idle engine with no keep can be evicted by the cap:
+        // a running one, one waiting on a permission or on queued input, and
+        // a kept chat are never counted nor ended.
+        if (reapable(engine) && !kept.has(key)) warm.push([key, engine]);
         continue;
       }
       if (now - (lastActive.get(key) ?? now) < limit) {
         if (!lastActive.has(key)) lastActive.set(key, now);
+        warm.push([key, engine]);
         continue;
       }
-      // As `release`: the next send makes a fresh engine that resumes it.
-      const done = engine
-        .halt()
-        .catch(() => {})
-        .then(() => {
-          reaping.delete(engine);
-          lastActive.delete(key);
-          if (engines.get(key) === engine) engines.delete(key);
-          engine.emitState();
-        });
-      reaping.set(engine, done);
+      end(key, engine);
+    }
+    // NOTE: Each idle CLI holds a few hundred MB, so the idle time alone
+    // lets a burst of chats pile up: past the cap the least recently used
+    // go first. This holds with power saver off too (`limit` null), and a
+    // sweep is at most a minute late.
+    if (warm.length > WARM_ENGINE_CAP) {
+      warm.sort(
+        ([a], [b]) => (lastUsed.get(a) ?? now) - (lastUsed.get(b) ?? now),
+      );
+      for (const [key, engine] of warm.slice(0, warm.length - WARM_ENGINE_CAP))
+        end(key, engine);
     }
     for (const key of lastActive.keys())
       if (!engines.has(key)) lastActive.delete(key);
+    for (const key of lastUsed.keys())
+      if (!engines.has(key)) lastUsed.delete(key);
   }
   const sweeper = setInterval(sweep, IDLE_SWEEP_MS);
   sweeper.unref?.();

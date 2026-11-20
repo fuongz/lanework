@@ -71,6 +71,28 @@ const MIGRATIONS: readonly string[] = [
     launched_by_conductor, launched_by_project
   );
   `,
+  // 3: whether the user may work in a session a conductor started: off
+  // until it lets the user in (`sessions.access`). The rail index is
+  // rebuilt with it, as in 2. (4 gives the rows from before it access.)
+  `
+  ALTER TABLE agent_session
+    ADD COLUMN launched_user_access INTEGER NOT NULL DEFAULT 0;
+  DROP INDEX agent_session_rail;
+  CREATE INDEX agent_session_rail ON agent_session(
+    project, archived_at, pinned_at, updated_at DESC,
+    conductor_id, key, agent, cli_id, cli_title, name,
+    working, card_board, card_id, bg_running, bg_total,
+    launched_by_conductor, launched_by_project, launched_user_access
+  );
+  `,
+  // 4: the sessions conductors started before 3 keep the user's access:
+  // they were the user's to work in when they ran, and nothing told their
+  // conductor it could lock them. Only those started from here on start
+  // read-only (`userAccess` on `sessions.start`).
+  `
+  UPDATE agent_session SET launched_user_access = 1
+    WHERE launched_by_conductor IS NOT NULL;
+  `,
 ];
 
 /** The version a fully migrated database reports. */

@@ -8,6 +8,7 @@ import {
   type AgentSubagent,
   isAgentSessionIdOf,
   isTerminalAgent,
+  type SessionLauncher,
   type TerminalAgent,
 } from "../../shared/terminal";
 import {
@@ -84,6 +85,7 @@ interface SessionRow {
   ingest_state: string | null;
   launched_by_conductor: string | null;
   launched_by_project: string | null;
+  launched_user_access: number;
 }
 
 /**
@@ -131,7 +133,7 @@ const UPSERT_SQL = `INSERT INTO agent_session (${CLI_COLUMNS.join(", ")})
 
 /** What the rail reads of a row; every one is in `agent_session_rail`. */
 const RAIL_COLUMNS =
-  "key, agent, cli_id, cli_title, name, updated_at, pinned_at, conductor_id, working, card_board, card_id, bg_running, bg_total, launched_by_conductor, launched_by_project";
+  "key, agent, cli_id, cli_title, name, updated_at, pinned_at, conductor_id, working, card_board, card_id, bg_running, bg_total, launched_by_conductor, launched_by_project, launched_user_access";
 
 type RailRow = Pick<
   SessionRow,
@@ -150,6 +152,7 @@ type RailRow = Pick<
   | "bg_total"
   | "launched_by_conductor"
   | "launched_by_project"
+  | "launched_user_access"
 >;
 
 /**
@@ -201,10 +204,17 @@ function toCard(
 
 /** Who started a row with `sessions.start`, or null for the user. */
 function launchedByOf(
-  row: Pick<SessionRow, "launched_by_conductor" | "launched_by_project">,
-): { conductor: string; project: string } | null {
+  row: Pick<
+    SessionRow,
+    "launched_by_conductor" | "launched_by_project" | "launched_user_access"
+  >,
+): SessionLauncher | null {
   return row.launched_by_conductor && row.launched_by_project
-    ? { conductor: row.launched_by_conductor, project: row.launched_by_project }
+    ? {
+        conductor: row.launched_by_conductor,
+        project: row.launched_by_project,
+        userAccess: Boolean(row.launched_user_access),
+      }
     : null;
 }
 
@@ -690,16 +700,13 @@ export class SessionStore {
 
   /**
    * Note the conductor that started `key` with `sessions.start` (FE-128),
-   * or clear it. The rail hides such a conversation from Agents; the
-   * conductor's own view lists it.
+   * and whether the user may work in it, or clear both. The rail hides such
+   * a conversation from Agents; the conductor's own view lists it.
    *
    * @returns False when there is no such row.
    * @throws When `launchedBy` is not a team lead's id and a project.
    */
-  setLaunchedBy(
-    key: string,
-    launchedBy: { conductor: string; project: string } | null,
-  ): boolean {
+  setLaunchedBy(key: string, launchedBy: SessionLauncher | null): boolean {
     if (
       launchedBy &&
       (!LEAD_REF_PATTERN.test(launchedBy.conductor) || !launchedBy.project)
@@ -707,9 +714,27 @@ export class SessionStore {
       invalid("a valid conductor is required");
     return (
       this.#run(
-        "UPDATE agent_session SET launched_by_conductor = ?, launched_by_project = ? WHERE key = ?",
+        "UPDATE agent_session SET launched_by_conductor = ?, launched_by_project = ?, launched_user_access = ? WHERE key = ?",
         launchedBy?.conductor ?? null,
         launchedBy?.project ?? null,
+        launchedBy?.userAccess ? 1 : 0,
+        key,
+      ) > 0
+    );
+  }
+
+  /**
+   * Let the user work in `key`, a session a conductor started, or take
+   * that back (`sessions.access`).
+   *
+   * @returns False when there is no such row, or no conductor started it:
+   *   a session the user started is theirs already.
+   */
+  setUserAccess(key: string, userAccess: boolean): boolean {
+    return (
+      this.#run(
+        "UPDATE agent_session SET launched_user_access = ? WHERE key = ? AND launched_by_conductor IS NOT NULL",
+        userAccess ? 1 : 0,
         key,
       ) > 0
     );

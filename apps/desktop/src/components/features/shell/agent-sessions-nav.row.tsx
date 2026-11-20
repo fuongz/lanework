@@ -1,7 +1,10 @@
-import { ArrowRight01Icon, PinIcon } from "@hugeicons/core-free-icons";
+import {
+  ArrowRight01Icon,
+  BubbleChatIcon,
+  PinIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { useEffect, useRef } from "react";
 import type {
   OrchestrationRun,
   OrchestrationTask,
@@ -19,7 +22,10 @@ import {
   taskLabel,
   useStopBackgroundTask,
 } from "#/components/shared/agents/background-tasks";
-import { factsSummary } from "#/components/shared/agents/conversation-facts";
+import {
+  SessionPreviewCard,
+  SessionPreviewTrigger,
+} from "#/components/shared/agents/session-preview-card";
 import { StatusPing } from "#/components/shared/agents/status-ping";
 import { useBackgroundTasks } from "#/components/shared/agents/use-background-tasks";
 import {
@@ -41,7 +47,6 @@ import {
 } from "#/lib/orchestration-status";
 import { relativeTime } from "#/lib/relative-time";
 import { cn } from "#/lib/utils";
-import { useAgentFacts } from "#/stores/agent-facts";
 import {
   agentKey,
   subagentKey,
@@ -50,6 +55,7 @@ import {
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { awaitingKey, useAwaiting } from "#/stores/awaiting";
 import { useChatEngines } from "#/stores/chat-engines";
+import { useSessionTabs } from "#/stores/session-tabs";
 import { CodexGoalBadge } from "./codex-goal-badge";
 
 const NO_TASKS: OrchestrationTask[] = [];
@@ -60,12 +66,26 @@ const SUBAGENTS_FOLDED = 3;
  * sits under its conversation's title (`px-2` + the 12px icon + `gap-2.5`).
  */
 const SUB_ROW = "h-[26px] w-full ps-[30px] text-left text-xs";
+
 /**
- * How long a pointer rests on a row before its numbers are read (FE-38/D5).
+ * A child row's branch: a curve off the parent's guide into its icon, so a
+ * sub-agent, worker or shell reads as the row above's, not a sibling.
+ *
+ * NOTE: Drawn as an element, not a `::before`: the rail row's own hover
+ * styles use the pseudo-elements. Solid `border` colour, not a translucent
+ * one, so where it meets the guide the two do not darken each other.
  */
-const PEEK_MS = 150;
-/** A row's numbers read this recently are shown again, not read again. */
-const FACTS_FRESH_MS = 15_000;
+const BRANCH = "relative";
+
+/** The curve of {@link BRANCH}: from above the row's middle into its icon. */
+function Branch() {
+  return (
+    <span
+      aria-hidden="true"
+      className="border-border pointer-events-none absolute start-[14px] top-[calc(50%-6px)] h-[6px] w-[10px] rounded-es-[6px] border-s border-b"
+    />
+  );
+}
 
 /**
  * A conversation's background shells and monitors still running, as rows
@@ -126,12 +146,13 @@ function BackgroundShellRows({
                   aria-current={viewed ? "page" : undefined}
                   aria-label={`${name}, a background ${task.kind} of “${session.title}”. ${task.kind === "workflow" ? "Open its agents" : "Open its output"}`}
                   title={`${task.command ?? name}\nBackground ${task.kind}${pid ? ` (${pid})` : ""}, running since ${relativeTime(task.startedAt, now)}`}
-                  className={cn(row, SUB_ROW, viewed && active)}
+                  className={cn(row, SUB_ROW, BRANCH, viewed && active)}
                 />
               }
             >
               {/* Its kind on the left, so a row says what runs; the ping
               under it, as a session's, says it still does. */}
+              <Branch />
               <span className="relative flex shrink-0">
                 <HugeiconsIcon
                   icon={TASK_KIND_ICONS[task.kind]}
@@ -285,45 +306,14 @@ export function SessionRow({
   const stop = useAgentTerminals((state) => state.stop);
   const refreshChats = useChatEngines((state) => state.refresh);
   const openInTerminal = useOpenInTerminal(slug, project);
-  // Known once its row was hovered, or its agent viewed (FE-38/D5). The
-  // tooltip line, not the facts: a view open on an agent reads its facts on
-  // every write, and the row redraws only when the line changes.
-  const summary = useAgentFacts((state) => {
-    const entry = state.byKey[key];
-    return entry ? factsSummary(entry.facts) : null;
-  });
-  const readFacts = useAgentFacts((state) => state.read);
   // Its agent stopped on a question or a permission (FE-97).
   const awaiting = useAwaiting(
     (state) => awaitingKey(project, session.id) in state.byKey,
   );
-  const peeking = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (peeking.current) clearTimeout(peeking.current);
-    },
-    [],
-  );
-  /**
-   * Read the row's cost and context, for its tooltip (FE-38/D5).
-   *
-   * Only once a pointer rests on the row: never for the whole list, and not
-   * for one it merely passes over on its way down the rail.
-   */
-  const peek = () => {
-    if (peeking.current) clearTimeout(peeking.current);
-    peeking.current = setTimeout(() => {
-      const known = useAgentFacts.getState().byKey[key];
-      if (!known || Date.now() - known.at > FACTS_FRESH_MS)
-        readFacts(project, session);
-    }, PEEK_MS);
-  };
-  const unpeek = () => {
-    if (peeking.current) clearTimeout(peeking.current);
-    peeking.current = null;
-  };
 
-  const agent = TERMINAL_KIND_LABELS[session.agent];
+  const agent = session.agents
+    ? session.agents.map((kind) => TERMINAL_KIND_LABELS[kind]).join(" then ")
+    : TERMINAL_KIND_LABELS[session.agent];
   const subagents = session.subagents;
   // Working first, then newest (FE-33/D4): the ones still going are the
   // ones worth seeing above the fold.
@@ -356,7 +346,6 @@ export function SessionRow({
     (state) => state.kept[project]?.includes(session.id) ?? false,
   );
   const keepChat = useChatEngines((state) => state.keep);
-  const terminal = Boolean(tab) || chat;
   // Stop asks first while it works, as for a tab. A chat's Stop ends its
   // engine: the turn is cut off, the conversation kept.
   const stopChat = () =>
@@ -428,70 +417,148 @@ export function SessionRow({
   return (
     <>
       <div className="group/row relative">
-        <ContextMenu>
-          <ContextMenuTrigger
-            render={
-              <button
-                type="button"
-                onClick={onResume}
-                aria-current={current ? "page" : undefined}
-                aria-label={`Open “${session.title}”${awaiting ? ", waiting for you" : ""}`}
-                aria-busy={working || undefined}
-                title={`${session.title}\n${agent}, ${awaiting ? "waiting for you" : working ? "working" : terminal ? "running" : relativeTime(session.updatedAt, now)}${summary ? `\n${summary}` : ""}`}
-                onPointerEnter={peek}
-                onPointerLeave={unpeek}
-                onFocus={peek}
-                onBlur={unpeek}
-                className={`${row} w-full text-left ${current ? activeClass : ""}`}
-              />
-            }
-          >
-            {/* With sub-agents, hover trades the icon for their chevron. */}
-            <span
-              className={`relative flex shrink-0 ${nested ? MAKES_ROOM : ""}`}
+        {/* Its hover card (no native title, so no second tooltip) reads
+            the conversation's model, branch and usage only once it opens. */}
+        <SessionPreviewCard
+          project={project}
+          title={session.title}
+          icon={BubbleChatIcon}
+          session={session}
+        >
+          <ContextMenu>
+            <ContextMenuTrigger
+              render={
+                <SessionPreviewTrigger
+                  render={
+                    <button
+                      type="button"
+                      onClick={onResume}
+                      // A double click keeps its tab, not a preview.
+                      onDoubleClick={() =>
+                        useSessionTabs.getState().open(slug, session.id)
+                      }
+                      aria-current={current ? "page" : undefined}
+                      aria-label={`Open “${session.title}”${awaiting ? ", waiting for you" : ""}`}
+                      aria-busy={working || undefined}
+                      className={`${row} w-full text-left ${current ? activeClass : ""}`}
+                    />
+                  }
+                />
+              }
             >
-              <TerminalKindIcon
-                kind={session.agent}
-                className="size-3 shrink-0"
-              />
-              {(awaiting || working || running) && (
-                <StatusPing
-                  tone={awaiting ? "awaiting" : working ? "working" : "running"}
+              {/* With sub-agents, hover trades the icon for their chevron. */}
+              <span
+                className={`relative flex shrink-0 ${nested ? MAKES_ROOM : ""}`}
+              >
+                <ThreadAgentIcons session={session} />
+                {(awaiting || working || running) && !session.agents && (
+                  <StatusPing
+                    tone={
+                      awaiting ? "awaiting" : working ? "working" : "running"
+                    }
+                  />
+                )}
+              </span>
+              <span
+                className={`min-w-0 flex-1 truncate ${working ? "text-breathe" : ""}`}
+              >
+                {session.title}
+              </span>
+              {/* Pinned rows lead Sessions; the mark says why this one is up. */}
+              {isPinned && (
+                <HugeiconsIcon
+                  icon={PinIcon}
+                  className="text-muted-foreground size-3 shrink-0"
+                  strokeWidth={1.8}
+                  aria-label="Pinned"
                 />
               )}
-            </span>
-            <span
-              className={`min-w-0 flex-1 truncate ${working ? "text-breathe" : ""}`}
-            >
-              {session.title}
-            </span>
-            {/* Pinned rows lead Sessions; the mark says why this one is up. */}
-            {isPinned && (
-              <HugeiconsIcon
-                icon={PinIcon}
-                className="text-muted-foreground size-3 shrink-0"
-                strokeWidth={1.8}
-                aria-label="Pinned"
-              />
-            )}
-            {/* A Codex goal that stopped short says so (FE-41/D4). */}
-            <CodexGoalBadge project={project} session={session} />
-          </ContextMenuTrigger>
-          <ContextMenuContent>
-            <ContextMenuItem onClick={onRename}>Rename</ContextMenuItem>
-            <ContextMenuItem
-              onClick={() => void pin(project, session, !isPinned)}
-            >
-              {isPinned ? "Unpin" : "Pin"}
-            </ContextMenuItem>
-            {/* Off while a tab runs it (FE-72/D5), as Delete is. OpenCode
+              {/* A Codex goal that stopped short says so (FE-41/D4). */}
+              <CodexGoalBadge project={project} session={session} />
+              {/* NOTE: A thread's dot sits at the row's right end, centred on
+                  its line: on the overlapped agent icons it read as one more
+                  mark. */}
+              {(awaiting || working || running) && session.agents && (
+                <span className="flex shrink-0 items-center self-center">
+                  <StatusPing
+                    inline
+                    tone={
+                      awaiting ? "awaiting" : working ? "working" : "running"
+                    }
+                  />
+                </span>
+              )}
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              <ContextMenuItem onClick={onRename}>Rename</ContextMenuItem>
+              <ContextMenuItem
+                onClick={() => void pin(project, session, !isPinned)}
+              >
+                {isPinned ? "Unpin" : "Pin"}
+              </ContextMenuItem>
+              {/* Off while a tab runs it (FE-72/D5), as Delete is. OpenCode
                 keeps no archive (FE-104/D11). */}
-            {session.agent !== "opencode" && (
+              {session.agent !== "opencode" && (
+                <ContextMenuItem
+                  disabled={blocked}
+                  onClick={() =>
+                    releaseChat()
+                      .then(() => archive(project, session))
+                      .then(
+                        () => {
+                          if (viewing === session.id)
+                            void navigate({
+                              to: "/w/$slug/issues",
+                              params: { slug },
+                            });
+                        },
+                        (error: unknown) =>
+                          onError(
+                            "Could not archive it",
+                            ipcMessage(error, "Could not archive it."),
+                          ),
+                      )
+                  }
+                >
+                  Archive
+                </ContextMenuItem>
+              )}
+              <ContextMenuSeparator />
+              {/* The chat's Terminal button, moved here: the same
+                conversation in a terminal, not while a turn runs (D3). */}
+              <ContextMenuItem
+                disabled={working && !tab}
+                onClick={() =>
+                  void openInTerminal(session).then(
+                    (error) =>
+                      error &&
+                      onError("Could not open it in a terminal", error),
+                  )
+                }
+              >
+                {tab ? "Show terminal" : "Open in terminal"}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              {/* FE-126/D5: past the idle limit, until Stop or quit. */}
+              {chat && (
+                <ContextMenuItem
+                  onClick={() =>
+                    void keepChat(project, session.id, !isKept).catch(() => {})
+                  }
+                >
+                  {isKept ? "Let it end when idle" : "Keep running"}
+                </ContextMenuItem>
+              )}
+              {onStop && <StopItem onStop={onStop} />}
+              {/* Out of Lanework only, its name and pin with it; the CLI keeps
+                the transcript, so a Pull brings it back (FE-112). Nothing is
+                lost, so it does not ask. Off while a tab runs it, as Delete
+                is: Lanework lists what it runs. */}
               <ContextMenuItem
                 disabled={blocked}
                 onClick={() =>
                   releaseChat()
-                    .then(() => archive(project, session))
+                    .then(() => forget(project, session))
                     .then(
                       () => {
                         if (viewing === session.id)
@@ -502,80 +569,30 @@ export function SessionRow({
                       },
                       (error: unknown) =>
                         onError(
-                          "Could not archive it",
-                          ipcMessage(error, "Could not archive it."),
+                          "Could not remove it",
+                          ipcMessage(
+                            error,
+                            "Could not remove it from Lanework.",
+                          ),
                         ),
                     )
                 }
               >
-                Archive
+                Remove from Lanework
               </ContextMenuItem>
-            )}
-            <ContextMenuSeparator />
-            {/* The chat's Terminal button, moved here: the same
-                conversation in a terminal, not while a turn runs (D3). */}
-            <ContextMenuItem
-              disabled={working && !tab}
-              onClick={() =>
-                void openInTerminal(session).then(
-                  (error) =>
-                    error && onError("Could not open it in a terminal", error),
-                )
-              }
-            >
-              {tab ? "Show terminal" : "Open in terminal"}
-            </ContextMenuItem>
-            <ContextMenuSeparator />
-            {/* FE-126/D5: past the idle limit, until Stop or quit. */}
-            {chat && (
-              <ContextMenuItem
-                onClick={() =>
-                  void keepChat(project, session.id, !isKept).catch(() => {})
-                }
-              >
-                {isKept ? "Let it end when idle" : "Keep running"}
-              </ContextMenuItem>
-            )}
-            {onStop && <StopItem onStop={onStop} />}
-            {/* Out of Lanework only, its name and pin with it; the CLI keeps
-                the transcript, so a Pull brings it back (FE-112). Nothing is
-                lost, so it does not ask. Off while a tab runs it, as Delete
-                is: Lanework lists what it runs. */}
-            <ContextMenuItem
-              disabled={blocked}
-              onClick={() =>
-                releaseChat()
-                  .then(() => forget(project, session))
-                  .then(
-                    () => {
-                      if (viewing === session.id)
-                        void navigate({
-                          to: "/w/$slug/issues",
-                          params: { slug },
-                        });
-                    },
-                    (error: unknown) =>
-                      onError(
-                        "Could not remove it",
-                        ipcMessage(error, "Could not remove it from Lanework."),
-                      ),
-                  )
-              }
-            >
-              Remove from Lanework
-            </ContextMenuItem>
-            {/* NOTE: Off while a tab runs it (FE-57/D4): the CLI would only
+              {/* NOTE: Off while a tab runs it (FE-57/D4): the CLI would only
                 write the transcript again. Stop first. Main deletes
                 OpenCode's through its own CLI (FE-104). */}
-            <ContextMenuItem
-              variant="destructive"
-              disabled={blocked}
-              onClick={() => void releaseChat().then(onDelete)}
-            >
-              Delete transcript…
-            </ContextMenuItem>
-          </ContextMenuContent>
-        </ContextMenu>
+              <ContextMenuItem
+                variant="destructive"
+                disabled={blocked}
+                onClick={() => void releaseChat().then(onDelete)}
+              >
+                Delete transcript…
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
+        </SessionPreviewCard>
         {/* NOTE: A sibling laid over the icon: the row is a button, and a
           button cannot hold another. */}
         {nested && (
@@ -609,106 +626,157 @@ export function SessionRow({
           </button>
         )}
       </div>
-      {open && background > 0 && (
-        <BackgroundShellRows
-          project={project}
-          slug={slug}
-          session={session}
-          row={row}
-          active={activeClass}
-          viewingTask={viewing === session.id ? viewingTask : undefined}
-          now={now}
-        />
-      )}
-      {open &&
-        shownSubagents.map(({ sub, working: busy }) => (
-          // Opens its transcript, read-only (FE-35/D9), not its
-          // conversation: that is usually the one on screen already, so a
-          // click would look like it did nothing. A sub-agent has nothing of
-          // its own to resume; its conversation's row still resumes.
-          <button
-            key={sub.id}
-            type="button"
-            onClick={() => view(sub)}
-            aria-current={viewed(sub) ? "page" : undefined}
-            aria-busy={busy || undefined}
-            aria-label={`${sub.title}, a sub-agent of “${session.title}”. Open its transcript`}
-            title={`${sub.title}\n${sub.type ?? "Sub-agent"}, ${busy ? "working" : relativeTime(sub.updatedAt, now)}`}
-            className={cn(row, SUB_ROW, viewed(sub) && activeClass)}
-          >
-            <span className="relative flex shrink-0">
-              <TerminalKindIcon
-                kind={session.agent}
-                className="size-3 shrink-0 opacity-60"
-              />
-              {busy && <StatusPing tone="working" />}
-            </span>
+      {/* The guide: one hairline down from under the parent's icon to the
+          last child's branch (it stops half a row short of the bottom). */}
+      <div
+        className={cn(
+          // As the rail's list: the children keep its gap between rows.
+          "relative flex flex-col gap-0.5",
+        )}
+      >
+        {open &&
+          (background > 0 ||
+            shownSubagents.length > 0 ||
+            workers.length > 0) && (
+            // Down to where the last child's curve begins: half a row and
+            // the curve's height short of the bottom.
             <span
-              className={`min-w-0 flex-1 truncate ${busy ? "text-breathe" : viewed(sub) ? "" : "text-muted-foreground"}`}
-            >
-              {sub.title}
-            </span>
-          </button>
-        ))}
-      {open &&
-        workers.map((task) => {
-          const busy =
-            task.status === "running" || task.status === "cancelling";
-          const seen =
-            task.conversation !== null &&
-            viewing === task.conversation &&
-            !viewingSub &&
-            !viewingTask;
-          return (
-            // A worker opens its own conversation, read-only: the lead is
-            // the one that talks to it. Not started yet, it has none.
+              aria-hidden="true"
+              className="bg-border pointer-events-none absolute start-[14px] top-0 bottom-[19px] w-px"
+            />
+          )}
+        {open && background > 0 && (
+          <BackgroundShellRows
+            project={project}
+            slug={slug}
+            session={session}
+            row={row}
+            active={activeClass}
+            viewingTask={viewing === session.id ? viewingTask : undefined}
+            now={now}
+          />
+        )}
+        {open &&
+          shownSubagents.map(({ sub, working: busy }) => (
+            // Opens its transcript, read-only (FE-35/D9), not its
+            // conversation: that is usually the one on screen already, so a
+            // click would look like it did nothing. A sub-agent has nothing of
+            // its own to resume; its conversation's row still resumes.
             <button
-              key={`worker:${task.id}`}
+              key={sub.id}
               type="button"
-              disabled={task.conversation === null}
-              onClick={() => {
-                if (task.conversation)
-                  void navigate({
-                    to: "/w/$slug/agents/chat/$conversation",
-                    params: { slug, conversation: task.conversation },
-                  });
-              }}
-              aria-current={seen ? "page" : undefined}
+              onClick={() => view(sub)}
+              aria-current={viewed(sub) ? "page" : undefined}
               aria-busy={busy || undefined}
-              aria-label={`${task.title}, a worker of “${session.title}”: ${workerLabel(task)}`}
-              title={`${task.title}\n${TERMINAL_KIND_LABELS[task.agent]} worker, ${workerLabel(task).toLowerCase()}`}
-              className={cn(row, SUB_ROW, seen && activeClass)}
+              aria-label={`${sub.title}, a sub-agent of “${session.title}”. Open its transcript`}
+              title={`${sub.title}\n${sub.type ?? "Sub-agent"}, ${busy ? "working" : relativeTime(sub.updatedAt, now)}`}
+              className={cn(row, SUB_ROW, BRANCH, viewed(sub) && activeClass)}
             >
+              <Branch />
               <span className="relative flex shrink-0">
                 <TerminalKindIcon
-                  kind={task.agent}
+                  kind={session.agent}
                   className="size-3 shrink-0 opacity-60"
                 />
                 {busy && <StatusPing tone="working" />}
               </span>
               <span
-                className={`min-w-0 flex-1 truncate ${busy ? "text-breathe" : seen ? "" : "text-muted-foreground"}`}
+                className={`min-w-0 flex-1 truncate ${busy ? "text-breathe" : viewed(sub) ? "" : "text-muted-foreground"}`}
               >
-                {task.title}
+                {sub.title}
               </span>
-              {!busy && (
-                <span className={cn("shrink-0", workerTone(task))}>
-                  {workerLabel(task)}
-                </span>
-              )}
             </button>
-          );
-        })}
-      {open && ordered.length > SUBAGENTS_FOLDED && (
-        <button
-          type="button"
-          aria-expanded={all}
-          onClick={onToggleAll}
-          className={cn(row, SUB_ROW, "text-muted-foreground")}
-        >
-          {all ? "Show less" : `Show ${ordered.length - SUBAGENTS_FOLDED} more`}
-        </button>
-      )}
+          ))}
+        {open &&
+          workers.map((task) => {
+            const busy =
+              task.status === "running" || task.status === "cancelling";
+            const seen =
+              task.conversation !== null &&
+              viewing === task.conversation &&
+              !viewingSub &&
+              !viewingTask;
+            return (
+              // A worker opens its own conversation, read-only: the lead is
+              // the one that talks to it. Not started yet, it has none.
+              <button
+                key={`worker:${task.id}`}
+                type="button"
+                disabled={task.conversation === null}
+                onClick={() => {
+                  if (task.conversation)
+                    void navigate({
+                      to: "/w/$slug/agents/chat/$conversation",
+                      params: { slug, conversation: task.conversation },
+                    });
+                }}
+                aria-current={seen ? "page" : undefined}
+                aria-busy={busy || undefined}
+                aria-label={`${task.title}, a worker of “${session.title}”: ${workerLabel(task)}`}
+                title={`${task.title}\n${TERMINAL_KIND_LABELS[task.agent]} worker, ${workerLabel(task).toLowerCase()}`}
+                className={cn(row, SUB_ROW, BRANCH, seen && activeClass)}
+              >
+                <Branch />
+                <span className="relative flex shrink-0">
+                  <TerminalKindIcon
+                    kind={task.agent}
+                    className="size-3 shrink-0 opacity-60"
+                  />
+                  {busy && <StatusPing tone="working" />}
+                </span>
+                <span
+                  className={`min-w-0 flex-1 truncate ${busy ? "text-breathe" : seen ? "" : "text-muted-foreground"}`}
+                >
+                  {task.title}
+                </span>
+                {!busy && (
+                  <span className={cn("shrink-0", workerTone(task))}>
+                    {workerLabel(task)}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        {open && ordered.length > SUBAGENTS_FOLDED && (
+          <button
+            type="button"
+            aria-expanded={all}
+            onClick={onToggleAll}
+            className={cn(row, SUB_ROW, "text-muted-foreground")}
+          >
+            {all
+              ? "Show less"
+              : `Show ${ordered.length - SUBAGENTS_FOLDED} more`}
+          </button>
+        )}
+      </div>
     </>
+  );
+}
+
+/**
+ * A row's agent mark: one icon, or for a thread handed off between agents
+ * each one it ran on, side by side, oldest first.
+ *
+ * NOTE: No disc behind each icon: on a selected or hovered row a disc of the
+ * rail's colour showed as a white blob. They only touch, barely overlapping.
+ */
+function ThreadAgentIcons({ session }: { session: AgentSession }) {
+  const agents = session.agents;
+  if (!agents || agents.length < 2)
+    return (
+      <TerminalKindIcon kind={session.agent} className="size-3 shrink-0" />
+    );
+  return (
+    // Pulled a little toward the title: the row's gap is sized for one icon.
+    <span className="-me-1 flex shrink-0 items-center" aria-hidden="true">
+      {agents.map((kind, index) => (
+        <TerminalKindIcon
+          key={kind}
+          kind={kind}
+          className={cn("size-3 shrink-0", index > 0 && "-ms-0.5")}
+        />
+      ))}
+    </span>
   );
 }

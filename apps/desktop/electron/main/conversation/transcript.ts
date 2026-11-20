@@ -5,7 +5,8 @@
 // NOTE: Read-only, and nothing here imports Electron: main calls it, and a
 // Node test drives it against a fake home folder, like
 // `subagent-transcript.ts`.
-import { stat } from "node:fs/promises";
+import type { Stats } from "node:fs";
+import { open, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   type AssistantTurn,
@@ -13,14 +14,21 @@ import {
   CONVERSATION_READ_MAX,
   type CompactionTurn,
   type Conversation,
+  type ConversationFacts,
+  isLaneworkEnvelope,
   spanMs,
+  TOOL_OUTPUT_FULL_MAX,
   TOOL_TEXT_MAX,
   type ToolCall,
   type ToolKind,
+  type ToolOutput,
   type Turn,
   type TurnUsage,
   type UserTurn,
+  webSourcesOf,
 } from "../../../shared/conversation";
+import type { TeamLead } from "../../../shared/orchestration";
+import { latestReadyProposal } from "../../../shared/orchestration-proposals";
 import {
   type AgentCard,
   isAgentSessionId,
@@ -31,8 +39,6 @@ import {
   claudeWorking,
   type Line,
   laneworkCard,
-  lines,
-  readRange,
   STALE_MS,
   tidy,
 } from "../terminal/agent-sessions";
@@ -304,7 +310,7 @@ function promptOf(
   let command = false;
   // Lanework's own envelopes (`/orchestrate`, FE-87) are the person's turn;
   // the chat decides what of them to draw.
-  if (text.startsWith("<") && !text.startsWith("<lanework_")) {
+  if (text.startsWith("<") && !isLaneworkEnvelope(text)) {
     const named = slashCommand(text);
     if (!named) return null;
     text = named;
@@ -512,9 +518,11 @@ function reminderTaskId(line: Line): string | null {
  *   stays: the lines are read in file order, never by `parentUuid`, which a
  *   boundary does not have.
  */
-export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
+export function turnFold(folder: string): TurnFold {
   const turns: Turn[] = [];
   const calls = new Map<string, ToolCall>();
+  // Where each result longer than the page is sent lies in the file, by call.
+  const long = new Map<string, LineSpan>();
   let building: Building | null = null;
 
   const close = () => {
@@ -554,8 +562,8 @@ export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
   // reminder told before its boundary, as the stream tells it.
   let compacted: CompactionTurn | null = null;
   let reminded: string | null = null;
-  for (const line of rows) {
-    if (line.isSidechain) continue;
+  const push = (line: Line, where?: LineSpan): void => {
+    if (line.isSidechain) return;
     const at = stamp(line);
     const compaction = compactionOf(line, at);
     if (compaction) {
@@ -566,13 +574,13 @@ export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
       reminded = null;
       compacted = compaction;
       turns.push(compaction);
-      continue;
+      return;
     }
     if (compacted && compacted.summary === null && turns.at(-1) === compacted) {
       const summary = compactSummary(line);
       if (summary) {
         compacted.summary = summary;
-        continue;
+        return;
       }
     }
     const task = reminderTaskId(line);
@@ -581,7 +589,7 @@ export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
       // stream tells its `hook_response` before.
       if (line.type !== "attachment") reminded = task;
       else if (compacted && compacted.taskId === null) compacted.taskId = task;
-      continue;
+      return;
     }
     // NOTE: A current CLI writes a local command's answer as a `system`
     // `local_command` line ("Not enough messages to compact."), and the
@@ -604,14 +612,14 @@ export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
           open: false,
         });
       }
-      continue;
+      return;
     }
     if (localOutput(line) && !line.isMeta) {
       // `/model` and the like ran in the CLI and never reached the model.
       if (command !== null && command === turns.length - 1 && !building)
         turns.pop();
       command = null;
-      continue;
+      return;
     }
     const prompt = promptOf(steered(line) ?? line);
     if (prompt) {
@@ -626,7 +634,7 @@ export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
         attachments: prompt.attachments,
         at: at ?? "",
       } satisfies UserTurn);
-      continue;
+      return;
     }
 
     if (line.type === "assistant") {
@@ -702,7 +710,7 @@ export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
           turn.lastTextMessage = null;
         }
       }
-      continue;
+      return;
     }
 
     if (line.type === "user") {
@@ -718,7 +726,12 @@ export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
               ? calls.get(part.tool_use_id)
               : undefined;
           if (!call) continue;
-          call.output = cut(resultText(part.content));
+          const text = resultText(part.content);
+          call.output = cut(text);
+          if (text.length > TOOL_TEXT_MAX) {
+            call.outputCut = true;
+            if (where) long.set(call.id, where);
+          }
           call.error = part.is_error === true;
           call.durationMs = spanMs(call.startedAt, at);
           if (call.kind === "agent" && isClaudeSubagentId(result.agentId))
@@ -730,7 +743,7 @@ export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
         const time = Date.parse(at);
         if (Number.isFinite(time)) b.lastAt = time;
       }
-      continue;
+      return;
     }
 
     // A running sub-agent names itself before its call returns.
@@ -740,7 +753,7 @@ export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
       const call = typeof parent === "string" ? calls.get(parent) : undefined;
       if (call && call.kind === "agent" && isClaudeSubagentId(data.agentId))
         call.subagent ??= data.agentId;
-      continue;
+      return;
     }
 
     if (
@@ -751,57 +764,455 @@ export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
     ) {
       (building as Building).turn.endedAt = at;
     }
-  }
-  close();
-  return turns;
+  };
+  return {
+    push,
+    longResult: (call) => long.get(call),
+    finish: () => {
+      close();
+      return turns;
+    },
+    peek: () => {
+      if (!building) return turns;
+      const b = building as Building;
+      const usage = finishUsage(b);
+      // What `close` would push, left open: the next line may add to it.
+      return b.turn.blocks.length > 0 || usage
+        ? [...turns, { ...b.turn, usage }]
+        : turns;
+    },
+  };
 }
 
-/** What a read of a transcript's lines answers, before main adds its own. */
-function conversationOf(
-  id: string,
-  rows: readonly Line[],
-  {
-    folder,
-    fresh,
-    truncated,
-    since = null,
-  }: {
-    folder: string;
-    fresh: boolean;
-    truncated: boolean;
-    /** The lines since a cut-off turn (`cutOffAt`): they alone decide. */
-    since?: Line[] | null;
-  },
-): Conversation {
-  const turns = buildTurns(rows, folder);
-  const working = fresh && claudeWorking(since ?? (rows as Line[]));
-  const last = turns.at(-1);
-  if (last?.role === "assistant") {
-    last.open = working;
-    if (working) last.endedAt = null;
-  }
+/**
+ * {@link buildTurns}, one line at a time, so a transcript that only grew
+ * folds in its new lines alone (`refreshFold`), and the engine's running
+ * turn takes each line as it comes (`emitLast`).
+ */
+export interface TurnFold {
+  /** `where`: the line's place in its file, when it was read from one. */
+  push: (line: Line, where?: LineSpan) => void;
+  /**
+   * Where the line holding call `call`'s result lies, when that result was
+   * cut ({@link ToolCall.outputCut}) and the line came with its place.
+   */
+  longResult: (call: string) => LineSpan | undefined;
+  /** The turns, the last one closed: the fold is done with. */
+  finish: () => Turn[];
+  /**
+   * The turns so far, the one being built included, without closing it.
+   * They are the fold's own: read them, never change them.
+   */
+  peek: () => Turn[];
+}
+
+/** A line's place in its file: its first byte, and its length in bytes. */
+export interface LineSpan {
+  at: number;
+  length: number;
+}
+
+/**
+ * The turns of a conversation's lines, in order: see {@link turnFold}.
+ */
+export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
+  const fold = turnFold(folder);
+  for (const line of rows) fold.push(line);
+  return fold.finish();
+}
+
+// ─── A transcript folded once, read by the chat and the rail ────────────────
+
+/**
+ * A Claude transcript folded into turns, kept between reads so a transcript
+ * that only grew is read from where the last read stopped.
+ */
+interface FoldedTranscript {
+  /** What the fold was started for: another folder or limit starts anew. */
+  folder: string;
+  max: number;
+  /** The file as last read: when both still match, nothing is read. */
+  size: number;
+  mtimeMs: number;
+  /** Where the fold started: 0, or past the read limit the tail's start. */
+  start: number;
+  /** Where the whole lines folded so far end: the next read's start. */
+  end: number;
+  /** `end` is a line's start; false until a tail's cut first line is gone. */
+  aligned: boolean;
+  /** The last bytes folded, up to `end` (`foldNew`). */
+  seen: Buffer;
+  /** The turns and facts of every line folded so far. */
+  fold: RowFold;
+  /** The rail's last answer and what it assumed; dropped when a line is folded. */
+  answer: { working: boolean; leads: string; id: string | null } | null;
+  /** The panel's last facts; dropped when a line is folded. */
+  facts: ConversationFacts | null;
+}
+
+/** What the lines folded so far say beside their turns. */
+export interface RowFacts {
+  /** Whether the agent works, as the lines alone say (not the file's age). */
+  working: boolean;
+  cwd: string | null;
+  branch: string | null;
+  /** The newest Lanework card a line names. */
+  card: AgentCard | null;
+}
+
+/** A {@link TurnFold} that also keeps what the same lines say of the session. */
+export interface RowFold extends TurnFold {
+  facts: () => RowFacts;
+}
+
+/**
+ * One CLI's transcript, as {@link refreshFold} folds it: Claude's here,
+ * Codex's in `codex-transcript.ts`. Both are JSONL, so the cache (size and
+ * mtime, new complete lines only, a rewrite folded again) is one.
+ */
+export interface FoldKind {
+  agent: "claude" | "codex";
+  /** A fold with no line yet. */
+  make: (folder: string) => RowFold;
+  /**
+   * The line a fold that starts past the file's head must be given first
+   * (Codex's `session_meta`, which names its folder and branch), if any.
+   */
+  head?: (file: string) => Promise<Line | null>;
+  /** Whether the agent works, as the lines at the end of the file say. */
+  working: (tail: Line[]) => boolean;
+}
+
+/**
+ * A Claude transcript's turns, and the facts its lines name beside them.
+ *
+ * NOTE: `working` is what `claudeWorking` says of every line so far, kept one
+ * line at a time; `cwd`, `gitBranch` and the Lanework card are each the newest
+ * a line names, what a walk back from the end finds first.
+ */
+function claudeRows(folder: string): RowFold {
+  const fold = turnFold(folder);
+  let working = claudeWorking([]);
   let cwd: string | null = null;
   let branch: string | null = null;
   let card: AgentCard | null = null;
-  for (let at = rows.length - 1; at >= 0; at--) {
-    const line = rows[at] as Line;
-    if (cwd === null && typeof line.cwd === "string") cwd = line.cwd;
-    if (branch === null && typeof line.gitBranch === "string" && line.gitBranch)
-      branch = line.gitBranch;
-    if (working && card === null) card = laneworkCard(line);
-    if (cwd !== null && branch !== null && (card !== null || !working)) break;
-  }
   return {
-    id,
-    agent: "claude",
-    cwd,
-    branch,
-    turns,
-    working,
-    card,
-    settings: null,
-    truncated,
+    ...fold,
+    push: (row, where) => {
+      fold.push(row, where);
+      working = workingAfter(working, row);
+      if (typeof row.cwd === "string") cwd = row.cwd;
+      if (typeof row.gitBranch === "string" && row.gitBranch)
+        branch = row.gitBranch;
+      card = laneworkCard(row) ?? card;
+    },
+    facts: () => ({ working, cwd, branch, card }),
   };
+}
+
+const claude: FoldKind = {
+  agent: "claude",
+  make: claudeRows,
+  working: claudeWorking,
+};
+
+/**
+ * The transcripts folded so far, by file, least recently read first.
+ *
+ * NOTE: Only the turns are kept, never the parsed lines: a conductor's long
+ * conversation is up to {@link CONVERSATION_READ_MAX} of JSON, its turns a
+ * fraction of it. The chat (`readConversation`) and the rail
+ * (`latestClaudeProposal`) share one fold per file, so a chat that is open
+ * and a conductor the rail watches cost one read of each new line. A handful
+ * of chats and conductors at a time, hence the cap.
+ */
+const folded = new Map<string, FoldedTranscript>();
+const FOLDED_MAX = 16;
+/** One read at a time per file: two folding the same new lines would double them. */
+const folding = new Map<string, Promise<unknown>>();
+
+/**
+ * A line `claudeWorking` reads as working. Put before another line, it
+ * tells a line that decides nothing (the answer stays this one's) from one
+ * that decides "not working".
+ */
+const UNDECIDED: Line = { type: "user", message: { content: "" } };
+
+/**
+ * What `claudeWorking` says of the lines so far once `line` is added: it
+ * reads back from the end to the first line that decides, so the newest
+ * deciding line's verdict stands.
+ */
+function workingAfter(working: boolean, line: Line): boolean {
+  const alone = claudeWorking([line]);
+  if (alone) return true;
+  return claudeWorking([UNDECIDED, line]) ? working : false;
+}
+
+/** `work` once every earlier read of `file` is done. */
+function inTurn<T>(file: string, work: () => Promise<T>): Promise<T> {
+  const before = folding.get(file) ?? Promise.resolve();
+  const run = before.then(work, work);
+  const settled = run.catch(() => {});
+  folding.set(file, settled);
+  void settled.then(() => {
+    if (folding.get(file) === settled) folding.delete(file);
+  });
+  return run;
+}
+
+/** A fresh fold of `size` bytes: all of them, or past `max` only the end. */
+function startFold(
+  kind: FoldKind,
+  folder: string,
+  size: number,
+  mtimeMs: number,
+  max: number,
+): FoldedTranscript {
+  const start = size > max ? size - max : 0;
+  return {
+    folder,
+    max,
+    size,
+    mtimeMs,
+    start,
+    end: start,
+    aligned: start === 0,
+    seen: Buffer.alloc(0),
+    fold: kind.make(folder),
+    answer: null,
+    facts: null,
+  };
+}
+
+/**
+ * The whole lines of `chunk[from, to)`, parsed, each with its place in the
+ * file (`base` is where `chunk` starts): `lines`, keeping where each was.
+ *
+ * NOTE: Split on the bytes, not the text, so a place is a byte offset even
+ * past a multi-byte character. A newline byte is never inside one in UTF-8.
+ *
+ * @param aligned `from` is a line's start; else the first line is cut and
+ *   dropped, as `lines` drops a tail's.
+ */
+function placedLines(
+  chunk: Buffer,
+  from: number,
+  to: number,
+  base: number,
+  aligned: boolean,
+): { line: Line; where: LineSpan }[] {
+  const out: { line: Line; where: LineSpan }[] = [];
+  let start = from;
+  let first = true;
+  while (start < to) {
+    let end = chunk.indexOf(0x0a, start);
+    if (end === -1 || end > to) end = to;
+    const skip = first && !aligned;
+    first = false;
+    if (!skip && end > start) {
+      const text = chunk.toString("utf8", start, end);
+      if (text.trim())
+        try {
+          const value: unknown = JSON.parse(text);
+          if (value && typeof value === "object")
+            out.push({
+              line: value as Line,
+              where: { at: base + start, length: end - start },
+            });
+        } catch {
+          // Cut, or not ours.
+        }
+    }
+    start = end + 1;
+  }
+  return out;
+}
+
+/** How much of what was folded last is kept, to tell growth from a rewrite. */
+const SEEN_TAIL = 4 * 1024;
+
+/**
+ * Fold `file`'s whole lines from `entry.end` to `size` into `entry`.
+ *
+ * NOTE: Not `eachLine`: it hands a line longer than its 1 MB step over cut,
+ * and a prompt with a pasted image is that long. Cut, it would not parse,
+ * and the chat would lose a turn a whole read of the file keeps.
+ *
+ * NOTE: The read starts at the last bytes already folded (`seen`), which
+ * must still be there: a file written again under the same name, longer
+ * than before, would pass for one that grew, and its new lines would be
+ * folded onto the old ones.
+ *
+ * @returns false when the bytes already folded changed: fold it anew.
+ */
+async function foldNew(
+  file: string,
+  entry: FoldedTranscript,
+  size: number,
+): Promise<boolean> {
+  if (size <= entry.end) return true;
+  const from = entry.end - entry.seen.length;
+  const handle = await open(file, "r");
+  let chunk: Buffer;
+  try {
+    const buffer = Buffer.alloc(size - from);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, from);
+    chunk = buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+  const kept = entry.seen.length;
+  if (chunk.length < kept || !chunk.subarray(0, kept).equals(entry.seen))
+    return false;
+  // A line still being written waits for the next read, as `lines` drops it.
+  const last = chunk.lastIndexOf(0x0a);
+  if (last < kept) return true;
+  const rows = placedLines(chunk, kept, last + 1, from, entry.aligned);
+  entry.end = from + last + 1;
+  entry.seen = Buffer.from(
+    chunk.subarray(Math.max(0, last + 1 - SEEN_TAIL), last + 1),
+  );
+  entry.aligned = true;
+  entry.answer = null;
+  entry.facts = null;
+  for (const { line: row, where } of rows) entry.fold.push(row, where);
+  return true;
+}
+
+/**
+ * A fresh fold of `file`, given its head line first when it starts past it
+ * ({@link FoldKind.head}).
+ */
+async function beginFold(
+  file: string,
+  kind: FoldKind,
+  folder: string,
+  info: Stats,
+  max: number,
+): Promise<FoldedTranscript> {
+  const entry = startFold(kind, folder, info.size, info.mtimeMs, max);
+  if (entry.start > 0) {
+    const head = await kind.head?.(file);
+    if (head) entry.fold.push(head);
+  }
+  return entry;
+}
+
+/**
+ * `file`'s fold, brought up to date with the file. Called inside
+ * {@link inTurn} only.
+ *
+ * NOTE: Kept per file and checked against its size and mtime:
+ * - both unchanged: nothing is read;
+ * - it grew: only the bytes after the last whole line folded are read and
+ *   folded, so only the turns those lines touch change (the last one, a new
+ *   one, a call a result answers); every other turn is the same object;
+ * - it shrank, changed at the same size, or the last bytes folded are not
+ *   what they were: it was rewritten, and is folded again from the start.
+ * Past {@link CONVERSATION_READ_MAX} only the end is read. The fold starts
+ * there too, and starts again from the new end once it holds a quarter of
+ * that more: re-anchored on every growth, a long conversation would be read
+ * whole again after every turn. So the chat of such a conversation may show
+ * up to a quarter more of its past than the limit, never less.
+ *
+ * @throws When the conversation has no transcript.
+ */
+async function refreshFold(
+  file: string,
+  folder: string,
+  max: number,
+  kind: FoldKind,
+): Promise<{ entry: FoldedTranscript; info: Stats }> {
+  const info = await stat(file).catch(() => null);
+  if (!info?.isFile()) {
+    folded.delete(file);
+    throw new Error("That conversation has no transcript.");
+  }
+  const known = folded.get(file);
+  folded.delete(file);
+  const kept =
+    known !== undefined && known.folder === folder && known.max === max
+      ? known
+      : null;
+  const grew =
+    kept !== null &&
+    info.size > kept.size &&
+    info.size - kept.start <= max + max / 4;
+  const same =
+    kept !== null && info.size === kept.size && info.mtimeMs === kept.mtimeMs;
+  let entry =
+    kept !== null && (grew || same)
+      ? kept
+      : await beginFold(file, kind, folder, info, max);
+  // A read that fails leaves no entry: the next read folds it all again.
+  if (!(await foldNew(file, entry, info.size))) {
+    entry = await beginFold(file, kind, folder, info, max);
+    await foldNew(file, entry, info.size);
+  }
+  entry.size = info.size;
+  entry.mtimeMs = info.mtimeMs;
+  folded.set(file, entry);
+  if (folded.size > FOLDED_MAX)
+    folded.delete(folded.keys().next().value as string);
+  return { entry, info };
+}
+
+/**
+ * Whether the agent works on the transcript `entry` folded: a stale file is
+ * not working, and after a turn cut off with its process only the lines
+ * since decide (`cutOffAt`).
+ */
+async function foldWorking(
+  file: string,
+  info: Stats,
+  entry: FoldedTranscript,
+  kind: FoldKind,
+): Promise<boolean> {
+  const fresh = Date.now() - info.mtimeMs <= STALE_MS;
+  const since =
+    cutOffAt(file, info.size) === null ? null : await turnTail(file, info.size);
+  return (
+    fresh && (since !== null ? kind.working(since) : entry.fold.facts().working)
+  );
+}
+
+/**
+ * The fold's turns as a read shows them: a new list, its last assistant turn
+ * open while the agent works.
+ *
+ * NOTE: The last turn is a copy: the fold's own turn stays as the next line
+ * finds it. The other turns are the fold's own, shared: they go out over IPC
+ * (copied as they are sent) or are read at once, never kept or changed.
+ */
+function shownTurns(turns: readonly Turn[], working: boolean): Turn[] {
+  const shown = turns.slice();
+  const last = shown.at(-1);
+  if (last?.role === "assistant")
+    shown[shown.length - 1] = shownLast(last, working);
+  return shown;
+}
+
+/** The last turn's shown copy, by the folded turn and whether it works. */
+const shownCopies = new WeakMap<Turn, { working: boolean; copy: Turn }>();
+
+/**
+ * `last` with `open` and `endedAt` set for `working`.
+ *
+ * NOTE: The same copy while neither changes: a thread's read tags each
+ * session's turns once and reuses the tag by identity, and a fresh copy here
+ * on every read made the newest turn of every earlier session tagged again.
+ */
+function shownLast(last: AssistantTurn, working: boolean): Turn {
+  const known = shownCopies.get(last);
+  if (known && known.working === working) return known.copy;
+  const copy: Turn = {
+    ...last,
+    open: working,
+    endedAt: working ? null : last.endedAt,
+  };
+  shownCopies.set(last, { working, copy });
+  return copy;
 }
 
 /**
@@ -810,30 +1221,217 @@ function conversationOf(
  * NOTE: The path is built from the folder and an id that passed
  * {@link isAgentSessionId}, inside Claude's own folder under `home`.
  *
+ * Folded once and kept ({@link refreshFold}): a read after the transcript
+ * grew parses only the lines written since, not the whole file again, so a
+ * long turn read after every line costs what it wrote, not its square.
  * Past {@link CONVERSATION_READ_MAX} bytes only the end is read, and
  * `truncated` says so.
  *
  * @throws When the conversation has no transcript.
  */
+// NOTE: Async so a bad id rejects like a missing file, never throws at the
+// caller before it has a promise to catch.
 export async function readConversation(
   home: string,
   folder: string,
   id: string,
   max = CONVERSATION_READ_MAX,
 ): Promise<Conversation> {
-  const file = transcriptPath(home, folder, id);
-  const info = await stat(file).catch(() => null);
-  if (!info?.isFile()) throw new Error("That conversation has no transcript.");
-  const fresh = Date.now() - info.mtimeMs <= STALE_MS;
-  const truncated = info.size > max;
-  const start = truncated ? info.size - max : 0;
-  const rows = lines(await readRange(file, start, info.size - start), {
-    head: !truncated,
+  return readFolded(transcriptPath(home, folder, id), folder, id, max, claude);
+}
+
+/**
+ * Conversation `id`, read from `file` as `kind` folds it: what
+ * {@link readConversation} and Codex's read both are.
+ *
+ * @throws When the file is gone.
+ */
+export function readFolded(
+  file: string,
+  folder: string,
+  id: string,
+  max: number,
+  kind: FoldKind,
+): Promise<Conversation> {
+  return inTurn(file, async () => {
+    const { entry, info } = await refreshFold(file, folder, max, kind);
+    const working = await foldWorking(file, info, entry, kind);
+    const facts = entry.fold.facts();
+    return {
+      id,
+      agent: kind.agent,
+      cwd: facts.cwd,
+      branch: facts.branch,
+      turns: shownTurns(entry.fold.peek(), working),
+      working,
+      card: working ? facts.card : null,
+      settings: null,
+      truncated: entry.start > 0,
+    };
   });
-  // A turn cut off with its process is not working (`cutOffAt`).
-  const since =
-    cutOffAt(file, info.size) === null ? null : await turnTail(file, info.size);
-  return conversationOf(id, rows, { folder, fresh, truncated, since });
+}
+
+// ─── A long tool result, read back whole ─────────────────────────────────────
+
+/**
+ * The longest line {@link readToolOutput} reads back. A tool result's line
+ * repeats it (`toolUseResult`), and a Read of a large file is long.
+ */
+const RESULT_LINE_MAX = 64 * 1024 * 1024;
+
+/**
+ * The whole result of tool call `call` in conversation `id`, which a read
+ * sent cut ({@link ToolCall.outputCut}).
+ *
+ * NOTE: The fold keeps only where each such result's line is in the file,
+ * never its text: the chat asks for one when the person opens it, and that
+ * one line is read from disk then. The fold is brought up to date first
+ * ({@link refreshFold}), so a result written since the last read is found,
+ * and a transcript rewritten since is folded again, its places with it.
+ *
+ * @throws When the conversation has no transcript, or the call no cut
+ *   result in it.
+ */
+export async function readToolOutput(
+  home: string,
+  folder: string,
+  id: string,
+  call: string,
+  max = CONVERSATION_READ_MAX,
+): Promise<ToolOutput> {
+  const file = transcriptPath(home, folder, id);
+  return inTurn(file, async () => {
+    const { entry } = await refreshFold(file, folder, max, claude);
+    const where = entry.fold.longResult(call);
+    if (!where || where.length > RESULT_LINE_MAX)
+      throw new Error("That tool result is not in the transcript.");
+    const handle = await open(file, "r");
+    let text: string;
+    try {
+      const buffer = Buffer.alloc(where.length);
+      const { bytesRead } = await handle.read(
+        buffer,
+        0,
+        where.length,
+        where.at,
+      );
+      text = buffer.toString("utf8", 0, bytesRead);
+    } finally {
+      await handle.close();
+    }
+    let line: Line;
+    try {
+      line = JSON.parse(text) as Line;
+    } catch {
+      throw new Error("That tool result is not in the transcript.");
+    }
+    const content = (line.message as { content?: unknown } | undefined)
+      ?.content;
+    const part = Array.isArray(content)
+      ? (content as Record<string, unknown>[]).find(
+          (entry) =>
+            entry?.type === "tool_result" && entry.tool_use_id === call,
+        )
+      : undefined;
+    if (!part) throw new Error("That tool result is not in the transcript.");
+    const whole = resultText(part.content);
+    return whole.length > TOOL_OUTPUT_FULL_MAX
+      ? { text: whole.slice(0, TOOL_OUTPUT_FULL_MAX), cut: true }
+      : { text: whole, cut: false };
+  });
+}
+
+// ─── The rail's latest proposal, from the same fold ─────────────────────────
+
+/**
+ * The id of conversation `id`'s latest proposal when it waits on the user,
+ * or null: what `deriveProposals` answers of the chat's turns
+ * (`readConversation`), without reading the whole transcript each time.
+ *
+ * NOTE: The chat's fold ({@link refreshFold}); the answer is kept too while
+ * no line is folded, unless whether it works or `leads` changed.
+ *
+ * @throws When the conversation has no transcript.
+ */
+// NOTE: Async for the same reason as `readConversation`.
+export async function latestClaudeProposal(
+  home: string,
+  folder: string,
+  id: string,
+  leads: readonly TeamLead[],
+  max = CONVERSATION_READ_MAX,
+): Promise<string | null> {
+  return latestFoldedProposal(
+    transcriptPath(home, folder, id),
+    folder,
+    leads,
+    max,
+    claude,
+  );
+}
+
+/**
+ * {@link latestClaudeProposal} of `file`, as `kind` folds it: Codex's too.
+ *
+ * @throws When the file is gone.
+ */
+export function latestFoldedProposal(
+  file: string,
+  folder: string,
+  leads: readonly TeamLead[],
+  max: number,
+  kind: FoldKind,
+): Promise<string | null> {
+  return inTurn(file, async () => {
+    const { entry, info } = await refreshFold(file, folder, max, kind);
+    const working = await foldWorking(file, info, entry, kind);
+    const key = JSON.stringify(leads);
+    if (entry.answer?.working === working && entry.answer.leads === key)
+      return entry.answer.id;
+    const answer = latestReadyProposal(
+      shownTurns(entry.fold.peek(), working),
+      leads,
+    );
+    entry.answer = { working, leads: key, id: answer };
+    return answer;
+  });
+}
+
+// ─── The panel's small facts, from the same fold ────────────────────────────
+
+/**
+ * What a panel reads of a whole conversation (its web pages), from `file`'s
+ * fold, as `kind` folds it.
+ *
+ * NOTE: The same fold the chat and the rail read ({@link refreshFold}), and
+ * the answer is kept on it until a line is folded: a panel that asks again
+ * with nothing written reads nothing and scans no turn, and one that asks
+ * after a turn scans the turns the fold holds, never the file. The turns
+ * are not sent.
+ *
+ * @throws When the file is gone.
+ */
+export function foldedFacts(
+  file: string,
+  folder: string,
+  max: number,
+  kind: FoldKind,
+): Promise<ConversationFacts> {
+  return inTurn(file, async () => {
+    const { entry } = await refreshFold(file, folder, max, kind);
+    entry.facts ??= { web: webSourcesOf(entry.fold.peek()) };
+    return entry.facts;
+  });
+}
+
+/** {@link foldedFacts} of Claude conversation `id`. */
+export function claudeFacts(
+  home: string,
+  folder: string,
+  id: string,
+  max = CONVERSATION_READ_MAX,
+): Promise<ConversationFacts> {
+  return foldedFacts(transcriptPath(home, folder, id), folder, max, claude);
 }
 
 /** Re-exported for the engine's live turns. */

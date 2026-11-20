@@ -8,7 +8,8 @@
 // stands for. Settings are names picked from the lists below, checked again
 // in main before they become a flag.
 
-import type { AgentCard } from "./terminal";
+import type { TeamLead } from "./orchestration";
+import type { AgentCard, SessionLauncher } from "./terminal";
 
 // ─── Composer settings ──────────────────────────────────────────────────────
 
@@ -493,6 +494,12 @@ export interface ToolCall {
   input: string;
   /** Its result as text, cut at {@link TOOL_TEXT_MAX}; null while it runs. */
   output: string | null;
+  /**
+   * Its result was longer than {@link TOOL_TEXT_MAX}: `output` is only its
+   * start, and `toolOutput` reads the whole of it back. Set from a Claude
+   * transcript; absent elsewhere.
+   */
+  outputCut?: boolean;
   /** Its result said it failed. */
   error: boolean;
   /** The file it read or wrote, when it names one, for the file chip. */
@@ -526,8 +533,21 @@ export function spanMs(
   return Math.max(0, to - from);
 }
 
-/** The most of one tool call's input or output sent to the page, in chars. */
+/**
+ * The most of one tool call's input or output sent to the page, in chars. A
+ * longer output goes as its start, {@link ToolCall.outputCut} set.
+ */
 export const TOOL_TEXT_MAX = 16 * 1024;
+
+/** The most of one tool result `toolOutput` sends back, in chars. */
+export const TOOL_OUTPUT_FULL_MAX = 2 * 1024 * 1024;
+
+/** One tool call's whole result, as `toolOutput` reads it back. */
+export interface ToolOutput {
+  text: string;
+  /** Longer than {@link TOOL_OUTPUT_FULL_MAX} even so: `text` is its start. */
+  cut: boolean;
+}
 
 /** Something the user attached to a prompt: a pasted image, a file. */
 export interface Attachment {
@@ -579,6 +599,8 @@ export interface UserTurn {
   attachments: Attachment[];
   /** When it was sent, as an ISO timestamp. */
   at: string;
+  /** The session of a thread it came from ({@link TurnSession}). */
+  session?: TurnSession;
 }
 
 export interface AssistantTurn {
@@ -595,6 +617,8 @@ export interface AssistantTurn {
   endedAt: string | null;
   /** Still being written: the last turn of a working conversation. */
   open: boolean;
+  /** The session of a thread it came from ({@link TurnSession}). */
+  session?: TurnSession;
 }
 
 /**
@@ -620,13 +644,76 @@ export interface CompactionTurn {
   taskId: string | null;
   /** When it compacted, as an ISO timestamp. */
   at: string;
+  /** The session of a thread it came from ({@link TurnSession}). */
+  session?: TurnSession;
 }
 
-export type Turn = UserTurn | AssistantTurn | CompactionTurn;
+/**
+ * Which session of a thread a turn came from (see {@link HandoffTurn}): set
+ * only on the turns of a thread that spans more than one session.
+ */
+export interface TurnSession {
+  /** The native session (CLI conversation) id the turn was read from. */
+  conversation: string;
+  agent: ConversationAgent;
+  /** The model it ran on there, when known. */
+  model: string | null;
+}
+
+/** One side of a handoff marker: a session's agent and model. */
+export interface HandoffTurnSide {
+  /** The native session id. */
+  conversation: string;
+  agent: ConversationAgent;
+  model: string | null;
+}
+
+/**
+ * Where a thread was handed to another agent in place (`switchAgent`):
+ * drawn between the sessions it joins, never written by a CLI.
+ *
+ * NOTE: A marker main makes when it stitches a thread's sessions together
+ * on `read`; its id is derived from the session it opens, so a page that
+ * reads again finds the same one.
+ */
+export interface HandoffTurn {
+  role: "handoff";
+  /** `handoff:<the new session's id>`. */
+  id: string;
+  /** The sessions it continued, oldest first. */
+  from: HandoffTurnSide[];
+  /** The session it started. */
+  to: HandoffTurnSide;
+  /** When it was handed off, ISO. */
+  at: string;
+  /** What the context block carried. */
+  carried: HandoffCarried;
+  session?: TurnSession;
+}
+
+export type Turn = UserTurn | AssistantTurn | CompactionTurn | HandoffTurn;
 
 export interface Conversation {
+  /**
+   * The conversation's id. For a thread (several sessions joined by
+   * `switchAgent`), its head's: the first session's.
+   */
   id: string;
-  /** The CLI whose transcript it is, and that sends its next turn. */
+  /**
+   * The conductor that started it (FE-128) and the access it gives the
+   * user, as main knows it; null or absent for any other conversation.
+   * Known from the first read, before the rail lists the session.
+   */
+  launchedBy?: SessionLauncher | null;
+  /**
+   * Whether that conductor keeps the user out now (`isManaged`), as main
+   * gates the user's calls: false once it is gone.
+   */
+  managed?: boolean;
+  /**
+   * The CLI whose transcript it is, and that sends its next turn: for a
+   * thread, its newest session's.
+   */
   agent: ConversationAgent;
   /** The folder it runs in, shown as the composer's "Current checkout". */
   cwd: string | null;
@@ -637,14 +724,182 @@ export interface Conversation {
   working: boolean;
   /** The card its agent last named to the Lanework MCP, as the rail has it. */
   card: AgentCard | null;
-  /** The settings it last ran with here, or null when never sent from chat. */
+  /**
+   * The settings it last ran with here, or null when never sent from chat:
+   * for a thread, its newest session's.
+   */
   settings: ComposerSettings | null;
   /** Longer than one read takes: its start was dropped, the end kept. */
   truncated: boolean;
+  /**
+   * How many turns come before `turns`: `read` sends only the newest
+   * ({@link windowStart}), and `readBefore` pages back through the rest.
+   * 0 or absent: `turns` is all main holds (still `truncated` past
+   * {@link CONVERSATION_READ_MAX}).
+   */
+  earlier?: number;
+  /**
+   * What the chat would read from turns a window leaves out: set when
+   * `earlier` > 0. The page reads its own turns first, and this only when
+   * they say nothing.
+   */
+  summary?: ConversationSummary;
+  /**
+   * The conversation's last {@link ConversationEvent.seq} when `read`
+   * answered: every event up to it went out before this answer did. Absent
+   * from anything but `read`.
+   */
+  seq?: number;
+}
+
+/**
+ * Facts of a whole conversation, sent with a read that holds only its newest
+ * turns ({@link Conversation.summary}).
+ *
+ * NOTE: Each is what a scan of every turn would answer, so a chat that holds
+ * a window answers as one that held them all, without the turns themselves.
+ */
+export interface ConversationSummary {
+  /**
+   * The context version its last conductor turn carried (FE-95), or null:
+   * a conductor's next turn sends its rules again only when it changed.
+   */
+  conductorContext: string | null;
+  /** The model its last answer came from, or null. */
+  model: string | null;
+  /** The proposals planned before the window, oldest first (FE-134). */
+  proposals: EarlierProposal[];
+  /**
+   * The turns the newest of {@link proposals} is read from: its planning
+   * and repair turns, each reply with its text blocks only. The chat reads
+   * the proposal from them as from its own turns (it may be the latest, its
+   * card drawn above the prompt), and never draws them. Empty when there is
+   * none, or it is too long to send.
+   */
+  anchor: Turn[];
+}
+
+/**
+ * A proposal whose planning turn the window leaves out: enough to title its
+ * run and keep that run in its place, not at the chat's end.
+ */
+export interface EarlierProposal {
+  id: string;
+  /** Its title; empty when its reply did not hold a valid proposal. */
+  title: string;
+  /** The reply turn its settled run follows, as `DerivedProposal`. */
+  afterTurn: string | null;
 }
 
 /** The most of a transcript one read takes. */
 export const CONVERSATION_READ_MAX = 32 * 1024 * 1024;
+
+/**
+ * The most user turns one `read` sends: the newest, with everything after
+ * the first of them. Older ones come a page at a time (`readBefore`).
+ */
+export const CONVERSATION_WINDOW_TURNS = 20;
+
+/**
+ * The most of one `read` or `readBefore` page, as {@link turnBytes} counts
+ * it. Whichever of this and the user turns' count comes first ends it.
+ */
+export const CONVERSATION_WINDOW_BYTES = 1024 * 1024;
+
+/** The most user turns one `readBefore` page may ask for. */
+export const CONVERSATION_PAGE_TURNS_MAX = 100;
+
+/** How `read` reads: the newest turns, or all of them. */
+export interface ConversationReadOptions {
+  /**
+   * Every turn main holds, not the newest only.
+   *
+   * NOTE: The whole conversation, up to {@link CONVERSATION_READ_MAX} of
+   * transcript, is copied over IPC and into the page: only for a caller that
+   * cannot do with a window or a call for small facts (`summary`,
+   * `readToolCalls`).
+   */
+  full?: boolean;
+}
+
+/** Turns from before the ones the page holds (`readBefore`). */
+export interface ConversationPage {
+  /** In order, oldest first; they end right before the turn asked from. */
+  turns: Turn[];
+  /** How many turns come before these. */
+  earlier: number;
+}
+
+/**
+ * About how many bytes `turn` takes once serialized: its strings' lengths and
+ * a little for each field. An estimate for {@link windowStart}, never sent.
+ *
+ * NOTE: Not `JSON.stringify(turn).length`: that builds a copy of every turn
+ * a read looks at, the cost the window is there to save.
+ */
+export function turnBytes(turn: Turn): number {
+  const FIELD = 64;
+  if (turn.role === "user")
+    return (
+      FIELD * 4 +
+      turn.text.length +
+      turn.attachments.reduce(
+        (sum, entry) =>
+          sum +
+          FIELD +
+          entry.name.length +
+          entry.mediaType.length +
+          (entry.path?.length ?? 0),
+        0,
+      )
+    );
+  if (turn.role === "compaction")
+    return FIELD * 8 + (turn.summary?.length ?? 0);
+  if (turn.role === "handoff") return FIELD * (8 + 4 * turn.from.length);
+  let bytes = FIELD * 8 + (turn.model?.length ?? 0);
+  for (const block of turn.blocks) {
+    if (block.type === "text") bytes += FIELD + block.text.length;
+    else if (block.type === "tools")
+      for (const call of block.calls)
+        bytes +=
+          FIELD * 12 +
+          call.summary.length +
+          call.input.length +
+          (call.output?.length ?? 0) +
+          (call.filePath?.length ?? 0);
+    else bytes += FIELD * 8 + block.request.input.length;
+  }
+  return bytes;
+}
+
+/**
+ * Where the newest turns of `turns[0, end)` start: back from `end` until
+ * `maxUsers` user turns are in, or the next turn would take it past
+ * `maxBytes` ({@link turnBytes}). At least one turn is always in, however
+ * large.
+ *
+ * @returns The first index in; 0 when everything is.
+ */
+export function windowStart(
+  turns: readonly Turn[],
+  end = turns.length,
+  maxUsers = CONVERSATION_WINDOW_TURNS,
+  maxBytes = CONVERSATION_WINDOW_BYTES,
+): number {
+  let users = 0;
+  let bytes = 0;
+  let start = end;
+  while (start > 0) {
+    const turn = turns[start - 1] as Turn;
+    const size = turnBytes(turn);
+    if (start < end && bytes + size > maxBytes) break;
+    bytes += size;
+    start--;
+    // A window starts on its oldest prompt, never on what answers one.
+    if (turn.role === "user" && ++users >= maxUsers) break;
+  }
+  return start;
+}
 
 // ─── Sending ────────────────────────────────────────────────────────────────
 
@@ -856,8 +1111,18 @@ export type EngineState =
   | { state: "terminal"; terminalId: string }
   | ({ state: "error"; message: string } & EngineQueue);
 
-/** Main → renderer, as a turn streams in. */
-export type ConversationEvent =
+/**
+ * Main → renderer, as a turn streams in.
+ *
+ * NOTE: Not every window hears every event. `delta`, `turn` and `moved` go
+ * in full only to the windows that `subscribe`d to the conversation; the
+ * others hear its status: `permission`, `permission-done`, `claude-auth` and
+ * a `state` that changes `engine.state` at once, and at most one other
+ * `state` and one `moved` (standing for every `turn` and `moved` since) per
+ * {@link CONVERSATION_STATUS_MS}. A hidden chat or the rail never pays for
+ * streamed text it does not draw.
+ */
+export type ConversationEvent = (
   | {
       type: "state";
       project: string;
@@ -899,7 +1164,40 @@ export type ConversationEvent =
       conversation: string;
       state: "failed" | "ok";
       message: string | null;
-    };
+    }
+) & {
+  /**
+   * The conversation's own count of events, one higher on each, set by main
+   * as the event goes out (absent before it does).
+   *
+   * A subscribed page drops what it has applied already (`seq` at or below
+   * its last) and asks {@link DesktopConversationApi | replay} for the
+   * events after its last when one is skipped. A status event standing for
+   * several carries the last one's. Counted from 1 again only when the app
+   * starts.
+   */
+  seq?: number;
+};
+
+/**
+ * Status events, other than a change of `engine.state`, wait up to this
+ * long to go to a window not subscribed to their conversation: the latest
+ * goes, the rest are dropped.
+ */
+export const CONVERSATION_STATUS_MS = 250;
+
+/**
+ * What `subscribe` and `replay` answer: the conversation's last
+ * {@link ConversationEvent.seq}, and the events after the one asked from.
+ *
+ * `events` is null when main no longer holds them all (it keeps the last
+ * few per conversation) or none was asked from: the page reads the
+ * conversation, its engine's state and its permissions again instead.
+ */
+export interface ConversationReplay {
+  seq: number;
+  events: ConversationEvent[] | null;
+}
 
 /**
  * Whether a failed Claude turn's words say its sign-in must be done again
@@ -918,6 +1216,242 @@ export function needsClaudeSignIn(text: string): boolean {
     /\bOAuth token (has expired|(was )?revoked)\b/i.test(text) ||
     /\bInvalid API key\b/i.test(text)
   );
+}
+
+// ─── Usage limits ───────────────────────────────────────────────────────────
+
+/** Which of the account's windows ran out, as far as the CLI said. */
+export const USAGE_LIMIT_WINDOWS = [
+  "5-hour",
+  "weekly",
+  "monthly",
+  "unknown",
+] as const;
+export type UsageLimitWindow = (typeof USAGE_LIMIT_WINDOWS)[number];
+
+/**
+ * An agent's account ran out of usage: its CLI refused a turn for it.
+ *
+ * Main keeps one per agent and scope until `resetsAt` passes, or until a
+ * turn under it goes through again (bought usage, a banked reset spent).
+ */
+export interface UsageLimit {
+  agent: ConversationAgent;
+  /**
+   * The model family it caps alone (`opus`, `sonnet`: Claude's weekly
+   * per-model caps); null when it caps the whole account.
+   */
+  scope: string | null;
+  window: UsageLimitWindow;
+  /** When the window starts over, ISO; null when nothing said. */
+  resetsAt: string | null;
+  /** The CLI's own words, cut at 500 characters. */
+  message: string;
+  /** When main saw it, ISO. */
+  at: string;
+}
+
+/**
+ * A conversation main stopped (or saw refused) because its agent hit a
+ * usage limit.
+ *
+ * `autoContinue` says what happens next:
+ * - `scheduled`: "Continue where you left off." goes at `continueAt`.
+ * - `off`: the conversation is not opted in; it waits for the person.
+ * - `unknown-reset`: opted in, but the CLI and the usage readers gave no
+ *   reset time, so nothing is sent by itself.
+ */
+export interface UsageLimitStop {
+  agent: ConversationAgent;
+  project: string;
+  conversation: string;
+  autoContinue: "scheduled" | "off" | "unknown-reset";
+  /** ISO; set only when `scheduled`. */
+  continueAt: string | null;
+}
+
+/** What `usageLimits` answers, and every `onUsageLimits` event carries. */
+export interface UsageLimitsState {
+  /** The limits in force now, one per agent and scope at most. */
+  limits: UsageLimit[];
+  /** Conversations stopped by a limit and not sent to since. */
+  stopped: UsageLimitStop[];
+  /** Conversations opted in to auto-continue, stopped or not. */
+  autoContinue: { project: string; conversation: string }[];
+}
+
+/**
+ * Whether a turn on `model` falls under a limit of `scope`.
+ *
+ * @param unknown What a turn whose model is not known counts as: under the
+ *   limit when stopping (it may run on the capped model), not when a turn
+ *   that went through is read as the limit gone.
+ */
+export function inScope(
+  scope: string | null | undefined,
+  model: string | null | undefined,
+  unknown: boolean,
+): boolean {
+  if (!scope) return true;
+  if (!model) return unknown;
+  return model.toLowerCase().includes(scope);
+}
+
+/**
+ * The limit a conversation of `agent` on `model` is under, if any: the
+ * whole account's first (no turn goes through it), else its model family's.
+ */
+export function limitOver(
+  limits: readonly UsageLimit[],
+  agent: ConversationAgent | null,
+  model: string | null | undefined,
+): UsageLimit | null {
+  if (!agent) return null;
+  const own = limits.filter((entry) => entry.agent === agent);
+  return (
+    own.find((entry) => !entry.scope) ??
+    own.find((entry) => inScope(entry.scope, model, false)) ??
+    null
+  );
+}
+
+/** The message an opted-in conversation is sent once its limit resets. */
+export const AUTO_CONTINUE_TEXT = "Continue where you left off.";
+
+// ─── Handoff ────────────────────────────────────────────────────────────────
+
+/**
+ * Continue a conversation in a NEW one, on another agent (or model).
+ *
+ * Main reads the source's transcript, carries its latest compaction summary
+ * and its most recent turns (under a budget) into a context block, and starts
+ * the new conversation with that block followed by `text`.
+ */
+export interface HandoffRequest {
+  project: string;
+  /** The conversation handed off from. */
+  conversation: string;
+  /** The agent to continue on; must be the agent of `model`. */
+  agent: ConversationAgent;
+  model: string;
+  effort: Effort;
+  /** Default: false. */
+  fast?: boolean;
+  /** Default: the source's last settings, else the last used anywhere. */
+  permission?: Permission;
+  /** The first message the person writes to the new conversation. */
+  text: string;
+  /** Sent with `text`, as a start's are. Default: none. */
+  attachments?: OutgoingAttachment[];
+}
+
+/** What a handoff carried from its source's transcript. */
+export interface HandoffCarried {
+  /** The source's latest compaction summary went in (cut if long). */
+  summary: boolean;
+  /** Turns since that compaction (or since the start) that went in. */
+  turns: number;
+  /** Turns since then that did not fit the budget. */
+  omitted: number;
+  /** The context block's size, in UTF-8 bytes. */
+  bytes: number;
+}
+
+/**
+ * One handoff, old -> new: read for "Handed off from" on the new
+ * conversation and "Continued in" on the old one.
+ */
+export interface ConversationHandoff {
+  project: string;
+  from: {
+    conversation: string;
+    agent: ConversationAgent;
+    /** The model it last ran with, when known; absent on older links. */
+    model?: string | null;
+  };
+  to: { conversation: string; agent: ConversationAgent; model: string };
+  /** When it was handed off, ISO. */
+  at: string;
+  carried: HandoffCarried;
+  /**
+   * The source agent's usage limit in force at the time (see
+   * {@link UsageLimitsState}), when one was: the likely reason for it.
+   */
+  limit: UsageLimit | null;
+  /**
+   * Made in place (`switchAgent`): `to` continues the SAME thread as `from`,
+   * not a conversation of its own. Absent for a handoff to a new
+   * conversation (`handoff`).
+   */
+  thread?: boolean;
+}
+
+/**
+ * Hand a thread to another agent in place: a new native session joins the
+ * thread, started with the whole thread's context block, then `text`.
+ */
+export interface SwitchAgentRequest {
+  /** The model to continue on; it picks the agent. */
+  model: string;
+  effort: Effort;
+  /** Default: false. */
+  fast?: boolean;
+  /** Default: the newest session's last settings, else the last used anywhere. */
+  permission?: Permission;
+  /** The person's message, sent after the context block. */
+  text: string;
+  /** Sent with `text`, as a send's are. Default: none. */
+  attachments?: OutgoingAttachment[];
+}
+
+/** A conversation's handoffs, both ways. */
+export interface ConversationHandoffLinks {
+  /** The handoff that started this conversation, if one did. */
+  from: ConversationHandoff | null;
+  /** The handoffs out of this conversation, oldest first. */
+  to: ConversationHandoff[];
+}
+
+/** Opens the context block a handoff puts before the person's message. */
+export const HANDOFF_CONTEXT_OPEN = "<lanework-handoff";
+/** Closes it. */
+export const HANDOFF_CONTEXT_CLOSE = "</lanework-handoff>";
+/** Between the block and the person's message. */
+export const HANDOFF_MESSAGE_HEADING = "User message:";
+
+/**
+ * Whether `text` opens with one of Lanework's own envelopes: a conductor's
+ * (`<lanework_…>`, FE-87) or a handoff's context block. Those are the
+ * person's turn; any other leading tag is the CLI's own and is no turn.
+ *
+ * NOTE: The handoff block's tag has a hyphen, not an underscore: a check for
+ * `<lanework_` alone took a handed-off message for the CLI's, so it never
+ * showed, and the chat sat on "Sending…".
+ */
+export function isLaneworkEnvelope(text: string): boolean {
+  const start = text.trimStart();
+  return (
+    start.startsWith("<lanework_") || start.startsWith(HANDOFF_CONTEXT_OPEN)
+  );
+}
+
+/**
+ * A handoff's first message split into its context block and the person's
+ * own message, for a chat that shows the block folded.
+ *
+ * @returns null when `text` does not start with a handoff block.
+ */
+export function splitHandoffText(
+  text: string,
+): { context: string; message: string } | null {
+  if (!text.startsWith(HANDOFF_CONTEXT_OPEN)) return null;
+  const end = text.indexOf(HANDOFF_CONTEXT_CLOSE);
+  if (end < 0) return null;
+  const context = text.slice(0, end + HANDOFF_CONTEXT_CLOSE.length);
+  let message = text.slice(context.length).replace(/^\s+/, "");
+  if (message.startsWith(HANDOFF_MESSAGE_HEADING))
+    message = message.slice(HANDOFF_MESSAGE_HEADING.length).replace(/^\s+/, "");
+  return { context, message };
 }
 
 // ─── Links ──────────────────────────────────────────────────────────────────
@@ -1120,8 +1654,223 @@ export function checkPowerSettings(value: unknown): PowerSettings {
   };
 }
 
+// ─── What a panel reads of a whole conversation: its web pages ──────────────
+
+/** One page a conversation found or read on the web. */
+export interface WebSource {
+  url: string;
+  /** As the search result named it; null when only the URL is known. */
+  title: string | null;
+  /** The URL's host, without a leading `www.`. */
+  host: string;
+  /** The agent read the page itself (WebFetch), not only listed it. */
+  fetched: boolean;
+}
+
+/** One web search and what it found; `query: null` for pages read directly. */
+export interface WebSearch {
+  query: string | null;
+  /** When it ran, as an ISO timestamp; "" when unknown. */
+  at: string;
+  sources: WebSource[];
+}
+
+/**
+ * Small facts of a whole conversation, for a panel that would otherwise read
+ * every turn for them (`summary`).
+ */
+export interface ConversationFacts {
+  /** The web searches it ran and pages it read, newest first. */
+  web: { searches: WebSearch[]; partial: boolean };
+}
+
+/** The most searches and sources one panel shows. */
+const WEB_SEARCHES_MAX = 100;
+const WEB_SOURCES_MAX = 500;
+
+const WEB_SEARCH_TOOLS: ReadonlySet<string> = new Set([
+  "WebSearch",
+  "web_search",
+  "websearch",
+]);
+const WEB_FETCH_TOOLS: ReadonlySet<string> = new Set([
+  "WebFetch",
+  "webfetch",
+  "fetch",
+]);
+
+/**
+ * `raw` as a web page's address: http or https only, without credentials or
+ * a fragment. null for anything else, so no other scheme reaches a click.
+ */
+function webUrlOf(raw: string): { url: string; host: string } | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw.trim());
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  parsed.username = "";
+  parsed.password = "";
+  parsed.hash = "";
+  return { url: parsed.href, host: parsed.hostname.replace(/^www\./, "") };
+}
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+/** A tool call's input as an object; `{}` when it is not JSON. */
+function callInput(call: ToolCall): Record<string, unknown> {
+  try {
+    return asRecord(JSON.parse(call.input));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The JSON array after `Links:` in a Claude WebSearch result, read by
+ * matching brackets: the result goes on in prose after it.
+ */
+function linksArray(output: string): unknown[] | null {
+  const start = output.indexOf("Links: [");
+  if (start < 0) return null;
+  const open = start + "Links: ".length;
+  let depth = 0;
+  let quoted = false;
+  for (let at = open; at < output.length; at++) {
+    const char = output[at];
+    if (quoted) {
+      if (char === "\\") at++;
+      else if (char === '"') quoted = false;
+    } else if (char === '"') quoted = true;
+    else if (char === "[") depth++;
+    else if (char === "]" && --depth === 0) {
+      try {
+        const parsed: unknown = JSON.parse(output.slice(open, at + 1));
+        return Array.isArray(parsed) ? parsed : null;
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+const URL_IN_TEXT = /https?:\/\/[^\s"'<>()[\]{}`]+/g;
+
+/** The pages a search result lists: its links, else every URL in it. */
+function pagesIn(output: string): { url: string; title: string | null }[] {
+  const links = linksArray(output);
+  if (links)
+    return links.flatMap((entry) => {
+      const { url, title } = asRecord(entry);
+      return typeof url === "string"
+        ? [
+            {
+              url,
+              title:
+                typeof title === "string" && title.trim() ? title.trim() : null,
+            },
+          ]
+        : [];
+    });
+  return [...output.matchAll(URL_IN_TEXT)].map((match) => ({
+    url: match[0].replace(/[.,;:!?]+$/, ""),
+    title: null,
+  }));
+}
+
+/**
+ * The web searches `turns` ran and the pages they read, from their own tool
+ * calls (a sub-agent's are in its own transcript, not here), newest first. A
+ * page read that no search listed goes under `query: null`.
+ *
+ * NOTE: Main answers this (`summary`), from the fold it keeps, so a panel
+ * that wants only these never reads the turns. The renderer's
+ * `src/lib/web-sources.ts` holds the same rule for the turns it has; change
+ * both together.
+ *
+ * @returns At most 100 searches and 500 sources, and whether some were left
+ *   out.
+ */
+export function webSourcesOf(turns: readonly Turn[]): {
+  searches: WebSearch[];
+  partial: boolean;
+} {
+  const searches: WebSearch[] = [];
+  const direct: WebSearch = { query: null, at: "", sources: [] };
+  /** Each URL's sources, so a later read marks every listing of it. */
+  const byUrl = new Map<string, WebSource[]>();
+  let count = 0;
+  let partial = false;
+
+  const add = (search: WebSearch, raw: string, title: string | null) => {
+    const web = webUrlOf(raw);
+    if (!web || search.sources.some((s) => s.url === web.url)) return null;
+    if (count >= WEB_SOURCES_MAX) {
+      partial = true;
+      return null;
+    }
+    const source: WebSource = { ...web, title, fetched: false };
+    search.sources.push(source);
+    byUrl.set(web.url, [...(byUrl.get(web.url) ?? []), source]);
+    count++;
+    return source;
+  };
+
+  for (const turn of turns) {
+    if (turn.role !== "assistant") continue;
+    for (const block of turn.blocks) {
+      if (block.type !== "tools") continue;
+      for (const call of block.calls) {
+        const at = turn.at;
+        if (WEB_SEARCH_TOOLS.has(call.tool)) {
+          const input = callInput(call);
+          const query =
+            typeof input.query === "string" ? input.query : call.input.trim();
+          const search: WebSearch = { query: query || null, at, sources: [] };
+          for (const found of pagesIn(call.output ?? ""))
+            add(search, found.url, found.title);
+          searches.push(search);
+        } else if (WEB_FETCH_TOOLS.has(call.tool) && call.kind === "fetch") {
+          const url = callInput(call).url;
+          const web = typeof url === "string" ? webUrlOf(url) : null;
+          if (!web) continue;
+          const listed = byUrl.get(web.url);
+          if (listed) for (const source of listed) source.fetched = true;
+          else {
+            const source = add(direct, web.url, null);
+            if (source) source.fetched = true;
+            direct.at = at;
+          }
+        }
+      }
+    }
+  }
+
+  const all = [...searches, ...(direct.sources.length ? [direct] : [])]
+    .filter((search) => search.query !== null || search.sources.length > 0)
+    .reverse();
+  if (all.length > WEB_SEARCHES_MAX) partial = true;
+  return { searches: all.slice(0, WEB_SEARCHES_MAX), partial };
+}
+
 export const conversationChannels = {
   read: "conversation:read",
+  /** Older turns than the page holds, a page at a time. */
+  readBefore: "conversation:read-before",
+  /** Only the tool calls with some names, from every turn (a summary). */
+  readToolCalls: "conversation:read-tool-calls",
+  /** Small facts of the whole conversation (its web pages), not its turns. */
+  summary: "conversation:summary",
+  /** One tool call's whole result, when the read sent only its start. */
+  toolOutput: "conversation:tool-output",
+  /** Only the id of the latest proposal that waits on the user (FE-95/D4). */
+  latestProposal: "conversation:latest-proposal",
   /** Start a NEW conversation with its first message; answers its id. */
   start: "conversation:start",
   send: "conversation:send",
@@ -1179,10 +1928,107 @@ export const conversationChannels = {
   openImage: "conversation:open-image",
   /** Main → renderer: a {@link ConversationEvent}. */
   event: "conversation:event",
+  /** Send this window a conversation's events in full, not its status only. */
+  subscribe: "conversation:subscribe",
+  unsubscribe: "conversation:unsubscribe",
+  /** A conversation's events after a `seq`, while main still holds them. */
+  replay: "conversation:replay",
+  /** The agents' usage limits in force, and who they stopped. */
+  usageLimits: "conversation:usage-limits",
+  /** Opt one conversation in to (or out of) auto-continue after a limit. */
+  setAutoContinue: "conversation:set-auto-continue",
+  /** Main → renderer: a {@link UsageLimitsState}, whenever it changes. */
+  usageLimitsEvent: "conversation:usage-limits-event",
+  /** Continue a conversation in a new one on another agent; answers its id. */
+  handoff: "conversation:handoff",
+  /** A conversation's handoffs, in and out. */
+  handoffLinks: "conversation:handoff-links",
+  /**
+   * Continue a thread on another agent IN PLACE (a new native session joins
+   * it); answers the thread's id.
+   */
+  switchAgent: "conversation:switch-agent",
 } as const;
 
 export interface DesktopConversationApi {
-  read: (project: string, conversation: string) => Promise<Conversation>;
+  /**
+   * The conversation with its newest turns only: the last
+   * {@link CONVERSATION_WINDOW_TURNS} user turns, or
+   * {@link CONVERSATION_WINDOW_BYTES} of turns, whichever is less;
+   * `earlier` counts the rest. `{ full: true }` sends every turn.
+   */
+  read: (
+    project: string,
+    conversation: string,
+    options?: ConversationReadOptions,
+  ) => Promise<Conversation>;
+  /**
+   * The turns right before turn `before` (the oldest one the page holds):
+   * up to `limit` user turns (default {@link CONVERSATION_WINDOW_TURNS}, at
+   * most {@link CONVERSATION_PAGE_TURNS_MAX}) or
+   * {@link CONVERSATION_WINDOW_BYTES}, whichever is less.
+   *
+   * NOTE: A Claude transcript comes from the fold `read` keeps: only lines
+   * written since are read from disk.
+   *
+   * @throws When `before` is no longer one of its turns (the transcript was
+   *   rewritten): read it again.
+   */
+  readBefore: (
+    project: string,
+    conversation: string,
+    before: string,
+    limit?: number,
+  ) => Promise<ConversationPage>;
+  /**
+   * Every assistant turn's tool calls named one of `tools` (`WebSearch`,
+   * `WebFetch`…), each turn holding only those, in order: what a panel that
+   * looks through the whole conversation for some calls needs, without the
+   * rest of it.
+   */
+  readToolCalls: (
+    project: string,
+    conversation: string,
+    tools: readonly string[],
+  ) => Promise<AssistantTurn[]>;
+  /**
+   * Small facts of the whole conversation ({@link ConversationFacts}): what a
+   * panel that wants only them asks for instead of every turn.
+   *
+   * NOTE: A Claude or Codex transcript comes from the fold `read` keeps, and
+   * the answer is kept with it: asked again with no line written, nothing is
+   * read and nothing recomputed.
+   *
+   * @throws When the conversation has no transcript.
+   */
+  summary: (
+    project: string,
+    conversation: string,
+  ) => Promise<ConversationFacts>;
+  /**
+   * The whole result of tool call `call`, whose read sent only its start
+   * ({@link ToolCall.outputCut}). Claude's conversations only.
+   *
+   * @throws When the call has no long result in the transcript.
+   */
+  toolOutput: (
+    project: string,
+    conversation: string,
+    call: string,
+  ) => Promise<ToolOutput>;
+  /**
+   * The id of the conversation's latest proposal when it is ready and waits
+   * on the user, else null: what `deriveProposals` answers of `read`'s turns
+   * with no turn running, `leads` finding the lead each envelope names.
+   *
+   * NOTE: Main keeps the transcript folded between asks and reads only what
+   * was written since, so the rail may ask after every turn.
+   */
+  latestProposal: (
+    project: string,
+    conversation: string,
+    leads?: readonly TeamLead[],
+  ) => Promise<string | null>;
   /**
    * Start a new conversation with `request` as its first message.
    *
@@ -1297,7 +2143,78 @@ export interface DesktopConversationApi {
   ) => Promise<void>;
   /** A path for a dropped or pasted `File`, as Electron knows it. */
   pathForFile: (file: File) => string;
+  /**
+   * Every event this window hears: in full for the conversations it
+   * subscribed to, their status only for the rest
+   * ({@link ConversationEvent}).
+   */
   onEvent: (listener: (event: ConversationEvent) => void) => () => void;
+  /**
+   * Send this window `conversation`'s events in full (`delta`, `turn`,
+   * `moved`), not its status only, until `unsubscribe`. Counted: each
+   * subscribe wants its own unsubscribe. A window that closes or loads
+   * another page is let go of by main.
+   *
+   * With `after`, also answers the events since that `seq`, as `replay`.
+   */
+  subscribe: (
+    project: string,
+    conversation: string,
+    after?: number | null,
+  ) => Promise<ConversationReplay>;
+  unsubscribe: (project: string, conversation: string) => Promise<void>;
+  /**
+   * The events of `conversation` after `seq` `after`, for a page that
+   * skipped one; null `events` when main no longer holds them all.
+   */
+  replay: (
+    project: string,
+    conversation: string,
+    after: number,
+  ) => Promise<ConversationReplay>;
+  /** The usage limits in force, and the conversations they stopped. */
+  usageLimits: () => Promise<UsageLimitsState>;
+  /**
+   * Send "Continue where you left off." to this conversation once a usage
+   * limit that stopped it resets. Kept in memory only: a restart forgets it.
+   */
+  setAutoContinue: (
+    project: string,
+    conversation: string,
+    on: boolean,
+  ) => Promise<UsageLimitsState>;
+  /** Every change to {@link UsageLimitsState}, whole. */
+  onUsageLimits: (listener: (state: UsageLimitsState) => void) => () => void;
+  /**
+   * Start a new conversation on `request.agent` that continues
+   * `request.conversation`: its context block, then `request.text`.
+   *
+   * Answers the new conversation's id once its first turn has started (as
+   * `start` does); the link is recorded by then. The source is left as it is.
+   */
+  handoff: (request: HandoffRequest) => Promise<string>;
+  /** Where `conversation` was handed off from, and where it was continued. */
+  handoffLinks: (
+    project: string,
+    conversation: string,
+  ) => Promise<ConversationHandoffLinks>;
+  /**
+   * Continue `thread` on `request.model`'s agent in the SAME conversation:
+   * a new native session starts with the context block of the whole
+   * thread's recent turns, then `request.text`, and joins the thread as its
+   * newest session. `read` then shows every session in order, a
+   * `handoff` turn between each two.
+   *
+   * Answers the thread's id (its head's, the first session's), never the
+   * new session's, once the new session's first turn has started.
+   *
+   * @throws While the thread's newest session runs a turn.
+   */
+  switchAgent: (
+    project: string,
+    thread: string,
+    request: SwitchAgentRequest,
+  ) => Promise<string>;
 }
 
 /** An `@` mention: quoted when its path has a space (`@"/a b/c.csv"`). */

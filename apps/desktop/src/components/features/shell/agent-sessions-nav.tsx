@@ -26,9 +26,11 @@ import {
   ContextMenuTrigger,
 } from "#/components/ui/context-menu";
 import { TooltipProvider } from "#/components/ui/tooltip";
+import { useCloseSessionTab } from "#/hooks/use-close-session-tab";
 import { ipcMessage } from "#/lib/ipc-error";
 import { agentKey, useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
+import { useSessionTabs } from "#/stores/session-tabs";
 import { AgentSessionSearch } from "./agent-session-search";
 import { AgentSessionsMini } from "./agent-sessions-nav.mini";
 import {
@@ -181,6 +183,7 @@ function AgentSessionsList({
     openSession,
   } = rail;
   const navigate = useNavigate();
+  const closeTab = useCloseSessionTab(slug);
   const stop = useAgentTerminals((state) => state.stop);
   const remove = useAgentSessions((state) => state.remove);
   const pull = useSessionsPull(project);
@@ -473,7 +476,14 @@ function AgentSessionsList({
                 remove(project, session).then(
                   () => {
                     setDeleting(null);
-                    if (viewing === session.id)
+                    // NOTE: Its tab goes too, as the tab's × would: left
+                    // open, it showed "has no transcript". On screen, its
+                    // neighbour opens instead.
+                    const tabbed = (
+                      useSessionTabs.getState().bySlug[slug] ?? []
+                    ).includes(session.id);
+                    closeTab(session.id);
+                    if (!tabbed && viewing === session.id)
                       void navigate({
                         to: "/w/$slug/issues",
                         params: { slug },

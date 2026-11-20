@@ -113,7 +113,8 @@ export function AgentSessionsMini({
     const waiting = isAwaiting(session);
     return slot(
       agentKey(session),
-      session.agent,
+      // A thread handed off shows the agent it runs on now.
+      session.agents?.at(-1) ?? session.agent,
       `Open “${session.title}”${waiting ? ", waiting for you" : ""}`,
       `${session.title} — ${agent}, ${waiting ? "waiting for you" : working ? "working" : terminal ? "running" : relativeTime(session.updatedAt, now)}`,
       waiting ? "awaiting" : working ? "working" : terminal ? "running" : null,

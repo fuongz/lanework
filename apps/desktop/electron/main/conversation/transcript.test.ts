@@ -316,7 +316,12 @@ describe("readConversation", () => {
 
     assert.equal(image.text, "What is this?");
     assert.deepEqual(image.attachments, [
-      { name: "shot.png", mediaType: "image/png", path: "/tmp/shot.png" },
+      {
+        name: "shot.png",
+        mediaType: "image/png",
+        path: "/tmp/shot.png",
+        size: 3,
+      },
     ]);
 
     // The open turn: still being written, its sub-agent named by progress.

@@ -125,6 +125,8 @@ test("Claude auth probe uses shell resolution, caches labels and times out", asy
     plan: "max",
     authMode: "claude.ai",
     identity: null,
+    email: null,
+    org: null,
   });
   await writeFile(shell, "#!/bin/sh\nexec sleep 3\n", { mode: 0o700 });
   expect((await probe()).plan).toBe("max");
@@ -134,7 +136,14 @@ test("Claude auth probe uses shell resolution, caches labels and times out", asy
       shell: { file: shell, args: [] },
       timeoutMs: 100,
     })(),
-  ).toEqual({ loggedIn: false, plan: null, authMode: null, identity: null });
+  ).toEqual({
+    loggedIn: false,
+    plan: null,
+    authMode: null,
+    identity: null,
+    email: null,
+    org: null,
+  });
   expect(Date.now() - start).toBeLessThan(1000);
   expect(
     claudeAuthOf({ subscriptionType: "accessToken-secret" }).plan,

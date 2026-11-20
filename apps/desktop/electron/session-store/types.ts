@@ -2,6 +2,7 @@ import type {
   AgentCard,
   AgentSubagent,
   BackgroundCount,
+  SessionLauncher,
   TerminalAgent,
 } from "../../shared/terminal";
 
@@ -63,10 +64,11 @@ export interface SessionMarks {
   /** When it was archived in Lanework, ISO, or null. */
   archivedAt: string | null;
   /**
-   * The conductor that started it with `sessions.start` (FE-128), and in
-   * which project; null for one the user started.
+   * The conductor that started it with `sessions.start` (FE-128), in which
+   * project, and whether the user may work in it; null for one the user
+   * started.
    */
-  launchedBy: { conductor: string; project: string } | null;
+  launchedBy: SessionLauncher | null;
 }
 
 /** One row of `agent_session`, decoded. */

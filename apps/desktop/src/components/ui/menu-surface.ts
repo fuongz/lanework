@@ -12,6 +12,7 @@
  * silently: the file still builds, the menus just turn back into solid
  * cards. After such a sync, put the `MENU_SURFACE` import and its class
  * back in each popup.
+ * `preview-card.tsx` takes `MENU_MOTION` alone, so it opens as they do.
  */
 /**
  * How a menu, popover or select opens: a quick pop out of its trigger's side

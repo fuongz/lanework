@@ -1,12 +1,16 @@
 import { Add01Icon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   type ConductorStopPreview,
   hasConductorStop,
 } from "#/../shared/conductor-sessions";
 import type { TeamLead } from "#/../shared/orchestration";
+import {
+  SessionPreviewCard,
+  SessionPreviewTrigger,
+} from "#/components/shared/agents/session-preview-card";
 import { StatusPing } from "#/components/shared/agents/status-ping";
 import { useTeamLeads } from "#/components/shared/conversation/composer";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
@@ -47,6 +51,7 @@ import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { useChatEngines } from "#/stores/chat-engines";
 import { notify } from "#/stores/notify";
+import { useSessionTabs } from "#/stores/session-tabs";
 import { ConductorDialog, type ConductorDialogMode } from "./conductor-dialog";
 import {
   type ConductorState,
@@ -153,7 +158,10 @@ export function ConductorsNav({
 }) {
   const navigate = useNavigate();
   const list = useTeamLeads(project, hasFolder);
-  const conductors = orderConductors(list);
+  // NOTE: Memoized: the statuses read every conductor's whole transcript
+  // whenever this list changes identity, so a fresh array each render
+  // re-read them on every render, and each read rendered again.
+  const conductors = useMemo(() => orderConductors(list), [list]);
   const live = useConductorStatuses(project, conductors);
   const finished = useFinishedConductors((state) => state.keys);
   const releaseConductor = useAgentSessions((state) => state.releaseConductor);
@@ -513,38 +521,58 @@ export function ConductorsNav({
         const current = isCurrent(lead, status);
         return (
           <div key={lead.id} className="group/row relative">
-            <ContextMenu>
-              <ContextMenuTrigger
-                render={
-                  <button
-                    type="button"
-                    onClick={() => open(lead)}
-                    aria-current={current ? "page" : undefined}
-                    aria-label={`${lead.name}, ${status.reason.toLowerCase()}`}
-                    aria-busy={status.state === "working" || undefined}
-                    title={`${lead.name}\n${status.reason}`}
-                    className={`${row} w-full text-left group-focus-within/row:pe-7 group-hover/row:pe-7 ${current ? active : ""}`}
-                  />
-                }
-              >
-                <ConductorIcon
-                  lead={lead}
-                  state={status.state}
-                  className="size-3.5"
-                />
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 truncate",
-                    status.state === "working" && "text-breathe",
-                  )}
+            {/* Its conversation's facts on hover, as a session row's; its
+                own model until it has one. */}
+            <SessionPreviewCard
+              project={project}
+              title={lead.name}
+              icon={leadIcon(lead.icon)}
+              conversation={status.conversation}
+              defaultModel={lead.lead}
+            >
+              <ContextMenu>
+                <ContextMenuTrigger
+                  render={
+                    <SessionPreviewTrigger
+                      render={
+                        <button
+                          type="button"
+                          onClick={() => open(lead)}
+                          // A double click keeps its conversation's tab.
+                          onDoubleClick={() => {
+                            if (status.conversation)
+                              useSessionTabs
+                                .getState()
+                                .open(slug, status.conversation);
+                          }}
+                          aria-current={current ? "page" : undefined}
+                          aria-label={`${lead.name}, ${status.reason.toLowerCase()}`}
+                          aria-busy={status.state === "working" || undefined}
+                          className={`${row} w-full text-left group-focus-within/row:pe-7 group-hover/row:pe-7 ${current ? active : ""}`}
+                        />
+                      }
+                    />
+                  }
                 >
-                  {lead.name}
-                </span>
-              </ContextMenuTrigger>
-              <ContextMenuContent className="w-max min-w-40">
-                {items(lead, status, ContextMenuItem, ContextMenuSeparator)}
-              </ContextMenuContent>
-            </ContextMenu>
+                  <ConductorIcon
+                    lead={lead}
+                    state={status.state}
+                    className="size-3.5"
+                  />
+                  <span
+                    className={cn(
+                      "min-w-0 flex-1 truncate",
+                      status.state === "working" && "text-breathe",
+                    )}
+                  >
+                    {lead.name}
+                  </span>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-max min-w-40">
+                  {items(lead, status, ContextMenuItem, ContextMenuSeparator)}
+                </ContextMenuContent>
+              </ContextMenu>
+            </SessionPreviewCard>
             <div className="pointer-events-none absolute inset-y-0 right-1 flex items-center opacity-0 transition-opacity group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100">
               <DropdownMenu>
                 <DropdownMenuTrigger

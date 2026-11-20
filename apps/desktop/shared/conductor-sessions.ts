@@ -6,13 +6,18 @@
 // conductor's permission mode, on Claude, Codex or OpenCode (`agent`, by
 // default the conductor's own), and names it after the title. The session is
 // private to the conductor (FE-128): it carries `launchedBy` and is hidden
-// from the Agents rail; the user reaches it through the conductor. Unless
+// from the Agents rail; the user reaches it through the conductor and sees
+// it read-only, unless the conductor lets them work in it (`userAccess` on
+// start, or `sessions.access` later). Unless
 // told otherwise, main tells the conductor once that session's turn ends, in
 // a hidden turn of its own, so it reviews the result and reports back.
+// Without user access, the session's permission requests wait on the
+// conductor: it is told of each, reads them with `sessions.read` and answers
+// with `sessions.answer`.
 //
 // Unlike `delegate`, nothing here is bound to a run: no write scopes, no
-// worktree, no merge. A conductor may only list, read and follow up the
-// sessions it started; the user's other conversations are not its to touch.
+// worktree, no merge. A conductor may only list, read, follow up and answer
+// the sessions it started; the user's other conversations are not its to touch.
 //
 // Memory (FE-128): each conductor keeps one {@link ConductorMemory} per
 // project, which outlives its conversations. Main appends to its ledger as
@@ -69,6 +74,8 @@ export const SESSION_ACTIONS = [
   "sessions.list",
   "sessions.read",
   "sessions.send",
+  "sessions.access",
+  "sessions.answer",
   "memory.read",
   "memory.append",
   "memory.write",
@@ -104,6 +111,8 @@ export const SESSIONS_RUNNING_MAX = 4;
 export const SESSIONS_LIST_MAX = 20;
 /** The most exchanges one `sessions.read` returns. */
 export const READ_LIMIT_MAX = 5;
+/** Each request's `ask` in `sessions.read`, cut to this. */
+export const WAITING_ASK_MAX = 300;
 /** Each message `sessions.read` returns, cut to this by default. */
 export const READ_CHARS_DEFAULT = 1500;
 export const READ_CHARS_MIN = 200;
@@ -147,6 +156,12 @@ export interface SessionInputs {
     taskId?: string;
     /** Default true: tell the conductor when its turn ends. */
     notifyOnComplete: boolean;
+    /**
+     * Default false: the session is the conductor's and the user sees it
+     * read-only. True lets the user send to it, stop it and answer its
+     * permissions too.
+     */
+    userAccess: boolean;
   };
   "sessions.list": Record<string, never>;
   "sessions.read": { sessionId: string; limit: number; maxChars: number };
@@ -154,6 +169,18 @@ export interface SessionInputs {
     sessionId: string;
     prompt: string;
     notifyOnComplete: boolean;
+  };
+  /** Let the user work in one of the conductor's sessions, or take it back. */
+  "sessions.access": { sessionId: string; userAccess: boolean };
+  /**
+   * Answer a permission request a session without user access waits on.
+   * `message` is the reason told to the session on a deny; absent on allow.
+   */
+  "sessions.answer": {
+    sessionId: string;
+    requestId: string;
+    allow: boolean;
+    message?: string;
   };
   "memory.read": Record<string, never>;
   /**
@@ -194,7 +221,8 @@ export type SessionCall = {
 /**
  * Where a session stands.
  *
- * - `waiting`: a tool approval or a question waits on the user.
+ * - `waiting`: a tool approval or a question waits on the user, or on the
+ *   conductor when the user has no access (`sessions.answer`).
  * - `terminal`: a terminal runs it; Lanework cannot send to it.
  */
 export type SessionStatus =
@@ -219,6 +247,19 @@ export interface SessionSummary {
 export interface SessionExchange {
   prompt: string;
   reply: string;
+}
+
+/** A permission request a session waits on, as `sessions.read` lists it. */
+export interface SessionWaiting {
+  /** What `sessions.answer` names it by. */
+  requestId: string;
+  tool: string;
+  /**
+   * What it asks, on one line, secrets redacted, at most
+   * {@link WAITING_ASK_MAX} characters: the first question of a question
+   * card, else the request's summary.
+   */
+  ask: string;
 }
 
 const SESSION_STATUSES: readonly SessionStatus[] = [
@@ -342,6 +383,7 @@ export interface SessionResults {
     agent: TerminalAgent;
     model: string;
     notifyOnComplete: boolean;
+    userAccess: boolean;
   };
   "sessions.list": { sessions: SessionSummary[] };
   "sessions.read": {
@@ -349,12 +391,23 @@ export interface SessionResults {
     title: string;
     status: SessionStatus;
     exchanges: SessionExchange[];
+    /** Oldest first; empty when it waits on nothing. */
+    waiting: SessionWaiting[];
   };
   "sessions.send": {
     sessionId: string;
     title: string;
     submitted: true;
     notifyOnComplete: boolean;
+  };
+  /** The session's access as it stands now. */
+  "sessions.access": { sessionId: string; title: string; userAccess: boolean };
+  /** The request was answered and is no longer waiting. */
+  "sessions.answer": {
+    sessionId: string;
+    title: string;
+    requestId: string;
+    allow: boolean;
   };
   /** The whole memory: ledger, runs and notes. */
   "memory.read": ConductorMemory;
@@ -397,8 +450,8 @@ function sessionId(value: unknown): string {
   return value;
 }
 
-function flag(value: unknown, label: string): boolean {
-  if (value === undefined) return true;
+function flag(value: unknown, label: string, fallback = true): boolean {
+  if (value === undefined) return fallback;
   if (typeof value !== "boolean") fail(`${label} must be true or false`);
   return value;
 }
@@ -468,6 +521,7 @@ const SCHEMAS: {
       "effort",
       "taskId",
       "notifyOnComplete",
+      "userAccess",
     ],
     parse: (input) => {
       const out: SessionInputs["sessions.start"] = {
@@ -477,6 +531,7 @@ const SCHEMAS: {
         ),
         prompt: controlText(input.prompt, "prompt", PROMPT_MAX),
         notifyOnComplete: flag(input.notifyOnComplete, "notifyOnComplete"),
+        userAccess: flag(input.userAccess, "userAccess", false),
       };
       if (input.agent !== undefined)
         out.agent = oneOf(input.agent, TERMINAL_AGENTS, "agent");
@@ -514,6 +569,41 @@ const SCHEMAS: {
       prompt: controlText(input.prompt, "prompt", PROMPT_MAX),
       notifyOnComplete: flag(input.notifyOnComplete, "notifyOnComplete"),
     }),
+  },
+  "sessions.access": {
+    fields: ["sessionId", "userAccess"],
+    parse: (input) => {
+      // NOTE: Required, unlike start's: a call that leaves it out says
+      // nothing about which way to turn it.
+      if (typeof input.userAccess !== "boolean")
+        fail("userAccess must be true or false");
+      return {
+        sessionId: sessionId(input.sessionId),
+        userAccess: input.userAccess,
+      };
+    },
+  },
+  "sessions.answer": {
+    fields: ["sessionId", "requestId", "allow", "message"],
+    parse: (input) => {
+      // NOTE: Required: leaving it out must never read as either answer.
+      if (typeof input.allow !== "boolean") fail("allow must be true or false");
+      const out: SessionInputs["sessions.answer"] = {
+        sessionId: sessionId(input.sessionId),
+        requestId: controlRequestId(input.requestId),
+        allow: input.allow,
+      };
+      if (input.message !== undefined) {
+        if (typeof input.message !== "string") fail("message must be a string");
+        if (input.message.length > PROMPT_MAX)
+          fail(`message is longer than ${PROMPT_MAX} characters`);
+        // NOTE: Taken with allow too, as the contract has it, but dropped:
+        // only a deny's answer carries a reason to the session.
+        if (!input.allow && input.message.trim())
+          out.message = input.message.trim();
+      }
+      return out;
+    },
   },
   "memory.read": { fields: [], parse: () => ({}) },
   "models.list": {
@@ -805,11 +895,13 @@ export const SESSION_HELP: Record<SessionAction, string> = {
   "sessions.start": `  sessions.start {"title":"Short title","prompt":"Self-contained instructions",
                   "agent":"${TERMINAL_AGENTS.join("|")}",
                   "model":"<model id>","effort":"${EFFORTS.join("|")}",
-                  "taskId":"FE-98","notifyOnComplete":true}
+                  "taskId":"FE-98","notifyOnComplete":true,"userAccess":false}
             Conductors only. Start a separate session in this project's
             checkout and submit the prompt as its first turn. It runs on
-            your permission mode, under the title, and is yours alone: the
-            user reaches it through you, not the Agents rail. "agent"
+            your permission mode, under the title, and is yours: the user
+            reaches it through you, not the Agents rail, and sees it
+            read-only unless "userAccess" is true (they may then send to
+            it, stop it and answer its permissions too). "agent"
             defaults to yours; "model" and "effort" to yours on your agent,
             else that agent's default (OpenCode's model is provider/model).
             "taskId" names the board card it works on. Unless
@@ -823,10 +915,26 @@ export const SESSION_HELP: Record<SessionAction, string> = {
   "sessions.read": `  sessions.read {"sessionId":"...","limit":2,"maxChars":${READ_CHARS_DEFAULT}}
             The last exchanges of one of your sessions (1-${READ_LIMIT_MAX}),
             prompts and replies only, each cut to maxChars
-            (${READ_CHARS_MIN}-${READ_CHARS_MAX}).`,
+            (${READ_CHARS_MIN}-${READ_CHARS_MAX}), and under "waiting" the
+            permission requests it waits on (requestId, tool, ask): answer
+            those with sessions.answer.`,
   "sessions.send": `  sessions.send {"sessionId":"...","prompt":"...","notifyOnComplete":true}
             A follow-up to one of your sessions. Refused while it works or
             waits on the user. notifyOnComplete works as in start.`,
+  "sessions.access": `  sessions.access {"sessionId":"...","userAccess":true}
+            Let the user work in one of your sessions (true), or make it
+            read-only to them again (false). Both fields are required. Only
+            the conductor that started a session may change it. Returns its
+            access as it stands now.`,
+  "sessions.answer": `  sessions.answer {"sessionId":"...","requestId":"...","allow":false,
+                   "message":"Why it was denied"}
+            Answer a permission request one of your sessions waits on (its
+            requestId from sessions.read). A session the user has no access
+            to waits on you: allow only what its task needs, deny with a
+            reason otherwise ("message", at most ${PROMPT_MAX} characters,
+            told to the session on a deny only). Refused when the user has access and answers it
+            themselves, and for a question: deny it, or give the user access
+            so they answer it.`,
   "memory.read": `  memory.read {}
             Conductors only. What you remember of this project across your
             conversations: your last ${MEMORY_LEDGER_MAX} sessions (title, agent,

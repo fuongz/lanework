@@ -20,13 +20,14 @@ import {
   useRef,
   useState,
 } from "react";
-import type {
-  AgentCommit,
-  AgentFiles,
-  AgentFileTouch,
-  AgentSession,
-  AgentWorkspace,
-  TerminalAgent,
+import {
+  type AgentCommit,
+  type AgentFiles,
+  type AgentFileTouch,
+  type AgentSession,
+  type AgentWorkspace,
+  type TerminalAgent,
+  userMayActOn,
 } from "#/../shared/terminal";
 import type { WorktreeFile } from "#/../shared/worktree";
 import {
@@ -50,11 +51,7 @@ import { Badge } from "#/components/ui/badge";
 import { ipcMessage } from "#/lib/ipc-error";
 import { relativeTime } from "#/lib/relative-time";
 import { cn } from "#/lib/utils";
-import {
-  mergeWebSearches,
-  type WebSearch,
-  webSources,
-} from "#/lib/web-sources";
+import { mergeWebSearches, type WebSearch } from "#/lib/web-sources";
 import { useWorktree } from "#/stores/worktree";
 import { SourceRows } from "./conductor-sessions.sources";
 
@@ -119,16 +116,18 @@ function useReads(project: string, slug: string, sources: ReadSource[]) {
         const [workspace, files, chat] = await Promise.allSettled([
           surface.agentWorkspace(project, agent, id),
           surface.agentFiles(project, agent, id),
-          // Its tool calls, for the pages it searched and read: nothing is
-          // fetched, the transcript already holds them.
-          window.desktop?.conversation.read(project, id) ??
+          // The pages it searched and read: nothing is fetched, the
+          // transcript already holds them. NOTE: Main answers only these
+          // (`summary`), from the fold it keeps: `read` sends the newest
+          // turns alone, and neither the whole conversation nor even its
+          // tool calls are worth sending for a list of pages.
+          window.desktop?.conversation.summary(project, id) ??
             Promise.reject(new Error("No conversation surface")),
         ]);
         return {
           workspace: workspace.status === "fulfilled" ? workspace.value : null,
           files: files.status === "fulfilled" ? files.value : null,
-          web:
-            chat.status === "fulfilled" ? webSources(chat.value.turns) : null,
+          web: chat.status === "fulfilled" ? chat.value.web : null,
           error:
             workspace.status === "rejected" && files.status === "rejected"
               ? ipcMessage(workspace.reason, "This session could not be read.")
@@ -978,7 +977,9 @@ function TaskRows({
               now={now}
               onOpen={opener.openTask}
               onOpenAgent={opener.openAgent}
-              onStop={stopping.requestStop}
+              // A task of a session its conductor manages is the
+              // conductor's to stop, as the session is.
+              onStop={userMayActOn(session) ? stopping.requestStop : undefined}
             />
           </li>
         ))

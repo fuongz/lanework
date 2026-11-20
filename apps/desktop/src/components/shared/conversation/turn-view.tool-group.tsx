@@ -25,6 +25,7 @@ import type {
   ConversationAgent,
   ToolCall,
   ToolKind,
+  ToolOutput,
 } from "#/../shared/conversation";
 import {
   ImageThumb,
@@ -38,6 +39,7 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "#/components/ui/context-menu";
+import { useProjectKey } from "#/hooks/use-project-key";
 import { commandProgram, commandText } from "#/lib/command-label";
 import {
   baseName,
@@ -46,6 +48,7 @@ import {
   isImagePath,
   mcpName,
 } from "#/lib/conversation-format";
+import { ipcMessage } from "#/lib/ipc-error";
 import { type JsonTokenKind, jsonTokens, prettyJson } from "#/lib/json-tokens";
 import { cn } from "#/lib/utils";
 
@@ -169,6 +172,53 @@ function JsonCode({ text }: { text: string }) {
  * A call's output: pretty and coloured when it is JSON, as it came
  * otherwise. A failure keeps its plain red text.
  */
+/**
+ * "Show full output": reads a cut result whole from main
+ * (`conversation.toolOutput`).
+ */
+function FullOutputButton({
+  slug,
+  conversation,
+  call,
+  onRead,
+}: {
+  slug: string;
+  conversation: string;
+  call: string;
+  onRead: (output: ToolOutput) => void;
+}) {
+  const project = useProjectKey(slug);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const surface = window.desktop?.conversation;
+  if (!project || !surface) return null;
+  const read = () => {
+    setBusy(true);
+    setError(null);
+    surface
+      .toolOutput(project, conversation, call)
+      .then(onRead)
+      .catch((reason: unknown) =>
+        setError(ipcMessage(reason, "Could not read the whole output.")),
+      )
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="flex items-center gap-2 font-sans">
+      <button
+        type="button"
+        onClick={read}
+        disabled={busy}
+        aria-busy={busy}
+        className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/40 rounded-md px-1 text-xs font-medium transition-colors outline-none focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-60"
+      >
+        {busy ? "Reading full output…" : "Show full output"}
+      </button>
+      {error && <span className="text-destructive text-xs">{error}</span>}
+    </div>
+  );
+}
+
 function OutputCode({ text, error }: { text: string; error: boolean }) {
   const pretty = useMemo(
     () => (error || !text ? null : prettyJson(text)),
@@ -308,6 +358,9 @@ function CallRow({
 }) {
   const running = call.output === null;
   const image = madeImage(call);
+  // NOTE: Only a result longer than the read sends (`outputCut`) is read
+  // whole, when asked: the chat never holds every long output at once.
+  const [full, setFull] = useState<ToolOutput | null>(null);
   const now = useNow(live && running && call.startedAt !== null);
   const elapsed = running
     ? live && call.startedAt
@@ -384,8 +437,24 @@ function CallRow({
                   call.error && "text-destructive",
                 )}
               >
-                <OutputCode text={call.output} error={call.error} />
+                <OutputCode
+                  text={full?.text ?? call.output}
+                  error={call.error}
+                />
               </pre>
+              {call.outputCut && !full && (
+                <FullOutputButton
+                  slug={slug}
+                  conversation={conversation}
+                  call={call.id}
+                  onRead={setFull}
+                />
+              )}
+              {full?.cut && (
+                <p className="text-muted-foreground font-sans text-xs">
+                  Still longer than the chat shows: its end is left out.
+                </p>
+              )}
             </>
           )}
         </div>

@@ -311,6 +311,35 @@ const usageRead = new Map<string, number>();
 const usageLater = new Map<string, ReturnType<typeof setTimeout>>();
 /** As {@link latest}, for the usage reads. */
 const usageLatest = new Map<string, number>();
+/**
+ * How long a usage read is current for a listing.
+ *
+ * NOTE: Every listing asked for the usage again, and a listing is asked for
+ * by each relist, sub-agent poll and focus. Writes already ask for it
+ * (throttled by {@link USAGE_MS}), so a listing asks only when the last read
+ * is older than this, or when the Codex conversations it lists changed: their
+ * goals are what that ask is for.
+ */
+const USAGE_FRESH_MS = 30_000;
+/** When each project's usage was last asked for (epoch ms). */
+const usageAt = new Map<string, number>();
+/**
+ * The projects whose usage was due while the window was hidden.
+ *
+ * NOTE: A hidden window shows nothing of it, and a turn writing in the
+ * background would have it read every {@link USAGE_MS} for no one. They are
+ * read once the window is shown again.
+ */
+const usageDue = new Set<string>();
+const hidden = () => document.visibilityState === "hidden";
+
+/** The Codex conversations of a listing, as a comparable text. */
+const codexIdsOf = (sessions: readonly AgentSession[] | undefined): string =>
+  (sessions ?? [])
+    .filter((entry) => entry.agent === "codex")
+    .map((entry) => entry.id)
+    .sort()
+    .join(",");
 
 /** The `refreshClaudeUsage` in flight, so a second click joins it. */
 let claudeRefresh: Promise<void> | null = null;
@@ -638,6 +667,10 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
     const usageSoon = (project: string) => {
       const read = () => {
         usageLater.delete(project);
+        if (hidden()) {
+          usageDue.add(project);
+          return;
+        }
         usageRead.set(project, Date.now());
         void get().loadCodexUsage(project);
       };
@@ -718,7 +751,18 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
     };
     poll(get());
     const stopPoll = useAgentSessions.subscribe(poll);
+    // The usage that fell due while hidden, read now it can be seen.
+    const shownAgain = () => {
+      if (hidden()) return;
+      for (const project of usageDue) {
+        usageDue.delete(project);
+        usageRead.set(project, Date.now());
+        void get().loadCodexUsage(project);
+      }
+    };
+    document.addEventListener("visibilitychange", shownAgain);
     return () => {
+      document.removeEventListener("visibilitychange", shownAgain);
       stopWritten();
       stopActivity();
       stopPoll();
@@ -735,9 +779,16 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
     try {
       const listed = await surface.agentSessions(project);
       if (latest.get(project) !== mine) return;
-      // With every listing, changed or not: the goals are its threads'.
-      void get().loadCodexUsage(project);
       const previous = get().byProject[project];
+      // The goals are its Codex threads': read when those changed, else only
+      // once the last read is stale (see USAGE_FRESH_MS).
+      if (
+        codexIdsOf(previous) !== codexIdsOf(listed) ||
+        Date.now() - (usageAt.get(project) ?? 0) > USAGE_FRESH_MS
+      ) {
+        if (hidden()) usageDue.add(project);
+        else void get().loadCodexUsage(project);
+      }
       // Unchanged: keep the old array, so the rail does not redraw.
       const unchanged =
         previous &&
@@ -751,6 +802,12 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
             entry.conductor === listed[index]?.conductor &&
             entry.launchedBy?.conductor ===
               listed[index]?.launchedBy?.conductor &&
+            // `sessions.access` changes only this: the chat opens or closes.
+            entry.launchedBy?.userAccess ===
+              listed[index]?.launchedBy?.userAccess &&
+            // A conductor deleted changes only this: the session is the
+            // user's again.
+            entry.managed === listed[index]?.managed &&
             entry.working === listed[index]?.working &&
             sameCard(entry.card, listed[index]?.card) &&
             sameSubagents(entry.subagents, listed[index]?.subagents ?? []) &&
@@ -802,6 +859,8 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
     if (!surface) return;
     const mine = (usageLatest.get(project) ?? 0) + 1;
     usageLatest.set(project, mine);
+    usageAt.set(project, Date.now());
+    usageDue.delete(project);
     const answers = claudeAnswers;
     try {
       const usage = await surface.codexUsage(project);

@@ -66,6 +66,13 @@ import {
 import type { ContentBlock } from "./outgoing";
 import { Held, type Outgoing, sameSettings } from "./queue";
 import { cut, inputText } from "./transcript";
+import {
+  maxedWindow,
+  type TurnFailure,
+  type TurnOutcome,
+  type UsageWindowReading,
+  windowOfMinutes,
+} from "./usage-limits";
 
 /** What a {@link CodexEngine} needs from main; `spawn` is a test seam. */
 interface CodexEngineDeps {
@@ -90,6 +97,48 @@ interface CodexEngineDeps {
     folder: string,
     conversation: string,
   ) => void;
+  /** See `EngineDeps.outcome`. */
+  outcome?: (outcome: TurnOutcome) => void;
+}
+
+/**
+ * Whether Codex's `codexErrorInfo` names a usage limit.
+ *
+ * A unit variant comes as its name (`"usageLimitExceeded"`), one with fields
+ * as an object keyed by it.
+ */
+function usageLimitInfo(info: unknown): boolean {
+  if (typeof info === "string") return /^usage_?limit_?exceeded$/i.test(info);
+  return Object.keys(record(info)).some((key) =>
+    /^usage_?limit_?exceeded$/i.test(key),
+  );
+}
+
+/**
+ * The windows of an `account/rateLimits/updated` notification.
+ *
+ * NOTE: `resetsAt` is Unix SECONDS, as in the rollout's `rate_limits`.
+ */
+function codexWindows(params: Json): UsageWindowReading[] {
+  const limits = record(params.rateLimits);
+  return [limits.primary, limits.secondary].flatMap((value) => {
+    const window = record(value);
+    const used = window.usedPercent;
+    const minutes = window.windowDurationMins;
+    const resets = window.resetsAt;
+    if (typeof used !== "number" || typeof minutes !== "number") return [];
+    return [
+      {
+        usedPercent: used,
+        windowMinutes: minutes,
+        resetsAt:
+          typeof resets === "number" && Number.isFinite(resets)
+            ? resets * 1000
+            : null,
+        limited: false,
+      },
+    ];
+  });
 }
 
 type CodexOutgoing = Outgoing;
@@ -297,6 +346,10 @@ export class CodexEngine implements ConversationEngine {
   stale = false;
   /** The images of the running turn and its steers, removed when it ends. */
   dirs: string[] = [];
+  /** The running turn's error said `usageLimitExceeded`. */
+  usageLimited = false;
+  /** The account's windows as Codex last told them, for a limit's reset. */
+  windows: UsageWindowReading[] = [];
   exited: Promise<void> = Promise.resolve();
   /** Resolves with the id once Codex names a new conversation. */
   named: Promise<string>;
@@ -465,11 +518,12 @@ export class CodexEngine implements ConversationEngine {
       named: () => this.conversation,
     });
     // FE-155: the conductor tools only on a conductor's process.
-    if (conductor && env[SESSIONS_ENV.token])
-      env[CONTROL_ROLE_ENV] = "conductor";
-    // FE-155: the control tools, for a process holding a control token.
+    const asConductor = conductor && Boolean(env[SESSIONS_ENV.token]);
+    if (asConductor) env[CONTROL_ROLE_ENV] = "conductor";
+    // FE-155: the control tools, for a process holding a control token; a
+    // conductor's runs its safe ones without asking.
     const control = controlMcpFor(env);
-    if (control) overrides.push(...codexControlArgs(control));
+    if (control) overrides.push(...codexControlArgs(control, asConductor));
     // FE-158: this build's lwk for the kit, unless its backend is ts.
     const kit = kitMcpFor();
     if (kit) overrides.push(...codexKitArgs(kit));
@@ -682,13 +736,29 @@ export class CodexEngine implements ConversationEngine {
           if (entry.rpcId === rpcId) this.settle(key);
         return;
       }
+      case "account/rateLimits/updated": {
+        const windows = codexWindows(params);
+        if (windows.length) this.windows = windows;
+        return;
+      }
       case "error": {
         if (params.willRetry === true) return;
-        this.error = str(record(params.error).message)?.slice(0, 300) ?? null;
+        const error = record(params.error);
+        if (usageLimitInfo(error.codexErrorInfo)) this.usageLimited = true;
+        this.error = str(error.message)?.slice(0, 300) ?? null;
         return;
       }
       case "turn/completed": {
         const turn = record(params.turn);
+        if (usageLimitInfo(record(turn.error).codexErrorInfo))
+          this.usageLimited = true;
+        // Before `onTurnEnd`, while `stopping` still says a Stop ended it.
+        this.tellOutcome(
+          turn.status === "failed"
+            ? (str(record(turn.error).message) ?? this.error ?? "")
+            : null,
+          turn.status === "interrupted",
+        );
         if (turn.status === "failed" && !this.stopping)
           this.error =
             str(record(turn.error).message)?.slice(0, 300) ??
@@ -710,6 +780,36 @@ export class CodexEngine implements ConversationEngine {
         return;
       }
     }
+  }
+
+  /**
+   * Tell main how the turn ended, for a usage limit (see `usage-limits.ts`).
+   * A stopped or interrupted turn is not told.
+   *
+   * @param failed The failed turn's words, or null when it went through.
+   */
+  private tellOutcome(failed: string | null, interrupted: boolean): void {
+    const limited = this.usageLimited;
+    this.usageLimited = false;
+    if (this.stopping || interrupted || !this.deps.outcome) return;
+    let failure: TurnFailure | null = null;
+    if (failed !== null) {
+      const maxed = limited ? maxedWindow(this.windows) : null;
+      failure = {
+        text: failed,
+        limited,
+        window: maxed ? windowOfMinutes(maxed.windowMinutes) : null,
+        resetsAt: maxed?.resetsAt ?? null,
+      };
+    }
+    const outcome: TurnOutcome = {
+      agent: "codex",
+      project: this.project,
+      conversation: this.conversation,
+      model: this.applied?.model ?? null,
+      failure,
+    };
+    safely(() => this.deps.outcome?.(outcome));
   }
 
   /**

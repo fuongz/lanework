@@ -68,6 +68,7 @@ import {
 import type { ContentBlock } from "./outgoing";
 import { Held, type Outgoing, sameSettings } from "./queue";
 import { cut, inputText } from "./transcript";
+import type { TurnFailure, TurnOutcome } from "./usage-limits";
 
 /** What an {@link OpenCodeEngine} needs from main; `fetch` is a test seam. */
 export interface OpenCodeEngineDeps {
@@ -80,6 +81,8 @@ export interface OpenCodeEngineDeps {
   emit: (event: ConversationEvent) => void;
   remember: (conversation: string, settings: ComposerSettings) => void;
   fetch?: typeof fetch;
+  /** See `EngineDeps.outcome` in `engine.ts`. */
+  outcome?: (outcome: TurnOutcome) => void;
   /** How long Stop waits for OpenCode to end the turn before it lets go. */
   stopTimeoutMs?: number;
 }
@@ -90,6 +93,15 @@ const record = (value: unknown): Json =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Json)
     : {};
+
+/**
+ * Whether an OpenCode error is a provider's 429: a usage limit, or only a
+ * passing rate limit the usage readers have to tell apart.
+ */
+function tooManyRequests(value: unknown): boolean {
+  const error = record(value);
+  return error.statusCode === 429 || record(error.data).statusCode === 429;
+}
 
 const str = (value: unknown): string | null =>
   typeof value === "string" && value.trim() ? value : null;
@@ -343,6 +355,8 @@ export class OpenCodeEngine implements ConversationEngine {
   private parents = new Map<string, string | null>();
   /** The images of the running turn and its steers, removed when it ends. */
   private dirs: string[] = [];
+  /** The running turn failed on a provider's 429. */
+  private throttled = false;
   /** Lets go of a Stop OpenCode does not answer. */
   private stopTimer: NodeJS.Timeout | null = null;
 
@@ -709,6 +723,7 @@ export class OpenCodeEngine implements ConversationEngine {
         // OpenCode retries by itself; the turn goes on.
         return;
       case "session.error":
+        if (tooManyRequests(data.error)) this.throttled = true;
         if (!this.stopping)
           this.error = errorMessage(data.error, "OpenCode failed.").slice(
             0,
@@ -769,6 +784,7 @@ export class OpenCodeEngine implements ConversationEngine {
         return;
       }
     }
+    if (failed && tooManyRequests(data.error)) this.throttled = true;
     if (failed && !this.stopping)
       this.error = errorMessage(data.error, "The turn failed.").slice(0, 300);
     this.finish(failed);
@@ -787,7 +803,32 @@ export class OpenCodeEngine implements ConversationEngine {
         error: failed,
       }),
     );
+    this.tellOutcome(failed);
     this.onTurnEnd(false);
+  }
+
+  /**
+   * Tell main how the turn ended, for a usage limit (see `usage-limits.ts`).
+   * A stopped turn is not told.
+   */
+  private tellOutcome(failed: boolean): void {
+    const throttled = this.throttled;
+    this.throttled = false;
+    if (this.stopping || !this.deps.outcome) return;
+    // NOTE: `session.error` may come without the execution failing (an
+    // `idle` ends the turn instead): its words are the failure then too.
+    const failure: TurnFailure | null =
+      failed || this.error
+        ? { text: this.error ?? "The turn failed.", throttled }
+        : null;
+    const outcome: TurnOutcome = {
+      agent: "opencode",
+      project: this.project,
+      conversation: this.conversation,
+      model: this.applied?.model ?? null,
+      failure,
+    };
+    safely(() => this.deps.outcome?.(outcome));
   }
 
   /** The running turn's last text, told when the turn ends. */

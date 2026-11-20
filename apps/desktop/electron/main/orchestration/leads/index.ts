@@ -12,6 +12,7 @@ import {
   type ContextPick,
   type LeadsMainHandlers,
   leadsChannels,
+  REPO_LEAD_PREFIX,
   type TeamLead,
   type TeamLeadInput,
 } from "../../../../shared/orchestration";
@@ -22,11 +23,36 @@ import { contextPickIn, createLeadStore, type LeadStore } from "./store";
 
 let instance: LeadStore | null = null;
 
+/** Main's own listeners to a change of the leads, beside the pages. */
+const changeListeners = new Set<(project: string | null) => void>();
+
+/**
+ * Hear every change of the leads in main, as the pages do: a session whose
+ * conductor was deleted is the user's again, so its rail row changes too.
+ *
+ * @returns The unsubscribe.
+ */
+export function onTeamLeadsChanged(
+  listener: (project: string | null) => void,
+): () => void {
+  changeListeners.add(listener);
+  return () => changeListeners.delete(listener);
+}
+
 function store(): LeadStore {
   instance ??= createLeadStore({
     dir: join(app.getPath("userData"), "leads"),
     folderOf: terminalFolder,
-    broadcast: (event) => broadcast(leadsChannels.changed, event),
+    broadcast: (event) => {
+      broadcast(leadsChannels.changed, event);
+      for (const listener of changeListeners) {
+        try {
+          listener(event.project);
+        } catch (error) {
+          console.error("A leads listener failed", error);
+        }
+      }
+    },
   });
   return instance;
 }
@@ -38,6 +64,21 @@ function store(): LeadStore {
  */
 export function teamLeadOf(project: string, id: string): Promise<TeamLead> {
   return store().resolve(project, id);
+}
+
+/**
+ * Whether conductor `id` is still one of `project`'s. A repo conductor whose
+ * file does not parse counts as kept: it is broken, not gone.
+ */
+export async function isTeamLeadKept(
+  project: string,
+  id: string,
+): Promise<boolean> {
+  const { leads, errors } = await store().list(project);
+  return (
+    leads.some((lead) => lead.id === id) ||
+    (id.startsWith(REPO_LEAD_PREFIX) && errors.length > 0)
+  );
 }
 
 /**

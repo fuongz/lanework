@@ -9,6 +9,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { app } from "electron";
+import type { ConversationAgent } from "../../../shared/conversation";
 import {
   type AgentWrite,
   type ClaudeUsage,
@@ -20,6 +21,7 @@ import {
 } from "../../../shared/terminal";
 import { codexHome } from "../agent-home";
 import { createAgentCli } from "../conversation/claude-cli";
+import type { UsageWindowReading } from "../conversation/usage-limits";
 import { broadcast, handle } from "../ipc";
 import { arity, slug } from "../ipc-args";
 import { appHomeDir } from "../paths";
@@ -99,6 +101,20 @@ export const codexCli = createAgentCli("codex", () =>
 );
 
 // ── Codex limits and banked resets (FE-74) ────────────────────────────────
+
+/** Told when a banked reset was spent and Codex said it reset. */
+const codexResetListeners = new Set<() => void>();
+
+/**
+ * Hear every banked Codex reset that went through: the usage limits lift
+ * Codex's limit then, instead of waiting for its old reset time.
+ *
+ * @returns Stops hearing.
+ */
+export function onCodexReset(listener: () => void): () => void {
+  codexResetListeners.add(listener);
+  return () => codexResetListeners.delete(listener);
+}
 
 /** Ask `codex app-server` again in the background after this long. */
 const CODEX_SERVER_TTL_MS = 5 * 60_000;
@@ -358,6 +374,43 @@ async function claudeUsageNow(force: boolean): Promise<ClaudeUsage> {
 }
 
 /**
+ * `agent`'s usage windows as its reader knows them now: what a usage limit
+ * reads its window and reset time from when the CLI did not say.
+ *
+ * Asked once per limit, so each reader is asked afresh within its own
+ * floor: Claude's OAuth cache, Codex's app-server, OpenCode Go's TTL.
+ */
+export async function usageWindowsOf(
+  agent: ConversationAgent,
+): Promise<UsageWindowReading[]> {
+  const maxed = (used: number) => used >= 100;
+  switch (agent) {
+    case "claude": {
+      const usage = await claudeUsageNow(true);
+      return [usage.primary, usage.secondary].flatMap((window) =>
+        window ? [{ ...window, limited: maxed(window.usedPercent) }] : [],
+      );
+    }
+    case "codex": {
+      await readCodexServer();
+      const quota = codexQuotaNow(
+        (await readCodexUsage(codexDirs(), [])).quota,
+      );
+      return [quota?.primary, quota?.secondary].flatMap((window) =>
+        window ? [{ ...window, limited: maxed(window.usedPercent) }] : [],
+      );
+    }
+    case "opencode":
+      return ((await opencodeUsageNow())?.windows ?? []).map((window) => ({
+        usedPercent: window.usedPercent,
+        windowMinutes: window.windowMinutes,
+        resetsAt: window.resetsAt,
+        limited: window.status === "rate-limited" || maxed(window.usedPercent),
+      }));
+  }
+}
+
+/**
  * Register the usage IPC handlers and start polling Claude's limits, so they
  * are known before the footer first asks.
  */
@@ -370,6 +423,10 @@ export function registerUsage(
   // NOTE: By project alone (FE-41): the goals are those of the Codex
   // conversations Lanework lists for it (FE-112), and the quota is the
   // account's. A page names no file and no thread.
+  // NOTE: A burst of asks for one project's usage (a listing and a settled
+  // write land together) shares the read in flight: the rollouts, the goals
+  // database and Claude's limits are read once for all of them.
+  const inflight = new Map<string, Promise<CodexUsage>>();
   handle(
     terminalChannels.codexUsage,
     devUrl,
@@ -381,14 +438,26 @@ export function registerUsage(
       const ids = [...listed]
         .filter((entry) => entry.startsWith("codex:"))
         .map((entry) => entry.slice("codex:".length));
-      const [usage, claude, opencode] = await Promise.all([
-        readCodexUsage(codexDirs(), ids),
-        claudeUsageNow(false),
-        opencodeUsageNow(),
-      ]);
-      // In the background: the listing never waits on Codex starting.
-      void refreshCodexServer(CODEX_SERVER_TTL_MS);
-      return { ...usage, quota: codexQuotaNow(usage.quota), claude, opencode };
+      const key = `${project}\0${ids.join(",")}`;
+      const running = inflight.get(key);
+      if (running) return running;
+      const read = (async (): Promise<CodexUsage> => {
+        const [usage, claude, opencode] = await Promise.all([
+          readCodexUsage(codexDirs(), ids),
+          claudeUsageNow(false),
+          opencodeUsageNow(),
+        ]);
+        // In the background: the listing never waits on Codex starting.
+        void refreshCodexServer(CODEX_SERVER_TTL_MS);
+        return {
+          ...usage,
+          quota: codexQuotaNow(usage.quota),
+          claude,
+          opencode,
+        };
+      })().finally(() => inflight.delete(key));
+      inflight.set(key, read);
+      return read;
     },
   );
   // NOTE: A boolean alone (FE-74). The answer is read with `codexUsage`.
@@ -419,6 +488,14 @@ export function registerUsage(
         ? ((seam.outcome as CodexResetOutcome | undefined) ?? "reset")
         : await consumeCodexResetCredit(await codexServerCli(), id);
       await readCodexServer();
+      if (outcome === "reset")
+        for (const listener of codexResetListeners) {
+          try {
+            listener();
+          } catch (error) {
+            console.error("Unable to tell of a Codex reset", error);
+          }
+        }
       return outcome;
     },
   );

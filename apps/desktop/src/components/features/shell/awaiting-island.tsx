@@ -1,6 +1,7 @@
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AGENT_LABELS } from "#/../shared/conversation";
+import { userMayActOn } from "#/../shared/terminal";
 import {
   HarnessIcon,
   ISLAND_LEAVE_MS,
@@ -86,6 +87,10 @@ export function useAwaitingElsewhere(): Waiting[] {
       const listed = sessions[entry.project]?.find(
         (session) => session.id === entry.conversation,
       );
+      // A session its conductor manages waits on that conductor, which
+      // answers it: main refuses the user's answer. One whose conductor is
+      // gone, or let the user in, is theirs (`managed`, as main has it).
+      if (!userMayActOn(listed)) continue;
       out.push({
         ...entry,
         projectId: entry.project,

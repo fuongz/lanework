@@ -5,6 +5,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { Quote } from "#/lib/quote";
+import { cn } from "#/lib/utils";
 
 /**
  * The quotes, as a tab on the composer's top edge (the message queue's):
@@ -13,15 +14,20 @@ import type { Quote } from "#/lib/quote";
 export function QuotesTab({
   quotes,
   onRemove,
+  className,
 }: {
   quotes: Quote[];
   onRemove: (key: string) => void;
+  className?: string;
 }) {
   if (!quotes.length) return null;
   return (
     <section
       aria-label="Quoted in the next message"
-      className="bg-muted/60 border-border text-muted-foreground mx-3 flex flex-col rounded-t-lg border border-b-0 py-0.5 ps-2.5 pe-1 text-xs"
+      className={cn(
+        "bg-muted/60 border-border text-muted-foreground mx-3 flex flex-col rounded-t-lg border border-b-0 py-0.5 ps-2.5 pe-1 text-xs",
+        className,
+      )}
     >
       {quotes.map((quote, index) => (
         <div

@@ -47,9 +47,21 @@ export const useAgentFacts = create<AgentFactsState>()((set, get) => ({
     void surface
       .agentFacts(project, session.agent, session.id)
       .then((facts) =>
-        set((state) => ({
-          byKey: { ...state.byKey, [key]: { facts, at: Date.now() } },
-        })),
+        set((state) => {
+          // NOTE: A write that changed none of the numbers (a tool call, a
+          // user line) answers with equal facts. The old object is kept, so
+          // the views that select it do not redraw; only `at` moves on.
+          const known = state.byKey[key]?.facts;
+          const same =
+            known !== undefined &&
+            JSON.stringify(known) === JSON.stringify(facts);
+          return {
+            byKey: {
+              ...state.byKey,
+              [key]: { facts: same ? known : facts, at: Date.now() },
+            },
+          };
+        }),
       )
       .catch(() => undefined)
       .finally(() => {

@@ -74,8 +74,8 @@ function bindFirstFree(
  * arrive on this socket, and swallowing the error would turn a clear refusal
  * into a ten-minute silence.
  *
- * @throws When `onPort` fails, the callback carries no code, the wait times
- *   out, or `signal` cancels it.
+ * @throws When `onPort` fails, the callback carries an `error` (Deny) or no
+ *   code, the wait times out, or `signal` cancels it.
  */
 export async function listenForCallback(input: {
   state: string;
@@ -114,6 +114,31 @@ export async function listenForCallback(input: {
       res
         .writeHead(400, { "Content-Type": "text/html; charset=utf-8" })
         .end(page("Ignored", "That callback did not come from this sign-in."));
+      return;
+    }
+
+    // The person pressed Deny: the control plane sends the browser back with
+    // `error=access_denied` (OAuth's shape) so we stop now, not in ten minutes.
+    const error = url.searchParams.get("error");
+    if (error) {
+      const denied = error === "access_denied";
+      res
+        .writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
+        .end(
+          denied
+            ? page(
+                "Sign-in denied",
+                "Nothing was connected. You can close this tab.",
+              )
+            : page("Something went wrong", "The sign-in did not finish."),
+        );
+      rejectHit(
+        new Error(
+          denied
+            ? "The sign-in was denied in the browser. Nothing was connected."
+            : `The sign-in failed (${error.slice(0, 64)}).`,
+        ),
+      );
       return;
     }
 

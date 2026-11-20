@@ -1,4 +1,9 @@
-import { BrowserWindow, type IpcMainInvokeEvent, ipcMain } from "electron";
+import {
+  BrowserWindow,
+  type IpcMainInvokeEvent,
+  ipcMain,
+  type WebContents,
+} from "electron";
 import { isTrustedUrl } from "./security";
 
 /**
@@ -35,15 +40,20 @@ export function assertTrustedSender(
   return true;
 }
 
-/** Register an `invoke` handler whose sender is validated before it runs. */
+/**
+ * Register an `invoke` handler whose sender is validated before it runs.
+ *
+ * `sender` is the window's page that asked, for a handler that answers per
+ * window (`conversation.subscribe`).
+ */
 export function handle<T>(
   channel: string,
   devUrl: string | undefined,
-  handler: (args: unknown[]) => T | Promise<T>,
+  handler: (args: unknown[], sender: WebContents) => T | Promise<T>,
 ): void {
   ipcMain.handle(channel, (event, ...args: unknown[]) => {
     if (!assertTrustedSender(event, devUrl)) return undefined;
-    return handler(args);
+    return handler(args, event.sender);
   });
 }
 
@@ -59,10 +69,31 @@ export function onBroadcast(listener: BroadcastListener): () => void {
   return () => broadcastListeners.delete(listener);
 }
 
+/** The page of every open window: what `broadcast` sends to. */
+export function windowContents(): WebContents[] {
+  return BrowserWindow.getAllWindows().map((window) => window.webContents);
+}
+
+/** Send `payload` to one window's page, unless it is gone. */
+export function sendTo(
+  contents: WebContents,
+  channel: string,
+  payload: unknown,
+): void {
+  if (!contents.isDestroyed()) contents.send(channel, payload);
+}
+
 /** Send `payload` to every open window's top frame, and to main's listeners. */
 export function broadcast(channel: string, payload: unknown): void {
-  for (const window of BrowserWindow.getAllWindows())
-    window.webContents.send(channel, payload);
+  for (const contents of windowContents()) sendTo(contents, channel, payload);
+  hearInMain(channel, payload);
+}
+
+/**
+ * Tell main's own listeners ({@link onBroadcast}) of `payload`, as a
+ * `broadcast` would, for a sender that picks its windows itself.
+ */
+export function hearInMain(channel: string, payload: unknown): void {
   for (const listener of broadcastListeners) {
     try {
       listener(channel, payload);

@@ -35,6 +35,46 @@ export const CONTROL_FORWARD = [
 export const CONTROL_ROLE_ENV = "LANEWORK_CONTROL_AS";
 
 /**
+ * The control tools a conductor's process calls without a permission
+ * prompt, by their MCP names.
+ *
+ * NOTE: Each one only reaches the conductor's own sessions and memory, or
+ * reads the model catalog: asking the user before every call buried the
+ * work under prompts. `sessions_answer` is left out on purpose: it allows
+ * a tool in a session the user cannot see, so in an asking mode the user
+ * still confirms it. `conductors_create` saves a conductor, which is the
+ * user's to approve.
+ */
+export const CONDUCTOR_ALLOWED_TOOLS = [
+  "sessions_start",
+  "sessions_list",
+  "sessions_read",
+  "sessions_send",
+  "sessions_access",
+  "memory_read",
+  "memory_append",
+  "memory_write",
+  "models_list",
+] as const;
+
+/**
+ * Claude Code's `--allowedTools` for a conductor's process: the
+ * {@link CONDUCTOR_ALLOWED_TOOLS} under the control server's prefix.
+ *
+ * NOTE: An allow rule only skips the prompt in the asking modes; a deny
+ * rule (a guarded lead's `--disallowedTools`, the user's settings) still
+ * wins over it, so the two flags need no merging.
+ */
+export function claudeConductorAllowArgs(): string[] {
+  return [
+    "--allowedTools",
+    CONDUCTOR_ALLOWED_TOOLS.map(
+      (tool) => `mcp__${CONTROL_SERVER}__${tool}`,
+    ).join(","),
+  ];
+}
+
+/**
  * Whether `text`, the turn a process is started for, is a conductor's: the
  * app wraps every conductor message, and every report and run update it
  * sends one, in one of these hidden blocks. A plain session's never is.
@@ -159,11 +199,20 @@ export function claudeMcpArgs(
 /**
  * Codex's `-c` override for the control shim. Codex starts MCP servers with a
  * cleared environment; `env_vars` names the variables it copies from its own.
+ *
+ * A `conductor`'s process approves the {@link CONDUCTOR_ALLOWED_TOOLS}
+ * up front, as Claude's `--allowedTools` does: Codex takes an
+ * `approval_mode` per MCP tool (`approve` skips the prompt). Every other
+ * tool keeps Codex's default, so `sessions_answer` asks as the session's
+ * policy says.
  */
-export function codexControlArgs(control: string): string[] {
+export function codexControlArgs(control: string, conductor = false): string[] {
+  const tools = conductor
+    ? `,tools={${CONDUCTOR_ALLOWED_TOOLS.map((tool) => `${tool}={approval_mode="approve"}`).join(",")}}`
+    : "";
   return [
     "-c",
-    `mcp_servers.${CONTROL_SERVER}={command=${JSON.stringify(control)},args=[],env_vars=${JSON.stringify([...CONTROL_FORWARD])}}`,
+    `mcp_servers.${CONTROL_SERVER}={command=${JSON.stringify(control)},args=[],env_vars=${JSON.stringify([...CONTROL_FORWARD])}${tools}}`,
   ];
 }
 

@@ -19,7 +19,15 @@ import {
 } from "../../../shared/terminal";
 import type { SessionStore } from "../../session-store";
 import { type IngestSource, ingestOne } from "../sessions";
-import { onTurnCut } from "../transcripts/activity";
+import { subagentLook, tailReadOf } from "../sessions/ingest";
+import {
+  claudeSubagentGoing,
+  claudeWorking,
+  codexTurnOpen,
+  cutOffAt,
+  onTurnCut,
+  turnTail,
+} from "../transcripts/activity";
 import { type Watch, watchPath } from "../watch";
 import {
   CLAUDE_SUBAGENT_FILE,
@@ -28,7 +36,6 @@ import {
   lastCardIn,
   STALE_MS,
   transcriptCompleted,
-  transcriptWorking,
 } from "./agent-sessions";
 import { opencodeChanges, opencodeDataDirOf } from "./opencode-sessions";
 
@@ -171,16 +178,77 @@ export function watchAgentActivity(
   // the first read of a conversation goes back `CARD_SCAN`.
   const cards = new Map<string, { card: AgentCard | null; end: number }>();
   const cardOf = async (key: string, file: string) => {
-    const size = (await stat(file)).size;
+    const info = await stat(file);
+    const { size } = info;
     const known = cards.get(key);
     // Shorter than what was read: rewritten, so read it as new.
     const from = known && known.end <= size ? known.end : 0;
-    const read = await lastCardIn(file, from, size, true);
+    // NOTE: The end of the transcript the ingest and `workingOf` just read,
+    // kept for the same size and mtime: the first read of a conversation (up
+    // to 4 MB back) and every later one are mostly answered by it.
+    const held = await tailReadOf(file, size, info.mtimeMs, true);
+    const read = await lastCardIn(file, from, size, true, held);
     // The NEWEST card wins (FE-27/D5): an agent that moves on to another card
     // moves its mark with it; bytes naming none keep the one it had.
     const next = { card: read.card ?? known?.card ?? null, end: read.end };
     cards.set(key, next);
     return next.card;
+  };
+  // Whether the agent behind `file` works, from the end of its transcript.
+  //
+  // NOTE: `transcriptWorking`'s own checks, reading that end through the
+  // shared cache of the ingest (`tailReadOf`) instead of once more from disk.
+  // A turn cut off with its process still reads from the cut on, as before.
+  const workingOf = async (
+    file: string,
+    agent: "claude" | "codex",
+    subagent: boolean,
+  ): Promise<boolean> => {
+    try {
+      const info = await stat(file);
+      const { size, mtimeMs } = info;
+      // A Claude sub-agent has its own check, and its own staleness.
+      if (agent === "claude" && subagent) {
+        const { lines: tail } = await tailReadOf(file, size, mtimeMs);
+        // NOTE: Its `.meta.json` through the ingest's sub-agent cache
+        // (`subagentLook`), read only if the check gets that far.
+        return await claudeSubagentGoing(file, {
+          mtimeMs,
+          tail,
+          meta: () =>
+            subagentLook(file.replace(/\.jsonl$/, ".meta.json"), file, info),
+        });
+      }
+      if (Date.now() - mtimeMs > STALE_MS) return false;
+      const tail =
+        cutOffAt(file, size) === null
+          ? (await tailReadOf(file, size, mtimeMs, agent === "claude")).lines
+          : await turnTail(file, size);
+      return agent === "codex"
+        ? await codexTurnOpen(file, size, tail)
+        : claudeWorking(tail);
+    } catch {
+      return false;
+    }
+  };
+  // Whether the newest turn of `file` really ended, from the end of its
+  // transcript.
+  //
+  // NOTE: `transcriptCompleted`, handed the end that `workingOf` just read
+  // through the shared cache of the ingest (`tailReadOf`) instead of reading
+  // it once more. The cache is valid for the same size and mtime only, so a
+  // write in between is read afresh. A missing file is not completed.
+  const completedOf = async (
+    file: string,
+    agent: "claude" | "codex",
+  ): Promise<boolean> => {
+    try {
+      const { size, mtimeMs } = await stat(file);
+      const { lines: tail } = await tailReadOf(file, size, mtimeMs);
+      return await transcriptCompleted(file, agent, { mtimeMs, tail });
+    } catch {
+      return false;
+    }
   };
   let stopped = false;
 
@@ -250,11 +318,7 @@ export function watchAgentActivity(
               : { agent, file },
           );
           if (!stopped && !subagent) onWrite?.(agent, id);
-          const working = await transcriptWorking(
-            file,
-            agent,
-            subagent !== null,
-          );
+          const working = await workingOf(file, agent, subagent !== null);
           // Looked for only while working: an idle agent is on no card.
           const card =
             working && !subagent
@@ -274,7 +338,7 @@ export function watchAgentActivity(
             else if (
               wasRunning &&
               onCompleted &&
-              (await transcriptCompleted(file, agent))
+              (await completedOf(file, agent))
             ) {
               if (!stopped) onCompleted(agent, id);
             }
@@ -291,7 +355,7 @@ export function watchAgentActivity(
             // turn in its own file, so no write of it will say it is done.
             // Its conversation is told instead: read it again from there.
             for (const [sub, subFile] of busySubagents.get(parentKey) ?? []) {
-              if (await transcriptWorking(subFile, "claude", true)) continue;
+              if (await workingOf(subFile, "claude", true)) continue;
               busySubagents.get(parentKey)?.delete(sub);
               if (!stopped) onActivity(agent, id, false, null, sub);
             }

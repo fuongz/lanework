@@ -16,11 +16,15 @@ import {
   type Attachment,
   CONVERSATION_READ_MAX,
   type Conversation,
+  type ConversationFacts,
+  isLaneworkEnvelope,
   spanMs,
   type ToolCall,
   type Turn,
+  type TurnUsage,
   type UserTurn,
 } from "../../../shared/conversation";
+import type { TeamLead } from "../../../shared/orchestration";
 import { type AgentCard, isAgentSessionId } from "../../../shared/terminal";
 import {
   codexRole,
@@ -31,11 +35,17 @@ import {
   lines,
   META_CHUNK,
   readRange,
-  STALE_MS,
   tidy,
 } from "../terminal/agent-sessions";
-import { cutOffAt, turnTail } from "../transcripts/activity";
-import { cut, inputText } from "./transcript";
+import {
+  cut,
+  type FoldKind,
+  foldedFacts,
+  inputText,
+  latestFoldedProposal,
+  type RowFold,
+  readFolded,
+} from "./transcript";
 
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -280,21 +290,18 @@ function promptOf(item: Record<string, unknown>): {
 }
 
 /**
- * The turns of a rollout's lines, in order.
+ * One builder of a rollout's turns, a line at a time.
  *
  * A user turn per prompt, and everything after it (text, tool calls folded
  * between two texts) as one assistant turn. Usage is summed from its
  * `token_count` events.
+ *
+ * @param legacy Read the old `user_message` / `agent_message` events as
+ *   text: right for a rollout with no item events, wrong for one with them
+ *   (see {@link codexRows}).
  */
-function buildCodexTurns(rows: readonly Line[], folder: string): Turn[] {
+function turnBuilder(folder: string, legacy: boolean) {
   const turns: Turn[] = [];
-  // NOTE: Newer CLIs write both the item and the old event for one message,
-  // so the items win wherever there are any.
-  const items = rows.some(
-    (line) =>
-      line.type === "event_msg" &&
-      record(line.payload).type === "item_completed",
-  );
   let building: AssistantTurn | null = null;
   let usage = { input: 0, output: 0, cached: 0, seen: false };
   let promptAt: number | null = null;
@@ -302,25 +309,28 @@ function buildCodexTurns(rows: readonly Line[], folder: string): Turn[] {
   // The model's tool calls not yet answered, by call id, oldest first.
   const calls = new Map<string, OpenCall>();
 
+  /** The usage of the turn being built, or null when no count came. */
+  const finishUsage = (): TurnUsage | null => {
+    if (!usage.seen) return null;
+    const from = promptAt;
+    const to = building?.endedAt ? Date.parse(building.endedAt) : Number.NaN;
+    const seconds =
+      from !== null && Number.isFinite(to) ? (to - from) / 1000 : 0;
+    return {
+      input: usage.input,
+      output: usage.output,
+      cached: usage.cached,
+      cacheHitPct:
+        usage.cached > 0
+          ? (usage.cached / (usage.cached + usage.input)) * 100
+          : null,
+      tokPerSec:
+        seconds > 0 && usage.output > 0 ? usage.output / seconds : null,
+    };
+  };
   const close = () => {
     if (!building) return;
-    if (usage.seen) {
-      const from = promptAt;
-      const to = building.endedAt ? Date.parse(building.endedAt) : Number.NaN;
-      const seconds =
-        from !== null && Number.isFinite(to) ? (to - from) / 1000 : 0;
-      building.usage = {
-        input: usage.input,
-        output: usage.output,
-        cached: usage.cached,
-        cacheHitPct:
-          usage.cached > 0
-            ? (usage.cached / (usage.cached + usage.input)) * 100
-            : null,
-        tokPerSec:
-          seconds > 0 && usage.output > 0 ? usage.output / seconds : null,
-      };
-    }
+    building.usage = finishUsage();
     if (building.blocks.length > 0 || building.usage) turns.push(building);
     building = null;
     usage = { input: 0, output: 0, cached: 0, seen: false };
@@ -357,132 +367,188 @@ function buildCodexTurns(rows: readonly Line[], folder: string): Turn[] {
     turn.endedAt = at;
   };
 
-  for (const [index, line] of rows.entries()) {
-    const at = str(line.timestamp) ?? "";
-    const payload = record(line.payload);
-    if (line.type === "turn_context") {
-      model = str(payload.model) ?? model;
-      if (building) (building as AssistantTurn).model ??= model;
-      continue;
-    }
-    if (line.type === "response_item") {
-      const callId = str(payload.call_id);
-      if (!callId) continue;
-      if (
-        payload.type === "custom_tool_call" ||
-        payload.type === "function_call"
-      ) {
-        const issued = Date.parse(at);
-        if (Number.isFinite(issued))
-          calls.set(callId, { at: issued, lastItemAt: null });
-      } else if (
-        payload.type === "custom_tool_call_output" ||
-        payload.type === "function_call_output"
-      )
-        calls.delete(callId);
-      continue;
-    }
-    if (line.type !== "event_msg") continue;
-    switch (payload.type) {
-      case "item_completed": {
-        const item = record(payload.item);
-        const id = str(item.id) ?? `i-${index}`;
-        if (item.type === "UserMessage") {
-          const { text, attachments } = promptOf(item);
-          prompt(id, text, attachments, at);
-        } else if (item.type === "AgentMessage")
-          say(id, textOf(item.content), at);
-        else {
-          const call = toolOf(item, folder, id);
-          if (!call) break;
-          Object.assign(call, timingOf(item, at, calls));
-          const turn = open(id, at);
-          const last = turn.blocks.at(-1);
-          if (last?.type === "tools") last.calls.push(call);
-          else turn.blocks.push({ type: "tools", calls: [call] });
-          turn.endedAt = at;
-        }
-        break;
-      }
-      case "user_message":
-        if (!items) {
-          const text = (str(payload.message) ?? "").trim();
-          // Lanework's own envelopes (FE-87) are turns; Codex's tags are not.
-          if (!text.startsWith("<") || text.startsWith("<lanework_"))
-            prompt(`u-${index}`, text, [], at);
-        }
-        break;
-      case "agent_message":
-        if (!items) say(`a-${index}`, str(payload.message) ?? "", at);
-        break;
-      case "token_count": {
-        const last = record(record(payload.info).last_token_usage);
-        if (!building || !Object.keys(last).length) break;
-        const cached = num(last.cached_input_tokens);
-        usage = {
-          // NOTE: OpenAI's `input_tokens` counts the cached ones too.
-          input: usage.input + Math.max(0, num(last.input_tokens) - cached),
-          output: usage.output + num(last.output_tokens),
-          cached: usage.cached + cached,
-          seen: true,
-        };
-        break;
-      }
-      case "task_complete":
-      case "turn_aborted":
-        // A call the turn left unanswered times nothing after it.
-        calls.clear();
-        if (building) (building as AssistantTurn).endedAt = at;
-        break;
-    }
-  }
-  close();
-  return turns;
-}
-
-/** What a read of a rollout's lines answers, before main adds its own. */
-function codexConversationOf(
-  id: string,
-  rows: readonly Line[],
-  {
-    folder,
-    fresh,
-    truncated,
-    since = null,
-  }: {
-    folder: string;
-    fresh: boolean;
-    truncated: boolean;
-    /** The lines since a cut-off turn (`cutOffAt`): they alone decide. */
-    since?: Line[] | null;
-  },
-): Conversation {
-  const turns = buildCodexTurns(rows, folder);
-  const working = fresh && codexWorking(since ?? (rows as Line[]));
-  const last = turns.at(-1);
-  if (last?.role === "assistant") {
-    last.open = working;
-    if (working) last.endedAt = null;
-  }
-  const meta = record(
-    rows.find((line) => line.type === "session_meta")?.payload,
-  );
-  let card: AgentCard | null = null;
-  if (working)
-    for (let at = rows.length - 1; at >= 0 && !card; at--)
-      card = laneworkCard(rows[at] as Line);
   return {
-    id,
-    agent: "codex",
-    cwd: str(meta.cwd),
-    branch: str(record(meta.git).branch),
-    turns,
-    working,
-    card,
-    settings: null,
-    truncated,
+    /** `index`: the line's place among the lines of the fold, from 0. */
+    push(line: Line, index: number) {
+      const at = str(line.timestamp) ?? "";
+      const payload = record(line.payload);
+      if (line.type === "turn_context") {
+        model = str(payload.model) ?? model;
+        if (building) (building as AssistantTurn).model ??= model;
+        return;
+      }
+      if (line.type === "response_item") {
+        const callId = str(payload.call_id);
+        if (!callId) return;
+        if (
+          payload.type === "custom_tool_call" ||
+          payload.type === "function_call"
+        ) {
+          const issued = Date.parse(at);
+          if (Number.isFinite(issued))
+            calls.set(callId, { at: issued, lastItemAt: null });
+        } else if (
+          payload.type === "custom_tool_call_output" ||
+          payload.type === "function_call_output"
+        )
+          calls.delete(callId);
+        return;
+      }
+      if (line.type !== "event_msg") return;
+      switch (payload.type) {
+        case "item_completed": {
+          const item = record(payload.item);
+          const id = str(item.id) ?? `i-${index}`;
+          if (item.type === "UserMessage") {
+            const { text, attachments } = promptOf(item);
+            prompt(id, text, attachments, at);
+          } else if (item.type === "AgentMessage")
+            say(id, textOf(item.content), at);
+          else {
+            const call = toolOf(item, folder, id);
+            if (!call) break;
+            Object.assign(call, timingOf(item, at, calls));
+            const turn = open(id, at);
+            const last = turn.blocks.at(-1);
+            if (last?.type === "tools") last.calls.push(call);
+            else turn.blocks.push({ type: "tools", calls: [call] });
+            turn.endedAt = at;
+          }
+          break;
+        }
+        case "user_message":
+          if (legacy) {
+            const text = (str(payload.message) ?? "").trim();
+            // Lanework's own envelopes (FE-87) are turns; Codex's tags are not.
+            if (!text.startsWith("<") || isLaneworkEnvelope(text))
+              prompt(`u-${index}`, text, [], at);
+          }
+          break;
+        case "agent_message":
+          if (legacy) say(`a-${index}`, str(payload.message) ?? "", at);
+          break;
+        case "token_count": {
+          const last = record(record(payload.info).last_token_usage);
+          if (!building || !Object.keys(last).length) break;
+          const cached = num(last.cached_input_tokens);
+          usage = {
+            // NOTE: OpenAI's `input_tokens` counts the cached ones too.
+            input: usage.input + Math.max(0, num(last.input_tokens) - cached),
+            output: usage.output + num(last.output_tokens),
+            cached: usage.cached + cached,
+            seen: true,
+          };
+          break;
+        }
+        case "task_complete":
+        case "turn_aborted":
+          // A call the turn left unanswered times nothing after it.
+          calls.clear();
+          if (building) (building as AssistantTurn).endedAt = at;
+          break;
+      }
+    },
+    /** What `finish` would answer, the turn being built left open. */
+    peek(): Turn[] {
+      if (!building) return turns;
+      const b = building as AssistantTurn;
+      const usage = finishUsage();
+      return b.blocks.length > 0 || usage ? [...turns, { ...b, usage }] : turns;
+    },
+    finish(): Turn[] {
+      close();
+      return turns;
+    },
   };
 }
+
+/**
+ * A rollout's lines folded into turns and the facts beside them, one line at
+ * a time: `refreshFold` (`transcript.ts`) folds in only the lines written
+ * since its last read.
+ *
+ * NOTE: Newer CLIs write both the item and the old event for one message, so
+ * the items win wherever there are any. That is a fact about the whole
+ * rollout, known only once its first item is read, and the lines before it
+ * have been read by then. So until one comes the fold keeps two builders, one
+ * that reads the old events as text and one that does not; the first item
+ * drops the first, and an item that never comes leaves it the answer. A
+ * rollout is one or the other from its start, so the second builder is idle
+ * for the old and the first is dropped at once for the new.
+ *
+ * `index` counts every line (the fallback of an id with none), `session_meta`
+ * the first one's `cwd` and branch, and the Lanework card the newest one.
+ */
+function codexRows(folder: string): RowFold {
+  let legacy: ReturnType<typeof turnBuilder> | null = turnBuilder(folder, true);
+  const items = turnBuilder(folder, false);
+  let index = 0;
+  let working = false;
+  let meta: Record<string, unknown> | null = null;
+  let card: AgentCard | null = null;
+  return {
+    push: (line) => {
+      const payload = record(line.payload);
+      if (line.type === "event_msg") {
+        if (payload.type === "item_completed") legacy = null;
+        // What `codexWorking` reads: the last of these decides.
+        if (payload.type === "task_started") working = true;
+        else if (
+          payload.type === "task_complete" ||
+          payload.type === "turn_aborted"
+        )
+          working = false;
+      }
+      if (line.type === "session_meta") meta ??= payload;
+      card = laneworkCard(line) ?? card;
+      legacy?.push(line, index);
+      items.push(line, index);
+      index++;
+    },
+    // No sub-agent transcripts: no result is read back from a place.
+    longResult: () => undefined,
+    peek: () => (legacy ?? items).peek(),
+    finish: () => (legacy ?? items).finish(),
+    facts: () => ({
+      working,
+      cwd: str(meta?.cwd),
+      branch: str(record(meta?.git).branch),
+      card,
+    }),
+  };
+}
+
+/**
+ * The turns of a rollout's lines, in order: {@link codexRows}, all at once.
+ */
+export function buildCodexTurns(rows: readonly Line[], folder: string): Turn[] {
+  const fold = codexRows(folder);
+  for (const row of rows) fold.push(row);
+  return fold.finish();
+}
+
+/** The `session_meta` at a rollout's head: it names the folder and branch. */
+async function codexHead(file: string): Promise<Line | null> {
+  const head = lines(await readRange(file, 0, META_CHUNK).catch(() => ""), {
+    head: true,
+  });
+  return head.find((line) => line.type === "session_meta") ?? null;
+}
+
+/**
+ * How a rollout is folded for `refreshFold`.
+ *
+ * NOTE: The same size-and-mtime cache as a Claude transcript's: unchanged,
+ * nothing is read; grown, only the new whole lines are parsed; shrunk or
+ * rewritten, folded again. Past the read limit only the end is folded, and
+ * the head's `session_meta` is given the fold first (`head`).
+ */
+const codex: FoldKind = {
+  agent: "codex",
+  make: codexRows,
+  head: codexHead,
+  working: codexWorking,
+};
 
 /** Rollout paths already found, by id, so the tree is walked once for each. */
 const found = new Map<string, string>();
@@ -530,6 +596,9 @@ export async function codexRolloutPath(
  * Past {@link CONVERSATION_READ_MAX} only the end is read, and `truncated`
  * says so; its `session_meta` is then read from the head on its own.
  *
+ * Folded once and kept, as a Claude transcript is (`readFolded`): a read
+ * after the rollout grew parses only the lines written since.
+ *
  * @throws When the conversation has no transcript.
  */
 export async function readCodexConversation(
@@ -538,23 +607,52 @@ export async function readCodexConversation(
   id: string,
   max = CONVERSATION_READ_MAX,
 ): Promise<Conversation> {
+  return readFolded(await rolloutOf(home, folder, id), folder, id, max, codex);
+}
+
+/**
+ * The id of Codex conversation `id`'s latest proposal when it waits on the
+ * user, or null: {@link latestClaudeProposal}, for a rollout.
+ *
+ * @throws When the conversation has no transcript.
+ */
+export async function latestCodexProposal(
+  home: string,
+  folder: string,
+  id: string,
+  leads: readonly TeamLead[],
+  max = CONVERSATION_READ_MAX,
+): Promise<string | null> {
+  return latestFoldedProposal(
+    await rolloutOf(home, folder, id),
+    folder,
+    leads,
+    max,
+    codex,
+  );
+}
+
+/**
+ * Small facts of Codex conversation `id`, from the same fold.
+ *
+ * @throws When the conversation has no transcript.
+ */
+export async function codexFacts(
+  home: string,
+  folder: string,
+  id: string,
+  max = CONVERSATION_READ_MAX,
+): Promise<ConversationFacts> {
+  return foldedFacts(await rolloutOf(home, folder, id), folder, max, codex);
+}
+
+/** The rollout of `id`, or the error a conversation with none gives. */
+async function rolloutOf(
+  home: string,
+  folder: string,
+  id: string,
+): Promise<string> {
   const file = await codexRolloutPath(home, folder, id);
-  const info = file ? await stat(file).catch(() => null) : null;
-  if (!file || !info?.isFile())
-    throw new Error("That conversation has no transcript.");
-  const fresh = Date.now() - info.mtimeMs <= STALE_MS;
-  const truncated = info.size > max;
-  const start = truncated ? info.size - max : 0;
-  let rows = lines(await readRange(file, start, info.size - start), {
-    head: !truncated,
-  });
-  if (truncated) {
-    const head = lines(await readRange(file, 0, META_CHUNK), { head: true });
-    const meta = head.find((line) => line.type === "session_meta");
-    if (meta) rows = [meta, ...rows];
-  }
-  // A turn cut off with its process is not working (`cutOffAt`).
-  const since =
-    cutOffAt(file, info.size) === null ? null : await turnTail(file, info.size);
-  return codexConversationOf(id, rows, { folder, fresh, truncated, since });
+  if (!file) throw new Error("That conversation has no transcript.");
+  return file;
 }

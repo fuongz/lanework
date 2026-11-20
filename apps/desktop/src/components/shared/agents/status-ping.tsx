@@ -18,14 +18,21 @@ const COLOR: Record<StatusTone, string> = {
  * Only blue and red ping: they are what changes. Reduced motion keeps the
  * dot and drops the ring.
  */
-export function StatusPing({ tone }: { tone: StatusTone }) {
+export function StatusPing({
+  tone,
+  inline = false,
+}: {
+  tone: StatusTone;
+  /** In the row's flow, centred on its line, not pinned under an icon. */
+  inline?: boolean;
+}) {
   const color = COLOR[tone];
   return (
     <span
       aria-hidden="true"
       data-testid={tone === "awaiting" ? "awaiting-dot" : undefined}
       data-working={tone === "working" ? "" : undefined}
-      className="ring-sidebar absolute -right-0.5 -bottom-0.5 grid size-1.5 place-items-center rounded-full ring-[1.5px]"
+      className={`ring-sidebar grid size-1.5 shrink-0 place-items-center rounded-full ring-[1.5px] ${inline ? "relative" : "absolute -right-0.5 -bottom-0.5"}`}
     >
       {(tone === "working" || tone === "awaiting") && (
         <span

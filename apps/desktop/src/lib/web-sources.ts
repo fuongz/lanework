@@ -23,8 +23,23 @@ export interface WebSearch {
 const SEARCHES_MAX = 100;
 const SOURCES_MAX = 500;
 
-const SEARCH_TOOLS = new Set(["WebSearch", "web_search", "websearch"]);
-const FETCH_TOOLS = new Set(["WebFetch", "webfetch", "fetch"]);
+/** The tools whose calls are web searches, as each CLI names them. */
+export const SEARCH_TOOLS: ReadonlySet<string> = new Set([
+  "WebSearch",
+  "web_search",
+  "websearch",
+]);
+/** The tools whose calls read one web page, as each CLI names them. */
+export const FETCH_TOOLS: ReadonlySet<string> = new Set([
+  "WebFetch",
+  "webfetch",
+  "fetch",
+]);
+/**
+ * Every tool {@link webSources} reads: what a caller asks main for
+ * (`conversation.readToolCalls`) instead of the whole conversation.
+ */
+export const WEB_TOOLS: readonly string[] = [...SEARCH_TOOLS, ...FETCH_TOOLS];
 
 /**
  * `raw` as a web page's address: http or https only, without credentials or
