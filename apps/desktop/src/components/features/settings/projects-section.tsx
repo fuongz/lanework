@@ -5,7 +5,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { Project } from "#/../shared/projects";
 import { ImportLocalDialog } from "#/components/features/projects/import-local-dialog";
 import {
@@ -39,6 +39,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
+import { Input } from "#/components/ui/input";
 import { useBoard } from "#/stores/board";
 import { isLocalProject, useSession } from "#/stores/session";
 import { useFolderPaths } from "./projects-section.folders";
@@ -87,6 +88,10 @@ export function ProjectsSection({ slug }: { slug: string }) {
   const [confirming, setConfirming] = useState<
     (Project & { id: string }) | null
   >(null);
+  // What the person typed to confirm the delete; cleared whenever the dialog
+  // opens, so a name typed for one project never arms another's.
+  const [typed, setTyped] = useState("");
+  const confirmId = useId();
   const [failed, setFailed] = useState<string | null>(null);
   const shown = selected ? [selected] : NONE;
   const { paths, refresh } = useFolderPaths(shown);
@@ -207,7 +212,10 @@ export function ProjectsSection({ slug }: { slug: string }) {
                       onRename={setRenaming}
                       onFolders={setEditing}
                       onImport={setImporting}
-                      onDelete={setConfirming}
+                      onDelete={(project) => {
+                        setTyped("");
+                        setConfirming(project);
+                      }}
                       onFailed={setFailed}
                       extraRows={
                         canExport && selected ? (
@@ -319,36 +327,47 @@ export function ProjectsSection({ slug }: { slug: string }) {
           <AlertDialogHeader>
             {isLocalProject(confirming) ? (
               <>
-                <AlertDialogTitle>
-                  Delete {confirming?.name} from this machine?
-                </AlertDialogTitle>
+                <AlertDialogTitle>Delete {confirming?.name}?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This removes the project and its board from this machine. It
-                  was never on an account, so nothing else holds a copy and it
-                  cannot be undone. Files in its folder are left exactly where
-                  they are.
+                  The project and its board are deleted from this machine for
+                  good. Your code folder and its files are not touched.
                 </AlertDialogDescription>
               </>
             ) : (
               <>
-                <AlertDialogTitle>
-                  Delete {confirming?.name} from your account?
-                </AlertDialogTitle>
+                <AlertDialogTitle>Delete {confirming?.name}?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This removes the project and its cloud board from your
-                  lanework account, along with the folder paths every machine
-                  has reported for it. It cannot be undone from this app. Files
-                  on this machine are left exactly where they are, and another
-                  machine still syncing this project can put it back on its next
-                  write.
+                  The project and its board are deleted from your Lanework
+                  account for good. Your code folder and its files are not
+                  touched. If another machine still syncs this project, it can
+                  come back.
                 </AlertDialogDescription>
               </>
             )}
           </AlertDialogHeader>
+          <div className="flex flex-col gap-1.5 text-[13px]">
+            <label htmlFor={confirmId} className="text-muted-foreground">
+              Type{" "}
+              <span className="font-mono font-semibold text-foreground">
+                {confirming?.name}
+              </span>{" "}
+              to confirm.
+            </label>
+            <Input
+              id={confirmId}
+              autoComplete="off"
+              spellCheck={false}
+              value={typed}
+              onChange={(event) => setTyped(event.target.value)}
+            />
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
+              // NOTE: The exact name, case and spaces included, like the
+              // "Remove every issue" confirmation does with the slug.
+              disabled={!confirming || typed !== confirming.name}
               // The registry button pairs `border border-transparent` with
               // `bg-clip-padding`, so the fill stops short of the edge and the
               // popup shows through as a 1px ring. Every destructive
@@ -356,8 +375,8 @@ export function ProjectsSection({ slug }: { slug: string }) {
               className="border-0"
               onClick={() => {
                 const target = confirming;
+                if (!target || typed !== target.name) return;
                 setConfirming(null);
-                if (!target) return;
                 setFailed(null);
                 void deleteProject(target.id, target.slug).then((result) => {
                   if (result.error) setFailed(result.error);

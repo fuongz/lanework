@@ -2437,9 +2437,13 @@ test("projects are managed from settings: folders changed, deleted, created", as
     await pickInSettings(page, "Lanework");
     await page.getByRole("button", { name: "Delete Lanework" }).click();
     await expect(
-      page.getByText(/removes the project and its cloud board/),
+      page.getByText(/deleted from your Lanework account for good/),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Delete project" }).click();
+    // Armed only once the name is typed exactly.
+    const confirm = page.getByRole("button", { name: "Delete project" });
+    await expect(confirm).toBeDisabled();
+    await page.getByLabel(/to confirm/).fill("Lanework");
+    await confirm.click();
     await expect(
       page.getByRole("button", { name: "Delete Lanework" }),
     ).toBeHidden();
