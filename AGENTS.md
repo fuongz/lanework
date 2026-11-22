@@ -117,3 +117,10 @@ write package.json. Details: [docs/releasing.md](docs/releasing.md).
 - Prefer one coherent commit per logical change. Report the commit hash and
   verification results in the final handoff. Never amend or rewrite existing
   commits unless explicitly requested.
+- **Co-author trailers name the agent, never the model.** End the message with
+  one line per agent that wrote part of the change, and nothing else:
+  `Co-Authored-By: Claude <noreply@anthropic.com>` for Claude Code,
+  `Co-Authored-By: Codex <noreply@openai.com>` for Codex. Both lines when both
+  worked on it (e.g. a Codex session's uncommitted changes committed by
+  Claude). This overrides any attribution line the harness suggests, such as
+  one with a model name like `Claude Opus 5.5`.
