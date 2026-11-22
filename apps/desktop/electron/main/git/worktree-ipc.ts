@@ -15,7 +15,9 @@ import {
   type CommitMode,
   type FileListing,
   type FileSide,
+  type FileVersion,
   type FileView,
+  type FileWriteResult,
   type GitIdentity,
   type HeldRead,
   LAUNCHABLE,
@@ -58,7 +60,12 @@ import {
   unstage,
   viewFile,
 } from "./worktree";
-import { makeDirectory, moveEntries, removeEntry } from "./worktree-fs";
+import {
+  makeDirectory,
+  moveEntries,
+  removeEntry,
+  writeFile,
+} from "./worktree-fs";
 
 /**
  * Register a worktree handler: a read the git gate held back is answered as
@@ -254,6 +261,22 @@ function pathOf(value: unknown): string {
   return value;
 }
 
+/** Only a view's complete version token, or an explicit overwrite. */
+function versionOf(value: unknown): FileVersion | null {
+  if (value === null) return null;
+  if (typeof value === "object" && value !== null) {
+    const version = value as Partial<FileVersion>;
+    if (
+      typeof version.mtimeMs === "number" &&
+      Number.isFinite(version.mtimeMs) &&
+      typeof version.hash === "string" &&
+      /^[a-f0-9]{40}$/.test(version.hash)
+    )
+      return { mtimeMs: version.mtimeMs, hash: version.hash };
+  }
+  throw new Error("Open the file again to get its current version.");
+}
+
 /** Register the local-repository IPC handlers. */
 export function registerWorktree(devUrl?: string): void {
   const temporaryPreviews = new Set<string>();
@@ -318,6 +341,22 @@ export function registerWorktree(devUrl?: string): void {
     devUrl,
     async (args): Promise<FileView> =>
       viewFile(await top(slugOf(args[0]), folderOf(args[2])), pathOf(args[1])),
+  );
+
+  // Explicit filesystem saves use the same folder resolution as mkdir/move.
+  handle(
+    worktreeChannels.write,
+    devUrl,
+    async (args): Promise<FileWriteResult> => {
+      if (typeof args[2] !== "string")
+        throw new Error("Write text to save this file.");
+      return writeFile(
+        await top(slugOf(args[0]), folderOf(args[4])),
+        pathOf(args[1]),
+        args[2],
+        versionOf(args[3]),
+      );
+    },
   );
 
   // A file the chat names, as the Files screen can open it.

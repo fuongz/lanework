@@ -27,6 +27,7 @@ import {
   HISTORY_PAGE,
   IMAGE_TYPES,
   isFolderEntry,
+  MAX_TEXT_FILE_BYTES,
   patchStats,
   READS_REFUSED_MESSAGE,
   READS_UNCHECKED_MESSAGE,
@@ -47,6 +48,7 @@ import {
   gitWriteOut as writeOut,
 } from "./runner";
 import { readsVerdict } from "./trust-gate";
+import { textSnapshot } from "./worktree-content";
 
 export { GitMissingError };
 
@@ -100,7 +102,7 @@ const MAX_UNTRACKED_LISTED = 1000;
 const UNTRACKED_DIFFS_AT_ONCE = 8;
 
 /** The largest file read in full for the viewer. A diff needs no more. */
-const MAX_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_FILE_BYTES = MAX_TEXT_FILE_BYTES;
 
 /**
  * An automatic read of this folder was held back (FE-77, D6).
@@ -1246,13 +1248,14 @@ export async function viewFile(top: string, path: string): Promise<FileView> {
         size: info.size,
       };
     }
-    if (info.size > MAX_FILE_BYTES)
-      return { kind: "too-large", size: info.size };
-    const buffer = Buffer.alloc(info.size);
-    await handle.read(buffer, 0, info.size, 0);
-    // The same test git uses: a NUL in the content means binary.
-    if (buffer.includes(0)) return { kind: "binary", size: info.size };
-    return { kind: "text", text: buffer.toString("utf8"), size: info.size };
+    const snapshot = await textSnapshot(handle);
+    if (snapshot.kind === "error")
+      return {
+        kind: snapshot.reason === "too-large" ? "too-large" : "binary",
+        size: info.size,
+      };
+    const { mode: _mode, ...view } = snapshot;
+    return view;
   } finally {
     await handle.close();
   }

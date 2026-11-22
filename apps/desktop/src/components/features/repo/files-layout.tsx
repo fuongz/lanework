@@ -25,7 +25,8 @@ import { QuickOpen } from "./quick-open";
  * Repository › Files: the working tree on the left, the files open from it on
  * the right.
  *
- * An editor's explorer, read-only (FE-66/D1).
+ * An editor's explorer; a text file opens editable, ⌘S saves it and ⌘⌥S
+ * saves every open file.
  *
  * - The worktree status is read too, the way Changes reads it. It says
  *   whether there is a repository at all ({@link RepoEmpty} otherwise), and
@@ -50,7 +51,10 @@ export function FilesLayout() {
   const error = useFiles((state) => state.error);
   const loading = useFiles((state) => state.loading);
   const active = useFiles((state) => state.active);
-  const close = useFiles((state) => state.close);
+  const requestClose = useFiles((state) => state.requestClose);
+  const save = useFiles((state) => state.save);
+  const saveAll = useFiles((state) => state.saveAll);
+  const confirmDiscard = useFiles((state) => state.confirmDiscard);
   const setQuickOpen = useFiles((state) => state.setQuickOpen);
   // ⌘⇧F puts the search in the tree's place (FE-149); each press moves
   // `searchFocus` so a second one takes the box again.
@@ -88,10 +92,16 @@ export function FilesLayout() {
     if (folders && chosen && found <= 0) saveFolder(slug, null);
   }, [folders, chosen, found, slug]);
 
+  // Another folder shows other buffers: unsaved edits are asked about first.
   const pick = (index: number) => {
     const path = index > 0 ? (folders?.[index]?.path ?? null) : null;
-    setChosen(path);
-    saveFolder(slug, path);
+    confirmDiscard({
+      reason: "switch",
+      proceed: () => {
+        setChosen(path);
+        saveFolder(slug, path);
+      },
+    });
   };
 
   // The primary's status is the worktree store's, which Changes and the rail
@@ -119,11 +129,20 @@ export function FilesLayout() {
   }, [refresh, refreshWorktree, readFolders]);
 
   // ⌘P finds a file; ⌘W closes the open one (FE-66/D3, D8); ⌘⇧F searches
-  // the files' text (FE-149). The menu leaves ⌘W unbound (`menu.ts`) so it
-  // reaches the page.
+  // the files' text (FE-149); ⌘S saves the open file and ⌘⌥S every one. The
+  // menu leaves ⌘W and ⌘S unbound (`menu.ts`) so they reach the page, and
+  // Pierre's editor keymap has neither.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      if (!(event.metaKey || event.ctrlKey)) return;
+      // By `code`: with ⌥ held, macOS reports `key` as "ß".
+      if (event.code === "KeyS" && !event.shiftKey) {
+        event.preventDefault();
+        if (event.altKey) void saveAll();
+        else if (active) void save(active);
+        return;
+      }
+      if (event.altKey) return;
       const key = event.key.toLowerCase();
       if (event.shiftKey) {
         if (key !== "f") return;
@@ -137,12 +156,12 @@ export function FilesLayout() {
         setQuickOpen(true);
       } else if (key === "w" && active) {
         event.preventDefault();
-        close(active);
+        requestClose([active]);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, close, setQuickOpen]);
+  }, [active, requestClose, save, saveAll, setQuickOpen]);
 
   const refreshAll = () => {
     void refreshWorktree();

@@ -225,6 +225,12 @@ html[data-window-inactive]
   --sidebar-ring: var(--accent-brand);
   /* The 1px rule between two resizable panels. See the dark value below. */
   --panel-rule: oklch(0.93 0.007 45.4);
+  /* Repository › Files' editor pane: its tab strip, header and code. The
+     page's own ground, so the code sits on the app rather than on the
+     highlighter theme's colour. One place to give the editor its own. */
+  --editor: var(--background);
+  --editor-strip: var(--sidebar);
+  --editor-rule: var(--border);
   /* A rail row's hover and its open page (FE-143): the brand laid thinly over
      the ground, so they follow the accent picker with no value of their own. */
   --rail-hover: color-mix(in oklab, var(--primary) 7%, transparent);
@@ -354,6 +360,9 @@ html[data-window-inactive]
      over whatever the window is painted with and reads as a bright stripe
      down the whole app. This is that 10% already laid over `--sidebar`. */
   --panel-rule: oklch(0.235 0.008 58);
+  --editor: var(--background);
+  --editor-strip: var(--sidebar);
+  --editor-rule: var(--border);
   /* The card's edge, a step above the card and no more, as Codex draws it.
      `--border` (white 10%) would draw a bright frame round the whole page. */
   --panel-edge: oklch(0.2 0.009 58);
@@ -460,6 +469,9 @@ html[data-window-inactive]
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
+  --color-editor: var(--editor);
+  --color-editor-strip: var(--editor-strip);
+  --color-editor-rule: var(--editor-rule);
   --color-rail-hover: var(--rail-hover);
   --color-rail-active: var(--rail-active);
   --color-chart-5: var(--chart-5);

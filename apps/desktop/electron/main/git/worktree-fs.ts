@@ -1,7 +1,10 @@
 // Explicit changes to the Files tree, without invoking git.
+import { randomUUID } from "node:crypto";
+import { constants } from "node:fs";
 import {
   lstat,
   mkdir,
+  open,
   realpath,
   rename,
   rm,
@@ -17,6 +20,130 @@ import {
   sep,
   win32,
 } from "node:path";
+import {
+  type FileVersion,
+  type FileWriteResult,
+  MAX_TEXT_FILE_BYTES,
+} from "../../../shared/worktree";
+import { fileVersion, sameVersion, textSnapshot } from "./worktree-content";
+
+/** Serialize saves to the same canonical file, including symlink aliases. */
+const saves = new Map<string, Promise<unknown>>();
+
+/** Resolve a leaf symlink too: edits save its referent and keep the link. */
+async function writeTarget(root: string, path: string): Promise<string> {
+  const entry = await entryAt(root, path);
+  const info = await lstat(entry).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  if (!info) return entry;
+  const target = await realpath(entry);
+  assertInside(root, target);
+  return target;
+}
+
+/** Atomic, bounded UTF-8 saves with optimistic version checking. */
+export async function writeFile(
+  top: string,
+  value: string,
+  text: string,
+  expected: FileVersion | null,
+): Promise<FileWriteResult> {
+  const bytes = Buffer.from(text, "utf8");
+  if (bytes.length > MAX_TEXT_FILE_BYTES)
+    return {
+      kind: "error",
+      reason: "too-large",
+      message: "Text files must be at most 2 MB.",
+    };
+  if (bytes.includes(0))
+    return {
+      kind: "error",
+      reason: "binary",
+      message: "Text files cannot contain NUL bytes.",
+    };
+  if (bytes.toString("utf8") !== text)
+    return {
+      kind: "error",
+      reason: "invalid-text",
+      message: "The text contains invalid Unicode.",
+    };
+  const path = treePath(value);
+  const root = await realpath(top);
+  // A removed parent also means the file is missing. Never recreate it.
+  if (expected !== null) {
+    try {
+      await realpath(dirname(join(root, path)));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT")
+        return { kind: "missing" };
+      throw error;
+    }
+  }
+  const full = await writeTarget(root, path);
+  const previous = saves.get(full) ?? Promise.resolve();
+  const saving = previous
+    .catch(() => {})
+    .then(async (): Promise<FileWriteResult> => {
+      const inspect = async () => {
+        if ((await writeTarget(root, path)) !== full)
+          throw new Error(
+            "The file's symlink target changed. Open the file again.",
+          );
+        const handle = await open(
+          full,
+          constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+        ).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return null;
+          throw error;
+        });
+        if (!handle) return null;
+        try {
+          return await textSnapshot(handle);
+        } finally {
+          await handle.close();
+        }
+      };
+      const check = (
+        disk: Awaited<ReturnType<typeof inspect>>,
+      ): FileWriteResult | null => {
+        if (disk?.kind === "error") return disk;
+        if (!disk) return expected === null ? null : { kind: "missing" };
+        if (expected && !sameVersion(expected, disk.version))
+          return { kind: "conflict", text: disk.text, version: disk.version };
+        return null;
+      };
+      const disk = await inspect();
+      const refused = check(disk);
+      if (refused) return refused;
+      const temporary = join(dirname(full), `.lanework-save-${randomUUID()}`);
+      const handle = await open(temporary, "wx", 0o600);
+      try {
+        await handle.writeFile(bytes);
+        // Recheck after the asynchronous write, before replacing the file.
+        const latest = await inspect();
+        const changed = check(latest);
+        if (changed) return changed;
+        if (latest?.kind === "text") await handle.chmod(latest.mode & 0o7777);
+        else await handle.chmod(0o666 & ~process.umask());
+        await handle.sync();
+        const info = await handle.stat();
+        await handle.close();
+        await rename(temporary, full);
+        return { kind: "saved", version: fileVersion(info.mtimeMs, bytes) };
+      } finally {
+        await handle.close();
+        await rm(temporary, { force: true });
+      }
+    });
+  saves.set(full, saving);
+  try {
+    return await saving;
+  } finally {
+    if (saves.get(full) === saving) saves.delete(full);
+  }
+}
 
 /** A relative tree path, with the directory marker removed. */
 function treePath(value: string, allowRoot = false): string {

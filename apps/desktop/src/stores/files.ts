@@ -2,8 +2,10 @@ import { create } from "zustand";
 import { ipcMessage } from "#/lib/ipc-error";
 import { readStored, writeStored } from "#/lib/stored";
 import { desktopSurface } from "#/server/desktop";
+import { useWorktree } from "#/stores/worktree";
 import type {
   FileListing,
+  FileVersion,
   FileView,
   WorktreeState,
 } from "../../shared/worktree";
@@ -14,12 +16,56 @@ import type {
  * Read on entry, on window focus and on request. Never on a timer and never
  * by a file watcher, the same rule as Changes (FE-22/D10).
  *
- * NOTE: Mostly read-only (FE-66/D1). The tree can make a folder, move
- * entries and delete one (`worktree.mkdir`, `worktree.move`,
- * `worktree.remove`); this store only learns what they did
- * ({@link FilesStore.addDir}, {@link FilesStore.applyMove},
- * {@link FilesStore.applyRemove}).
+ * The tree can make a folder, move entries and delete one
+ * (`worktree.mkdir`, `worktree.move`, `worktree.remove`); this store only
+ * learns what they did ({@link FilesStore.addDir},
+ * {@link FilesStore.applyMove}, {@link FilesStore.applyRemove}).
+ *
+ * A text file opens editable: its {@link FileBuffer} holds the edits, and
+ * {@link FilesStore.save} writes them with the version they were read at, so
+ * a change made on disk meanwhile is a conflict, never overwritten unseen.
  */
+
+/** Why the last save or read could not settle a buffer against the disk. */
+export type BufferConflict =
+  /** The file changed on disk under unsaved edits: what it holds now. */
+  | { kind: "changed"; text: string; version: FileVersion }
+  /** The file was deleted or moved away on disk. */
+  | { kind: "missing" }
+  /** The save was refused (a folder now, binary, too large, an IO error). */
+  | { kind: "error"; message: string };
+
+/** One open text file as the editor holds it. */
+export interface FileBuffer {
+  /** The editor's text, edits included. */
+  text: string;
+  /** The text on disk at {@link version}. */
+  saved: string;
+  /** The disk version {@link saved} was read or written at. */
+  version: FileVersion;
+  /** `text` differs from `saved`. */
+  dirty: boolean;
+  /**
+   * Moves whenever the store, not the person typing, replaces the text
+   * (a reload, a revert, a clean refresh). The editor pushes `text` into its
+   * document only then; feeding every keystroke back would loop.
+   */
+  revision: number;
+  saving: boolean;
+  conflict: BufferConflict | null;
+}
+
+/** A "Save / Don't Save / Cancel" question about unsaved buffers. */
+export interface UnsavedRequest {
+  /** Every dirty path the question is about, in this project and folder. */
+  paths: string[];
+  /** Dirty buffers in other projects or folders, saved or dropped too. */
+  elsewhere: number;
+  /** Why it is asked; the dialog words its title by it. */
+  reason: "close" | "switch" | "quit";
+  proceed: () => void;
+  cancel?: () => void;
+}
 
 /**
  * One open file.
@@ -39,6 +85,12 @@ interface FileTab {
  * folders' paths are never the same files.
  */
 const tabMemory = new Map<string, { tabs: FileTab[]; active: string | null }>();
+
+/**
+ * The buffers of each project and folder, kept across a switch, so a draft
+ * left in one is still there coming back (and still asked about on quit).
+ */
+const bufferMemory = new Map<string, Record<string, FileBuffer>>();
 const memoryKey = (slug: string, folder: number) => `${slug}#${folder}`;
 
 /** The empty folders made or emptied here, per project and folder. */
@@ -215,6 +267,10 @@ interface FilesStore {
   active: string | null;
   views: Record<string, FileView>;
   viewErrors: Record<string, string>;
+  /** The open text files' editor state, by path. */
+  buffers: Record<string, FileBuffer>;
+  /** The unsaved-changes question on screen; null when none. */
+  unsaved: UnsavedRequest | null;
   /**
    * Markdown files showing the rendered page rather than the source
    * (FE-66/D9).
@@ -264,8 +320,41 @@ interface FilesStore {
    */
   reveal: (slug: string, path: string) => void;
   pin: (path: string) => void;
+  /** Close a tab now, dropping any unsaved edits. See {@link requestClose}. */
   close: (path: string) => void;
+  /** Close tabs, asking first when one has unsaved edits. */
+  requestClose: (paths: string[]) => void;
   activate: (path: string) => void;
+  /** The editor's text changed: the person typed, pasted, undid. */
+  edit: (path: string, text: string) => void;
+  /** Write one buffer; true once it is on disk. */
+  save: (path: string) => Promise<boolean>;
+  /** Write every dirty buffer, here and remembered; true when all landed. */
+  saveAll: () => Promise<boolean>;
+  /** Drop the edits: back to the text last read from or written to disk. */
+  revert: (path: string) => void;
+  /** Take what is on disk now, dropping the edits (the conflict's Reload). */
+  reload: (path: string) => Promise<void>;
+  /** Write the edits over whatever is on disk (the conflict's Overwrite). */
+  overwrite: (path: string) => Promise<boolean>;
+  /**
+   * Run `proceed` once no unsaved edit stands in its way, asking
+   * Save / Don't Save / Cancel first when one does.
+   *
+   * @param paths The tabs it is about; all of this folder's when omitted.
+   * @param everywhere Also count remembered projects' and folders' drafts.
+   */
+  confirmDiscard: (options: {
+    reason: UnsavedRequest["reason"];
+    proceed: () => void;
+    cancel?: () => void;
+    paths?: string[];
+    everywhere?: boolean;
+  }) => void;
+  /** Answer the unsaved-changes question. */
+  resolveUnsaved: (answer: "save" | "discard" | "cancel") => Promise<void>;
+  /** Whether any buffer, here or remembered, has unsaved edits. */
+  hasUnsaved: () => boolean;
   toggleRendered: (path: string) => void;
   setQuickOpen: (open: boolean) => void;
 }
@@ -278,7 +367,74 @@ export const useFiles = create<FilesStore>((set, get) => {
       if (get().slug !== slug || get().folder !== folder) return;
       set((state) => {
         const { [path]: _, ...viewErrors } = state.viewErrors;
-        return { views: { ...state.views, [path]: view }, viewErrors };
+        const buffer = state.buffers[path];
+        // Unsaved edits are never replaced by what a read found: the file
+        // stays on screen, and the banner says what happened on disk.
+        if (buffer?.dirty) {
+          // The editor needs a text view to stay on screen: after a switch
+          // back, none was read yet, and a deleted file's would say missing.
+          const shown = state.views[path];
+          const views =
+            shown?.kind === "text"
+              ? state.views
+              : {
+                  ...state.views,
+                  [path]:
+                    view.kind === "text"
+                      ? view
+                      : {
+                          kind: "text" as const,
+                          text: buffer.saved,
+                          size: buffer.saved.length,
+                          version: buffer.version,
+                        },
+                };
+          let conflict: BufferConflict | null;
+          if (view.kind === "text")
+            conflict =
+              view.version.hash === buffer.version.hash ||
+              view.text === buffer.saved
+                ? null
+                : { kind: "changed", text: view.text, version: view.version };
+          else if (view.kind === "missing") conflict = { kind: "missing" };
+          else
+            conflict = {
+              kind: "error",
+              message: "The file on disk can no longer be edited here.",
+            };
+          // A refusal from the last save stays until the next save or read
+          // that settles it.
+          if (!conflict && buffer.conflict?.kind === "error")
+            conflict = buffer.conflict;
+          return {
+            viewErrors,
+            views,
+            buffers: { ...state.buffers, [path]: { ...buffer, conflict } },
+          };
+        }
+        const views = { ...state.views, [path]: view };
+        if (view.kind !== "text") {
+          const { [path]: _gone, ...buffers } = state.buffers;
+          return { views, viewErrors, buffers };
+        }
+        // A clean buffer follows the disk silently.
+        const next: FileBuffer =
+          buffer && buffer.saved === view.text
+            ? { ...buffer, version: view.version, conflict: null }
+            : {
+                text: view.text,
+                saved: view.text,
+                version: view.version,
+                dirty: false,
+                revision: (buffer?.revision ?? 0) + 1,
+                saving: false,
+                conflict: null,
+              };
+        return {
+          views,
+          viewErrors,
+          buffers: { ...state.buffers, [path]: next },
+        };
       });
     } catch (error) {
       if (get().slug !== slug || get().folder !== folder) return;
@@ -292,10 +448,179 @@ export const useFiles = create<FilesStore>((set, get) => {
   }
 
   function remember() {
-    const { slug, folder, tabs, active, madeDirs } = get();
+    const { slug, folder, tabs, active, madeDirs, buffers } = get();
     if (!slug) return;
     tabMemory.set(memoryKey(slug, folder), { tabs, active });
     madeMemory.set(memoryKey(slug, folder), madeDirs);
+    bufferMemory.set(memoryKey(slug, folder), buffers);
+  }
+
+  /** Change one buffer, if it is still open. */
+  function patchBuffer(path: string, patch: Partial<FileBuffer>) {
+    set((state) => {
+      const buffer = state.buffers[path];
+      if (!buffer) return {};
+      return { buffers: { ...state.buffers, [path]: { ...buffer, ...patch } } };
+    });
+  }
+
+  /** The buffer back to `text` as the disk's, pushed into the editor. */
+  function resetBuffer(path: string, text: string, version: FileVersion) {
+    set((state) => {
+      const buffer = state.buffers[path];
+      if (!buffer) return {};
+      return {
+        buffers: {
+          ...state.buffers,
+          [path]: {
+            text,
+            saved: text,
+            version,
+            dirty: false,
+            revision: buffer.revision + 1,
+            saving: false,
+            conflict: null,
+          },
+        },
+      };
+    });
+  }
+
+  /**
+   * `git status` again after a save, so the tree's and the tabs' tones
+   * follow: the primary's through the worktree store, another folder's here.
+   */
+  function refreshStatus(slug: string, folder: number) {
+    if (folder === 0) {
+      if (useWorktree.getState().slug === slug)
+        void useWorktree.getState().refresh();
+      return;
+    }
+    void desktopSurface("worktree")
+      .status(slug, folder)
+      .then((folderStatus) => {
+        if (get().slug === slug && get().folder === folder)
+          set({ folderStatus });
+      })
+      .catch(() => {
+        // The next focus reads it again; a save is no place for this error.
+      });
+  }
+
+  /**
+   * Write `path`'s buffer, expecting `expected` on disk (null overwrites).
+   *
+   * The text written is the one at the call; typing during the write keeps
+   * the buffer dirty against it.
+   */
+  async function writeBuffer(
+    path: string,
+    expected: FileVersion | null,
+  ): Promise<boolean> {
+    const { slug, folder } = get();
+    const buffer = get().buffers[path];
+    if (!slug || !buffer) return false;
+    const text = buffer.text;
+    patchBuffer(path, { saving: true });
+    try {
+      const result = await desktopSurface("worktree").write(
+        slug,
+        path,
+        text,
+        expected,
+        folder,
+      );
+      if (get().slug !== slug || get().folder !== folder) return false;
+      const now = get().buffers[path];
+      if (!now) return result.kind === "saved";
+      if (result.kind === "saved") {
+        patchBuffer(path, {
+          saved: text,
+          version: result.version,
+          dirty: now.text !== text,
+          saving: false,
+          conflict: null,
+        });
+        remember();
+        refreshStatus(slug, folder);
+        return true;
+      }
+      patchBuffer(path, {
+        saving: false,
+        conflict:
+          result.kind === "conflict"
+            ? { kind: "changed", text: result.text, version: result.version }
+            : result.kind === "missing"
+              ? { kind: "missing" }
+              : { kind: "error", message: result.message },
+      });
+      return false;
+    } catch (error) {
+      if (get().slug === slug && get().folder === folder)
+        patchBuffer(path, {
+          saving: false,
+          conflict: {
+            kind: "error",
+            message: ipcMessage(error, "The file could not be saved."),
+          },
+        });
+      return false;
+    }
+  }
+
+  /** The remembered (not on screen) projects' and folders' dirty buffers. */
+  function rememberedDirty(): { key: string; path: string }[] {
+    const { slug, folder } = get();
+    const here = slug ? memoryKey(slug, folder) : null;
+    const out: { key: string; path: string }[] = [];
+    for (const [key, buffers] of bufferMemory) {
+      if (key === here) continue;
+      for (const [path, buffer] of Object.entries(buffers))
+        if (buffer.dirty) out.push({ key, path });
+    }
+    return out;
+  }
+
+  /** Write the remembered dirty buffers; true when every one landed. */
+  async function saveRemembered(): Promise<boolean> {
+    let ok = true;
+    for (const { key, path } of rememberedDirty()) {
+      const at = key.lastIndexOf("#");
+      const slug = key.slice(0, at);
+      const folder = Number(key.slice(at + 1));
+      const buffers = bufferMemory.get(key);
+      const buffer = buffers?.[path];
+      if (!buffers || !buffer) continue;
+      const result = await desktopSurface("worktree")
+        .write(slug, path, buffer.text, buffer.version, folder)
+        .catch(() => null);
+      if (result?.kind === "saved")
+        buffers[path] = {
+          ...buffer,
+          saved: buffer.text,
+          version: result.version,
+          dirty: false,
+          conflict: null,
+        };
+      else ok = false;
+    }
+    return ok;
+  }
+
+  /** Drop the remembered dirty buffers' edits. */
+  function discardRemembered() {
+    for (const { key, path } of rememberedDirty()) {
+      const buffers = bufferMemory.get(key);
+      const buffer = buffers?.[path];
+      if (!buffers || !buffer) continue;
+      buffers[path] = {
+        ...buffer,
+        text: buffer.saved,
+        dirty: false,
+        revision: buffer.revision + 1,
+        conflict: null,
+      };
+    }
   }
 
   /**
@@ -350,6 +675,7 @@ export const useFiles = create<FilesStore>((set, get) => {
       active: kept?.active ?? null,
       views: {},
       viewErrors: {},
+      buffers: bufferMemory.get(memoryKey(slug, folder)) ?? {},
       rendered: {},
       quickOpen: false,
     });
@@ -368,6 +694,8 @@ export const useFiles = create<FilesStore>((set, get) => {
     active: null,
     views: {},
     viewErrors: {},
+    buffers: {},
+    unsaved: null,
     rendered: {},
     quickOpen: false,
 
@@ -507,6 +835,7 @@ export const useFiles = create<FilesStore>((set, get) => {
           active: state.active && movedPath(state.active, moves),
           views: moveKeys(state.views, moves),
           viewErrors: moveKeys(state.viewErrors, moves),
+          buffers: moveKeys(state.buffers, moves),
           rendered: moveKeys(state.rendered, moves),
         };
       });
@@ -546,6 +875,7 @@ export const useFiles = create<FilesStore>((set, get) => {
           active,
           views: dropKeys(state.views, gone),
           viewErrors: dropKeys(state.viewErrors, gone),
+          buffers: dropKeys(state.buffers, gone),
           rendered: dropKeys(state.rendered, gone),
         };
       });
@@ -617,15 +947,130 @@ export const useFiles = create<FilesStore>((set, get) => {
           : active;
       set((state) => {
         const { [path]: _, ...views } = state.views;
-        return { tabs: next, active: after, views };
+        const { [path]: _buffer, ...buffers } = state.buffers;
+        return { tabs: next, active: after, views, buffers };
       });
       remember();
+    },
+
+    requestClose: (paths) => {
+      if (!paths.length) return;
+      get().confirmDiscard({
+        reason: "close",
+        paths,
+        proceed: () => {
+          for (const path of paths) get().close(path);
+        },
+      });
     },
 
     activate: (path) => {
       set({ active: path });
       remember();
     },
+
+    edit: (path, text) => {
+      const buffer = get().buffers[path];
+      if (!buffer || buffer.text === text) return;
+      const dirty = text !== buffer.saved;
+      patchBuffer(path, { text, dirty });
+      // Editing keeps the file open, as typing in an editor's preview does.
+      if (dirty && get().tabs.find((tab) => tab.path === path)?.preview)
+        get().pin(path);
+      if (dirty !== buffer.dirty) remember();
+    },
+
+    save: async (path) => {
+      const buffer = get().buffers[path];
+      if (!buffer || buffer.saving) return false;
+      // A known conflict is settled with Reload or Overwrite, not by saving
+      // again into the same refusal.
+      if (buffer.conflict?.kind === "changed") return false;
+      if (!buffer.dirty && !buffer.conflict) return true;
+      return writeBuffer(path, buffer.version);
+    },
+
+    saveAll: async () => {
+      const paths = Object.entries(get().buffers)
+        .filter(([, buffer]) => buffer.dirty)
+        .map(([path]) => path);
+      const results = await Promise.all(paths.map((p) => get().save(p)));
+      const elsewhere = await saveRemembered();
+      return elsewhere && results.every(Boolean);
+    },
+
+    revert: (path) => {
+      const buffer = get().buffers[path];
+      if (!buffer) return;
+      resetBuffer(path, buffer.saved, buffer.version);
+      remember();
+    },
+
+    reload: async (path) => {
+      const { slug } = get();
+      const buffer = get().buffers[path];
+      if (!slug || !buffer) return;
+      const conflict = buffer.conflict;
+      if (conflict?.kind === "changed") {
+        resetBuffer(path, conflict.text, conflict.version);
+        remember();
+        return;
+      }
+      // Missing or refused: read the disk again, edits dropped first so the
+      // read lands on a clean buffer.
+      resetBuffer(path, buffer.saved, buffer.version);
+      await readView(slug, path);
+      remember();
+    },
+
+    overwrite: (path) => writeBuffer(path, null),
+
+    confirmDiscard: ({ reason, proceed, cancel, paths, everywhere }) => {
+      const { buffers } = get();
+      const asked = paths ?? Object.keys(buffers);
+      const dirty = asked.filter((path) => buffers[path]?.dirty);
+      const elsewhere = everywhere ? rememberedDirty().length : 0;
+      if (!dirty.length && !elsewhere) {
+        proceed();
+        return;
+      }
+      // A question already open is answered first; a second is a no.
+      if (get().unsaved) {
+        cancel?.();
+        return;
+      }
+      set({ unsaved: { paths: dirty, elsewhere, reason, proceed, cancel } });
+    },
+
+    resolveUnsaved: async (answer) => {
+      const request = get().unsaved;
+      if (!request) return;
+      if (answer === "cancel") {
+        set({ unsaved: null });
+        request.cancel?.();
+        return;
+      }
+      if (answer === "discard") {
+        for (const path of request.paths) get().revert(path);
+        if (request.elsewhere) discardRemembered();
+        set({ unsaved: null });
+        request.proceed();
+        return;
+      }
+      const saved = await Promise.all(
+        request.paths.map((path) => get().save(path)),
+      );
+      const elsewhere = request.elsewhere ? await saveRemembered() : true;
+      set({ unsaved: null });
+      // A save that hit a conflict or an error stops here: its banner says
+      // why, and the edits are still in the editor.
+      if (saved.every(Boolean) && elsewhere) request.proceed();
+      else request.cancel?.();
+    },
+
+    hasUnsaved: () =>
+      Object.values(get().buffers).some((buffer) => buffer.dirty) ||
+      rememberedDirty().length > 0,
 
     toggleRendered: (path) =>
       set((state) => ({

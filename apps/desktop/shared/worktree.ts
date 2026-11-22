@@ -248,17 +248,38 @@ export interface FileListing {
 
 /** One file as the Files screen shows it. */
 export type FileView =
-  | { kind: "text"; text: string; size: number }
+  | { kind: "text"; text: string; size: number; version: FileVersion }
   /** An image, as a `data:` URL, drawn rather than called binary. */
   | { kind: "image"; url: string; size: number }
   | { kind: "binary"; size: number }
   | { kind: "too-large"; size: number }
   | { kind: "missing" };
 
+/** The exact bytes and modification time read from disk. */
+export interface FileVersion {
+  mtimeMs: number;
+  hash: string;
+}
+
+/** Refusals are values so their reason survives Electron's IPC boundary. */
+export type FileWriteResult =
+  | { kind: "saved"; version: FileVersion }
+  | { kind: "conflict"; text: string; version: FileVersion }
+  | { kind: "missing" }
+  | {
+      kind: "error";
+      reason: "directory" | "binary" | "too-large" | "invalid-text";
+      message: string;
+    };
+
+/** The text viewer and writer share the same byte limit. */
+export const MAX_TEXT_FILE_BYTES = 2 * 1024 * 1024;
+
 export const worktreeChannels = {
   files: "worktree:files",
   dir: "worktree:dir",
   view: "worktree:view",
+  write: "worktree:write",
   reveal: "worktree:reveal",
   locate: "worktree:locate",
   openDefault: "worktree:open-default",
@@ -358,6 +379,14 @@ export interface DesktopWorktreeApi {
   dir: (slug: string, path: string, folder?: number) => Promise<FileListing>;
   /** One file of the working tree, or why it cannot be shown. */
   view: (slug: string, path: string, folder?: number) => Promise<FileView>;
+  /** Atomically save UTF-8 text; null deliberately overwrites or creates. */
+  write: (
+    slug: string,
+    path: string,
+    text: string,
+    expected: FileVersion | null,
+    folder?: number,
+  ) => Promise<FileWriteResult>;
   /** Show one file of the working tree in Finder / Explorer. */
   reveal: (slug: string, path: string, folder?: number) => Promise<void>;
   /** Create one folder at a relative path; its parent must exist. */

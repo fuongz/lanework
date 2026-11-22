@@ -271,9 +271,12 @@ export function PatchView({
       items={items}
       options={options}
       renderCustomHeader={renderCustomHeader}
-      renderAnnotation={(_annotation, item) =>
+      // NOTE: `@pierre/diffs` 1.6 passes the file or diff being drawn second
+      // and the item third. The item is the one this view built, so its name
+      // is the path the preview was asked for.
+      renderAnnotation={(annotation, _fileOrDiff, item) =>
         item.type === "file"
-          ? preview?.render(item.file.name, _annotation.metadata.previousPath)
+          ? preview?.render(item.file.name, annotation.metadata.previousPath)
           : null
       }
       // NOTE: `overflow-y-auto` HERE, on CodeView's own root. It virtualizes

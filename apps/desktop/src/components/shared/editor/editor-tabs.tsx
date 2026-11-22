@@ -1,8 +1,15 @@
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useRef } from "react";
+import { type ReactElement, useEffect, useRef } from "react";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import { Button } from "#/components/ui/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "#/components/ui/context-menu";
 import { cn } from "#/lib/utils";
 
 /** One open file's tab. */
@@ -36,7 +43,10 @@ export function EditorTabs({
   onActivate,
   onClose,
   onPin,
+  onCloseOthers,
+  onCloseAll,
   label = "Open files",
+  surface = "page",
 }: {
   tabs: EditorTab[];
   active: string | null;
@@ -44,8 +54,15 @@ export function EditorTabs({
   onClose: (id: string) => void;
   /** A double click: keep a preview tab. */
   onPin?: (id: string) => void;
+  /** A tab's context menu: Close Others. The menu shows only with it. */
+  onCloseOthers?: (id: string) => void;
+  /** A tab's context menu: Close All. */
+  onCloseAll?: () => void;
   label?: string;
+  /** "editor": the Files editor pane's own ground (`--editor`), not the page's. */
+  surface?: "page" | "editor";
 }) {
+  const editor = surface === "editor";
   const strip = useRef<HTMLDivElement>(null);
 
   // The active tab in view: there is no scrollbar to go and find it with.
@@ -63,21 +80,27 @@ export function EditorTabs({
       ref={strip}
       role="tablist"
       aria-label={label}
-      className="no-scrollbar border-border bg-sidebar flex h-8 shrink-0 items-stretch overflow-x-auto border-b"
+      className={cn(
+        "no-scrollbar flex h-8 shrink-0 items-stretch overflow-x-auto border-b",
+        editor
+          ? "border-editor-rule bg-editor-strip"
+          : "border-border bg-sidebar",
+      )}
     >
       {tabs.map((tab) => {
         const on = tab.id === active;
         // The ×: always on the active tab, on hover elsewhere. A dirty tab
         // shows its dot instead until hovered.
         const hideClose = !!tab.dirty || !on;
-        return (
+        const body: ReactElement = (
           <div
             key={tab.id}
             data-tab-id={tab.id}
             className={cn(
-              "group border-border flex max-w-56 shrink-0 items-center gap-1.5 border-r pr-1 pl-2.5 text-xs",
+              "group flex max-w-56 shrink-0 items-center gap-1.5 border-r pr-1 pl-2.5 text-xs",
+              editor ? "border-editor-rule" : "border-border",
               on
-                ? "bg-background text-foreground"
+                ? cn(editor ? "bg-editor" : "bg-background", "text-foreground")
                 : "text-muted-foreground hover:bg-muted/50",
             )}
             title={tab.path}
@@ -133,6 +156,31 @@ export function EditorTabs({
               />
             </Button>
           </div>
+        );
+        if (!onCloseOthers) return body;
+        return (
+          <ContextMenu key={tab.id}>
+            <ContextMenuTrigger render={body} />
+            <ContextMenuContent>
+              <ContextMenuItem onClick={() => onClose(tab.id)}>
+                Close
+              </ContextMenuItem>
+              <ContextMenuItem
+                disabled={tabs.length < 2}
+                onClick={() => onCloseOthers(tab.id)}
+              >
+                Close Others
+              </ContextMenuItem>
+              {onCloseAll && (
+                <>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem onClick={onCloseAll}>
+                    Close All
+                  </ContextMenuItem>
+                </>
+              )}
+            </ContextMenuContent>
+          </ContextMenu>
         );
       })}
     </div>
