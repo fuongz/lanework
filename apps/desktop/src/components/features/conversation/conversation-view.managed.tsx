@@ -1,7 +1,6 @@
-import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import type { TeamLead } from "#/../shared/orchestration";
-import { leadIcon } from "#/lib/orchestration-prompt";
+import { ConductorMark } from "#/components/shared/conductors/conductor-mark";
 
 /**
  * Where the composer would be in a session a conductor started and did not
@@ -27,11 +26,10 @@ export function ManagedNotice({
           params={{ slug, lead: conductor.id }}
           className="text-foreground inline-flex items-baseline gap-1 underline-offset-2 hover:underline"
         >
-          <HugeiconsIcon
-            icon={leadIcon(conductor.icon)}
+          <ConductorMark
+            lead={conductor}
             className="size-3.5 shrink-0 self-center"
             strokeWidth={1.5}
-            aria-hidden="true"
           />
           {conductor.name}
         </Link>

@@ -14,6 +14,9 @@
 // - `guard`: whether a process is a lead whose run is active or paused
 //   (FE-136/D1). Its edit tools are off: Claude starts without them, Codex
 //   runs read-only so a write asks. Asked again when each turn starts.
+// - `worker`: whether a process is a run worker's (FE-165). Its permission
+//   requests are orchestration's to answer, after its write-scope guard, so
+//   the engine never answers one from the project's rules itself.
 //
 // A conductor's sessions add their own `env` (`setSessionsEnv`): the token
 // any conversation but a worker's starts with, checked on each call.
@@ -59,6 +62,7 @@ export interface EngineTap {
   write?: (write: EngineWrite) => void;
   result?: (result: EngineResult) => void;
   guard?: (target: EngineTarget) => boolean;
+  worker?: (target: EngineTarget) => boolean;
 }
 
 let tap: EngineTap = {};
@@ -116,6 +120,114 @@ export function leadGuarded(target: EngineTarget): boolean {
     return tap.guard?.(target) === true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Whether `target` runs a run worker (FE-165): orchestration answers its
+ * permission requests. True when the answer throws: an engine then leaves
+ * the request alone rather than answer what a scope guard might refuse.
+ */
+export function runWorker(target: EngineTarget): boolean {
+  try {
+    return tap.worker?.(target) === true;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * What one process may reach of the user's MCP servers (FE-166), fixed when
+ * it starts.
+ */
+export interface ConnectorPlan {
+  /** Server names to turn off for this process. */
+  disabled: string[];
+  /**
+   * Claude only: start with only the servers in `--mcp-config`
+   * (`--strict-mcp-config`), the way a run worker does.
+   */
+  strict: boolean;
+}
+
+/** Where a process's disabled connectors come from; main installs it. */
+export interface ConnectorSource {
+  /**
+   * The names the conductor behind `target` turned off; [] for a process
+   * that is no conductor's. Called at each process start, so it must do no
+   * work for a conversation no conductor owns.
+   */
+  disabled: (
+    target: EngineTarget,
+    agent: "claude" | "codex",
+    conductor: boolean,
+  ) => string[] | Promise<string[]>;
+  /**
+   * The user's non-Lanework servers of `project` as last cached, for a
+   * worker's process; never starts a scan of its own account.
+   */
+  all: (project: string, agent: "claude" | "codex") => Promise<string[]>;
+}
+
+let connectorSource: ConnectorSource | undefined;
+
+/** Install the connector source; undefined removes it. */
+export function setConnectorSource(next: ConnectorSource | undefined): void {
+  connectorSource = next;
+}
+
+/**
+ * The connectors `target`'s process starts with, or null for all of them.
+ *
+ * - A run worker gets only Lanework's servers: Claude with
+ *   `--strict-mcp-config` when `strictOk` (the args then carry the local
+ *   board and the kit themselves), else every cached non-Lanework server
+ *   switched off; Codex the same switch-off. (OpenCode has no per-process
+ *   switch, see `connectors/flags.ts`.)
+ * - Any other process gets what its conductor disabled: `inherited` when
+ *   the caller already knows it (a session a conductor starts), else the
+ *   source's answer.
+ *
+ * NOTE: Built from stored names only. No scan, no timer, no watcher; a
+ * process nothing is disabled for costs a few lookups.
+ */
+export async function connectorPlan(
+  target: EngineTarget,
+  agent: "claude" | "codex",
+  options: {
+    conductor: boolean;
+    inherited?: readonly string[];
+    strictOk?: boolean;
+  },
+): Promise<ConnectorPlan | null> {
+  let worker = false;
+  try {
+    worker = tap.worker?.(target) === true;
+  } catch {
+    worker = false;
+  }
+  try {
+    if (worker) {
+      if (agent === "claude" && options.strictOk)
+        return { disabled: [], strict: true };
+      const names = (await connectorSource?.all(target.project, agent)) ?? [];
+      return names.length ? { disabled: names, strict: false } : null;
+    }
+    let names = options.inherited?.length
+      ? [...options.inherited]
+      : ((await connectorSource?.disabled(target, agent, options.conductor)) ??
+        []);
+    // Codex refuses to start when told to switch off a server its config no
+    // longer has (see `codexMcpArgs`), so a stale stored name is dropped.
+    // Only reached when something is disabled; `all` is memoized per folder.
+    if (agent === "codex" && names.length && connectorSource) {
+      const known = new Set(await connectorSource.all(target.project, agent));
+      names = names.filter((name) => known.has(name));
+    }
+    return names.length ? { disabled: names, strict: false } : null;
+  } catch {
+    // A list that cannot be read starts the process as it always did.
+    return null;
   }
 }
 

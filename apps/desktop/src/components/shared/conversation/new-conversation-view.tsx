@@ -1,4 +1,3 @@
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -10,6 +9,7 @@ import {
 } from "#/../shared/conversation";
 import { canLead, type TeamLead } from "#/../shared/orchestration";
 import type { BoardCard } from "#/../shared/projects";
+import { ConductorMark } from "#/components/shared/conductors/conductor-mark";
 import { setChatAgent } from "#/components/shared/conversation/chat-agent";
 import {
   Composer,
@@ -26,7 +26,6 @@ import { conductorConversation, orderConductors } from "#/lib/conductors";
 import { ipcMessage } from "#/lib/ipc-error";
 import {
   conductorTurn,
-  leadIcon,
   visibleText as orchestrationText,
   planningPrompt,
   proposalId,
@@ -34,7 +33,11 @@ import {
 } from "#/lib/orchestration-prompt";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { useBoard } from "#/stores/board";
-import { conductorMemory, withLiveContext } from "#/stores/conductor-context";
+import {
+  conductorConnectors,
+  conductorMemory,
+  withLiveContext,
+} from "#/stores/conductor-context";
 import { handSentMessage } from "#/stores/conversation-sends";
 import { useNewChats } from "#/stores/new-chats";
 import { useSessionTabs } from "#/stores/session-tabs";
@@ -153,7 +156,8 @@ export function NewConversationPage({
             withLiveContext(project, conductor),
             conductorMemory(project, conductor),
             readProjectRoots(project),
-          ]).then(([live, memory, roots]) =>
+            conductorConnectors(project, conductor, agentOfModel(chosen.model)),
+          ]).then(([live, memory, roots, connectors]) =>
             conductorTurn(
               text,
               live,
@@ -162,6 +166,7 @@ export function NewConversationPage({
               null,
               memory,
               roots.others,
+              connectors,
             ),
           )
         : text;
@@ -300,11 +305,10 @@ export function NewConversationPage({
           title bar (FE-144); a conductor's keeps its own name here. */}
       {conductor && (
         <WindowTitlebar className="gap-2.5">
-          <HugeiconsIcon
-            icon={leadIcon(conductor.icon)}
+          <ConductorMark
+            lead={conductor}
             className="text-muted-foreground size-4 shrink-0"
             strokeWidth={1.5}
-            aria-hidden="true"
           />
           <h1 className={WINDOW_TITLE}>{conductor.name}</h1>
         </WindowTitlebar>

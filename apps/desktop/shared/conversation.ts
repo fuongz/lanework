@@ -1611,6 +1611,12 @@ export type PowerMinutes = (typeof POWER_MINUTES)[number];
 export interface PowerSettings {
   enabled: boolean;
   minutes: PowerMinutes;
+  /**
+   * How many idle agents stay warm at once; past it the least recently used
+   * one's process ends (the next message resumes it). Applies whether or not
+   * `enabled` is on. Running, waiting, kept and conductor chats never count.
+   */
+  warmCap: number;
   /** How the app runs `lwk` for its searches (FE-158). */
   lwkMode: LwkMode;
 }
@@ -1627,10 +1633,14 @@ export interface PowerSettings {
 export const LWK_MODES = ["always", "on-demand", "per-call"] as const;
 export type LwkMode = (typeof LWK_MODES)[number];
 
+/** The most idle agents a user may keep warm at once. */
+export const POWER_WARM_CAP_MAX = 10;
+
 /** On, after 30 minutes (FE-126/D3); lwk always running (FE-161). */
 const DEFAULT_POWER_SETTINGS: PowerSettings = {
   enabled: true,
   minutes: 30,
+  warmCap: 3,
   lwkMode: "always",
 };
 
@@ -1648,6 +1658,12 @@ export function checkPowerSettings(value: unknown): PowerSettings {
     minutes: POWER_MINUTES.includes(saved.minutes as PowerMinutes)
       ? (saved.minutes as PowerMinutes)
       : DEFAULT_POWER_SETTINGS.minutes,
+    warmCap:
+      Number.isInteger(saved.warmCap) &&
+      (saved.warmCap as number) >= 1 &&
+      (saved.warmCap as number) <= POWER_WARM_CAP_MAX
+        ? (saved.warmCap as number)
+        : DEFAULT_POWER_SETTINGS.warmCap,
     lwkMode: LWK_MODES.includes(saved.lwkMode as LwkMode)
       ? (saved.lwkMode as LwkMode)
       : DEFAULT_POWER_SETTINGS.lwkMode,

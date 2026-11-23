@@ -88,6 +88,8 @@ import {
 import { redact } from "../../hook/redact";
 import type { Outgoing } from "../conversation/queue";
 import { JUDGE_TIMEOUT_MS } from "../jev/judge";
+import { recordAutoAllow, subjectOf, verdictFor } from "../permissions/gate";
+import type { PermissionSubject } from "../permissions/matcher";
 import { type Watch, watchPath } from "../watch";
 import type { EngineResult, EngineTarget, EngineWrite } from "./engine-tap";
 import {
@@ -913,6 +915,19 @@ export class Orchestrator {
   /** Whether `folder` is a running worker's own worktree. */
   isWorkerFolder(folder: string): boolean {
     return this.workerAt(folder) !== null;
+  }
+
+  /**
+   * Whether `target` is any worker's process, running or not (FE-165): its
+   * permission requests are this runtime's to answer, never the engine's.
+   */
+  isWorkerTarget(target: EngineTarget): boolean {
+    if (this.workerAt(target.folder)) return true;
+    const conversation = target.conversation ?? target.named?.() ?? null;
+    return (
+      conversation !== null &&
+      this.workerFolder(target.project, conversation) !== null
+    );
   }
 
   /**
@@ -1952,6 +1967,26 @@ export class Orchestrator {
       });
       return;
     }
+    // FE-165: the project's rules apply to workers too, but never over the
+    // write-scope guard: a strict Ask (an Ask rule, a write out of the
+    // checkout) goes to the lead, and neither the guard nor Jev allows it.
+    const subject = subjectOf(request);
+    const target =
+      subject && task.conversation && own.worktree
+        ? {
+            project: record.run.project,
+            conversation: task.conversation,
+            agent: task.agent ?? "claude",
+            folder: own.worktree,
+            roots: own.scratch ? [own.scratch] : [],
+          }
+        : null;
+    const rules = subject && target ? await verdictFor(target, subject) : null;
+    const strict = rules?.verdict.effect === "ask" && rules.verdict.strict;
+    if (task.status !== "running") {
+      deny("The orchestration run stopped this worker.");
+      return;
+    }
     if (EDIT_TOOLS.has(request.tool) && own.worktree) {
       let path: string | null = null;
       try {
@@ -1972,7 +2007,16 @@ export class Orchestrator {
           task.files,
           path,
         );
-        if (check.ok) {
+        if (!check.ok) {
+          deny(`${check.path} is outside your write scope.`);
+          await this.block(
+            record,
+            task,
+            `Tried to write outside its scope: ${check.path}`,
+          );
+          return;
+        }
+        if (!strict) {
           try {
             this.answerWorker(record, task, request.id, { behavior: "allow" });
           } catch {
@@ -1980,18 +2024,31 @@ export class Orchestrator {
           }
           return;
         }
-        deny(`${check.path} is outside your write scope.`);
-        await this.block(
-          record,
-          task,
-          `Tried to write outside its scope: ${check.path}`,
-        );
+      }
+    }
+    if (
+      rules?.verdict.effect === "allow" &&
+      subject &&
+      target &&
+      (await this.scopeAllows(own, task, subject))
+    ) {
+      if (task.status !== "running") {
+        deny("The orchestration run stopped this worker.");
         return;
       }
+      try {
+        this.answerWorker(record, task, request.id, { behavior: "allow" });
+        recordAutoAllow(target, subject, rules.verdict.rule, rules.conductor);
+      } catch {
+        // Answered already.
+      }
+      return;
     }
     // Jev may allow a read only inside the worker's own folders (FE-89/D6).
     const field = READ_ONLY.get(request.tool);
+    // NOTE: Never for a strict Ask: Jev may then only deny or ask the lead.
     const readOnly =
+      !strict &&
       field !== undefined &&
       !!own.worktree &&
       (field === null ||
@@ -2042,7 +2099,7 @@ export class Orchestrator {
     }
     if (
       answer?.decided &&
-      (answer.choice === "allow" || answer.choice === "deny")
+      ((answer.choice === "allow" && readOnly) || answer.choice === "deny")
     ) {
       try {
         this.answerWorker(
@@ -2063,6 +2120,26 @@ export class Orchestrator {
     }
     waiting.logId = answer?.logId ?? null;
     this.queueInput(record, task, own, waiting);
+  }
+
+  /**
+   * Whether a write the rules allow stays inside the worker's write scope
+   * (FE-165): every path of a file write must pass {@link checkWrite}. A
+   * read or a command has no scope to check.
+   */
+  private async scopeAllows(
+    own: TaskPrivate,
+    task: OrchestrationTask,
+    subject: PermissionSubject,
+  ): Promise<boolean> {
+    if (subject.kind !== "file" || subject.tool === "Read") return true;
+    const worktree = own.worktree;
+    if (!worktree) return false;
+    for (const path of subject.paths) {
+      const check = await checkWrite(worktree, own.scratch, task.files, path);
+      if (!check.ok) return false;
+    }
+    return true;
   }
 
   private queueInput(

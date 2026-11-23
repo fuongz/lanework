@@ -1,6 +1,6 @@
 import { Flowchart01Icon, TaskDaily01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import {
   type ConductorLedgerEntry,
   type ConductorRunEntry,
@@ -53,14 +53,21 @@ const OUTCOME_LABELS: Record<RunTaskOutcome, string> = {
   unreviewed: "Not reviewed",
 };
 
-/** The Memory page: ledger and runs above, notes below. */
+/**
+ * The Memory page: the files it always reads, then the ledger and runs, then
+ * its notes. A conductor not saved yet has only the files: the rest is kept
+ * per saved conductor and project (FE-128).
+ */
 export function ConductorMemory({
   project,
   conductor,
+  files,
 }: {
   project: string;
-  /** The saved conductor, by id. */
-  conductor: string;
+  /** The saved conductor, by id; null for a new or copied one. */
+  conductor: string | null;
+  /** "Files it always reads", edited with the draft. */
+  files: ReactNode;
 }) {
   // Undefined while it is read; null when it could not be.
   const [memory, setMemory] = useState<Memory | null | undefined>(undefined);
@@ -70,6 +77,7 @@ export function ConductorMemory({
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
+    if (!conductor) return;
     const surface = window.desktop?.leads;
     if (!surface) {
       setMemory(null);
@@ -96,7 +104,7 @@ export function ConductorMemory({
 
   const save = async () => {
     const surface = window.desktop?.leads;
-    if (!surface) return;
+    if (!surface || !conductor) return;
     setBusy(true);
     setError(null);
     try {
@@ -122,147 +130,164 @@ export function ConductorMemory({
       <div className="flex items-baseline gap-2 border-b py-3 pr-12 pl-5">
         <h2 className="text-sm font-medium">Memory</h2>
         <span className="text-muted-foreground truncate text-xs">
-          What it keeps of this project between conversations.
+          What it reads and keeps of this project between conversations.
         </span>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 pt-4 pb-5">
-        <section
-          aria-labelledby="memory-ledger"
-          className="flex flex-col gap-2"
-        >
-          <h3 id="memory-ledger" className="text-[13px] font-medium">
-            Sessions it started
-          </h3>
-          {memory === undefined ? (
-            <ListSkeleton
-              label="Reading its sessions"
-              rows={3}
-              lines={2}
-              className="px-0"
-            />
-          ) : memory === null ? null : memory.ledger.length === 0 ? (
-            <Empty className="border p-5">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <HugeiconsIcon
-                    icon={TaskDaily01Icon}
-                    strokeWidth={1.6}
-                    aria-hidden="true"
-                  />
-                </EmptyMedia>
-                <EmptyTitle>No sessions yet</EmptyTitle>
-                <EmptyDescription>
-                  Each session it starts in this project is listed here, with
-                  how it ended, and stays when the conversation is reset.
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : (
-            <ul className="divide-border flex flex-col divide-y rounded-lg border">
-              {memory.ledger.map((entry) => (
-                <LedgerRow key={entry.sessionId} entry={entry} now={now} />
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section aria-labelledby="memory-runs" className="flex flex-col gap-2">
-          <h3 id="memory-runs" className="text-[13px] font-medium">
-            Runs it led
-          </h3>
-          {memory === undefined ? (
-            <ListSkeleton
-              label="Reading its runs"
-              rows={2}
-              lines={2}
-              className="px-0"
-            />
-          ) : memory === null ? null : memory.runs.length === 0 ? (
-            <Empty className="border p-5">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <HugeiconsIcon
-                    icon={Flowchart01Icon}
-                    strokeWidth={1.6}
-                    aria-hidden="true"
-                  />
-                </EmptyMedia>
-                <EmptyTitle>No runs yet</EmptyTitle>
-                <EmptyDescription>
-                  Each run it leads in this project is listed here once it is
-                  finished or stopped, with how each worker ended.
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : (
-            <ul className="divide-border flex flex-col divide-y rounded-lg border">
-              {memory.runs.map((entry) => (
-                <RunRow key={entry.runId} entry={entry} now={now} />
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section aria-labelledby="memory-notes" className="flex flex-col gap-2">
-          <div className="flex items-baseline gap-2">
-            <h3 id="memory-notes" className="text-[13px] font-medium">
-              Notes
-            </h3>
-            <span className="text-muted-foreground truncate text-xs">
-              Decisions, conventions, open threads. It rewrites them as it
-              works.
-            </span>
-          </div>
-          {memory === undefined ? (
-            <TextSkeleton
-              label="Reading its notes"
-              className="block h-72 w-full rounded-md"
-            />
-          ) : (
-            <Textarea
-              aria-label="Conductor notes"
-              aria-invalid={over || undefined}
-              value={notes}
-              disabled={memory === null || busy}
-              placeholder="Nothing yet. It writes here after a decision or a finished piece of work."
-              onChange={(event) => {
-                setNotes(event.target.value);
-                setSaved(false);
-              }}
-              className="field-sizing-fixed min-h-72 resize-y font-mono"
-            />
-          )}
-          <div className="flex items-center gap-3">
-            <p
-              role={error ? "alert" : undefined}
-              className={cn(
-                "mr-auto min-w-0 text-xs leading-snug",
-                error ? "text-destructive" : "text-muted-foreground",
+        {files}
+        {!conductor ? (
+          <p className="text-muted-foreground text-xs leading-relaxed">
+            The sessions it starts, the runs it leads and its notes show here
+            once it is saved and at work in this project.
+          </p>
+        ) : (
+          <>
+            <section
+              aria-labelledby="memory-ledger"
+              className="flex flex-col gap-2"
+            >
+              <h3 id="memory-ledger" className="text-[13px] font-medium">
+                Sessions it started
+              </h3>
+              {memory === undefined ? (
+                <ListSkeleton
+                  label="Reading its sessions"
+                  rows={3}
+                  lines={2}
+                  className="px-0"
+                />
+              ) : memory === null ? null : memory.ledger.length === 0 ? (
+                <Empty className="border p-5">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <HugeiconsIcon
+                        icon={TaskDaily01Icon}
+                        strokeWidth={1.6}
+                        aria-hidden="true"
+                      />
+                    </EmptyMedia>
+                    <EmptyTitle>No sessions yet</EmptyTitle>
+                    <EmptyDescription>
+                      Each session it starts in this project is listed here,
+                      with how it ended, and stays when the conversation is
+                      reset.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              ) : (
+                <ul className="divide-border flex flex-col divide-y rounded-lg border">
+                  {memory.ledger.map((entry) => (
+                    <LedgerRow key={entry.sessionId} entry={entry} now={now} />
+                  ))}
+                </ul>
               )}
+            </section>
+
+            <section
+              aria-labelledby="memory-runs"
+              className="flex flex-col gap-2"
             >
-              {error ??
-                (saved && !dirty
-                  ? "Saved. It reads them from its next message."
-                  : "Saving replaces its notes for this project.")}
-            </p>
-            <span
-              className={cn(
-                "shrink-0 text-xs tabular-nums",
-                over ? "text-destructive" : "text-muted-foreground",
+              <h3 id="memory-runs" className="text-[13px] font-medium">
+                Runs it led
+              </h3>
+              {memory === undefined ? (
+                <ListSkeleton
+                  label="Reading its runs"
+                  rows={2}
+                  lines={2}
+                  className="px-0"
+                />
+              ) : memory === null ? null : memory.runs.length === 0 ? (
+                <Empty className="border p-5">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <HugeiconsIcon
+                        icon={Flowchart01Icon}
+                        strokeWidth={1.6}
+                        aria-hidden="true"
+                      />
+                    </EmptyMedia>
+                    <EmptyTitle>No runs yet</EmptyTitle>
+                    <EmptyDescription>
+                      Each run it leads in this project is listed here once it
+                      is finished or stopped, with how each worker ended.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              ) : (
+                <ul className="divide-border flex flex-col divide-y rounded-lg border">
+                  {memory.runs.map((entry) => (
+                    <RunRow key={entry.runId} entry={entry} now={now} />
+                  ))}
+                </ul>
               )}
+            </section>
+
+            <section
+              aria-labelledby="memory-notes"
+              className="flex flex-col gap-2"
             >
-              {notes.length.toLocaleString()} /{" "}
-              {MEMORY_NOTES_MAX.toLocaleString()}
-            </span>
-            <Button
-              size="sm"
-              disabled={!memory || !dirty || over || busy}
-              onClick={() => void save()}
-            >
-              {busy ? "Saving…" : "Save notes"}
-            </Button>
-          </div>
-        </section>
+              <div className="flex items-baseline gap-2">
+                <h3 id="memory-notes" className="text-[13px] font-medium">
+                  Notes
+                </h3>
+                <span className="text-muted-foreground truncate text-xs">
+                  Decisions, conventions, open threads. It rewrites them as it
+                  works.
+                </span>
+              </div>
+              {memory === undefined ? (
+                <TextSkeleton
+                  label="Reading its notes"
+                  className="block h-72 w-full rounded-md"
+                />
+              ) : (
+                <Textarea
+                  aria-label="Conductor notes"
+                  aria-invalid={over || undefined}
+                  value={notes}
+                  disabled={memory === null || busy}
+                  placeholder="Nothing yet. It writes here after a decision or a finished piece of work."
+                  onChange={(event) => {
+                    setNotes(event.target.value);
+                    setSaved(false);
+                  }}
+                  className="field-sizing-fixed min-h-72 resize-y font-mono"
+                />
+              )}
+              <div className="flex items-center gap-3">
+                <p
+                  role={error ? "alert" : undefined}
+                  className={cn(
+                    "mr-auto min-w-0 text-xs leading-snug",
+                    error ? "text-destructive" : "text-muted-foreground",
+                  )}
+                >
+                  {error ??
+                    (saved && !dirty
+                      ? "Saved. It reads them from its next message."
+                      : "Saving replaces its notes for this project.")}
+                </p>
+                <span
+                  className={cn(
+                    "shrink-0 text-xs tabular-nums",
+                    over ? "text-destructive" : "text-muted-foreground",
+                  )}
+                >
+                  {notes.length.toLocaleString()} /{" "}
+                  {MEMORY_NOTES_MAX.toLocaleString()}
+                </span>
+                <Button
+                  size="sm"
+                  disabled={!memory || !dirty || over || busy}
+                  onClick={() => void save()}
+                >
+                  {busy ? "Saving…" : "Save notes"}
+                </Button>
+              </div>
+            </section>
+          </>
+        )}
       </div>
     </div>
   );

@@ -28,6 +28,13 @@ export interface Outgoing {
   settings: ComposerSettings;
   /** Why it did not go, while it waits. */
   error?: string | null;
+  /**
+   * The connectors the conductor that started this session turned off
+   * (FE-166), when the process it starts must hold them before the session
+   * is known to main (a new Codex conversation). Read only when a process
+   * starts; never queued, never shown.
+   */
+  connectors?: readonly string[];
 }
 
 /** The extensions of an attached path the queue shows as an image. */

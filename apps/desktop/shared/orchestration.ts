@@ -35,6 +35,7 @@ import {
   PERMISSIONS,
   type Permission,
 } from "./conversation";
+import { type ProjectAvatar, parseProjectAvatar } from "./project-avatar";
 
 // ─── Limits ─────────────────────────────────────────────────────────────────
 
@@ -1328,6 +1329,10 @@ export const LEAD_CHECK_MAX = 300;
 export const LEAD_CONTEXT_FILES_MAX = 20;
 /** The longest one context file's path may be. */
 export const LEAD_CONTEXT_PATH_MAX = 1024;
+/** The most connector names one conductor may disable (FE-166). */
+export const LEAD_CONNECTORS_MAX = 100;
+/** The longest one connector name may be. */
+export const LEAD_CONNECTOR_NAME_MAX = 100;
 
 /** Where a team lead comes from. */
 export const LEAD_SOURCES = ["personal", "repo"] as const;
@@ -1365,6 +1370,11 @@ export interface TeamLead {
   id: string;
   name: string;
   icon: LeadIcon;
+  /**
+   * The avatar chosen for it, as a project's (FE-162 shape): an icon, emoji
+   * or letter on a palette colour. Absent wears {@link TeamLead.icon}.
+   */
+  avatar?: ProjectAvatar;
   /** The lead's own CLI (Claude or Codex, never OpenCode: FE-105), model and effort. */
   lead: TierModel;
   /** Told to the lead before the user's request; may be empty. */
@@ -1395,6 +1405,12 @@ export interface TeamLead {
    * composer's default. Always null for a `repo` lead, as `jev` is.
    */
   permission: Permission | null;
+  /**
+   * Connectors (MCP servers) this conductor does not get (FE-166). A denylist:
+   * by default a conductor inherits every connector. Absent means none are
+   * disabled. Allowed on a `repo` conductor too.
+   */
+  connectors?: { disabled: string[] };
   source: LeadSource;
 }
 
@@ -1572,6 +1588,22 @@ function leadWorkers(value: unknown): TeamLeadWorker[] {
   return workers;
 }
 
+function leadConnectors(value: unknown): { disabled: string[] } | undefined {
+  if (value == null) return undefined;
+  const input = strictObject(value, ["disabled"], "connectors");
+  const list = input.disabled ?? [];
+  if (!Array.isArray(list) || list.length > LEAD_CONNECTORS_MAX)
+    fail(`connectors.disabled must list at most ${LEAD_CONNECTORS_MAX} names`);
+  const disabled = [
+    ...new Set(
+      list.map((entry, index) =>
+        oneLine(entry, `Connector name ${index + 1}`, LEAD_CONNECTOR_NAME_MAX),
+      ),
+    ),
+  ];
+  return disabled.length ? { disabled } : undefined;
+}
+
 function leadJev(
   value: unknown,
 ): Partial<Record<JudgePoint, JudgePointConfig>> | null {
@@ -1599,6 +1631,7 @@ export function parseTeamLead(value: unknown, source: LeadSource): TeamLead {
       "id",
       "name",
       "icon",
+      "avatar",
       "lead",
       "instructions",
       "contextFiles",
@@ -1607,6 +1640,7 @@ export function parseTeamLead(value: unknown, source: LeadSource): TeamLead {
       "checks",
       "jev",
       "permission",
+      "connectors",
       "source",
     ],
     "The team lead",
@@ -1647,10 +1681,14 @@ export function parseTeamLead(value: unknown, source: LeadSource): TeamLead {
             : input.id,
         )}`
       : leadId(input.id);
+  const connectors = leadConnectors(input.connectors);
+  const avatar = input.avatar == null ? null : parseProjectAvatar(input.avatar);
+  if (input.avatar != null && !avatar) fail("avatar is not a valid avatar");
   return {
     id,
     name: oneLine(input.name, "name", LEAD_NAME_MAX),
     icon: oneOf(input.icon, LEAD_ICONS, "icon"),
+    ...(avatar ? { avatar } : {}),
     lead: tierModel(input.lead, "lead", true),
     instructions: input.instructions.trim(),
     contextFiles: leadContextFiles(input.contextFiles),
@@ -1668,6 +1706,7 @@ export function parseTeamLead(value: unknown, source: LeadSource): TeamLead {
       input.permission == null
         ? null
         : oneOf(input.permission, PERMISSIONS, "permission"),
+    ...(connectors ? { connectors } : {}),
     source: oneOf(source, LEAD_SOURCES, "source"),
   };
 }

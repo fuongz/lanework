@@ -1,4 +1,3 @@
-import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import type { TeamLead } from "#/../shared/orchestration";
 import type { BoardCard, BoardView } from "#/../shared/projects";
@@ -7,8 +6,8 @@ import {
   PriorityIcon,
   StatusIcon,
 } from "#/components/shared/board/glyphs";
+import { ConductorMark } from "#/components/shared/conductors/conductor-mark";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
-import { leadIcon } from "#/lib/orchestration-prompt";
 import { cn } from "#/lib/utils";
 
 /** Cards offered before "See board" (FE-98/D2a). */
@@ -96,11 +95,10 @@ export function ConductorPicks({
                   "border-tone-teal/50 bg-tone-teal/[0.06] text-tone-teal hover:text-tone-teal hover:bg-tone-teal/[0.08]",
               )}
             >
-              <HugeiconsIcon
-                icon={leadIcon(lead.icon)}
+              <ConductorMark
+                lead={lead}
                 className="size-3.5 shrink-0"
                 strokeWidth={1.5}
-                aria-hidden="true"
               />
               {lead.name}
             </button>

@@ -28,6 +28,11 @@ export interface ConversationEngine {
   readonly conversation: string | null;
   /** A turn runs (or is starting). */
   busy: boolean;
+  /**
+   * Its process runs as a conductor's own conversation: never ended to keep
+   * the warm cap (Settings → Power saver), only by the idle time.
+   */
+  readonly conductor?: boolean;
   /** Being stopped: an exit or an end now is not an error. */
   stopping: boolean;
   /** What went wrong last, shown until the next turn starts. */

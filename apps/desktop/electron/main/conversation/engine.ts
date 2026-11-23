@@ -45,7 +45,13 @@ import {
 } from "../../../shared/conversation";
 import { isAgentSessionId } from "../../../shared/terminal";
 import {
+  claudeDisallowedTools,
+  withDisallowedTools,
+} from "../connectors/flags";
+import {
   agentEnv,
+  type ConnectorPlan,
+  connectorPlan,
   type EngineTarget,
   engineTap,
   leadGuarded,
@@ -53,6 +59,8 @@ import {
   WRITE_TOOLS,
   writtenPaths,
 } from "../orchestration/engine-tap";
+import { autoAllow, engineMayAnswer, noteSubject } from "../permissions/gate";
+import { claudeSubject } from "../permissions/matcher";
 import type { ClaudeCli } from "./claude-cli";
 import { claudeJsonFor, isClaudeTrusted } from "./claude-trust";
 import { CodexEngine } from "./codex-engine";
@@ -114,6 +122,11 @@ interface EngineDeps {
    * never: Settings → Power saver (FE-126). Absent, 5 minutes.
    */
   idleLimit?: () => number | null;
+  /**
+   * How many idle engines may stay warm at once: Settings → Power saver.
+   * Absent, {@link WARM_ENGINE_CAP}.
+   */
+  warmCap?: () => number;
   /** The id of a live pty running Claude on this conversation, or null. */
   terminalOn: (
     project: string,
@@ -178,6 +191,9 @@ interface EngineDeps {
  * A `conductor`'s process with the control tools runs its safe ones without
  * asking (`claudeConductorAllowArgs`).
  *
+ * `connectors` (FE-166) are the MCP servers this process starts without, as
+ * `connectorPlan` says: fixed for the process's life, never changed mid-session.
+ *
  * @throws When the settings are off the lists or `id` is not a session id.
  */
 export function engineArgs(
@@ -191,6 +207,7 @@ export function engineArgs(
   controlMcp: string | null = null,
   kitMcp: KitMcp | null = null,
   conductor = false,
+  connectors: ConnectorPlan | null = null,
 ): string[] {
   const settings = checkSettings(value);
   if (!settings || !isAgentSessionId(id)) throw new Error("Unknown settings");
@@ -227,7 +244,12 @@ export function engineArgs(
   if (hint) args.push("--append-system-prompt", hint);
   if (guarded) args.push("--disallowedTools", [...WRITE_TOOLS].join(","));
   if (conductor && controlMcp) args.push(...claudeConductorAllowArgs());
-  return args;
+  if (!connectors) return args;
+  // FE-166: a run worker holds only the servers `--mcp-config` names.
+  if (connectors.strict) args.push("--strict-mcp-config");
+  // NOTE: Merged into the guard's `--disallowedTools` when there is one,
+  // never a second flag of its own.
+  return withDisallowedTools(args, claudeDisallowedTools(connectors.disabled));
 }
 
 /** `AskUserQuestion`'s questions, or null when its input is not that shape. */
@@ -384,6 +406,8 @@ class Engine implements ConversationEngine {
    * record for the folder (FE-77/D3). Set again at every start.
    */
   untrusted = false;
+  /** Started as a conductor's own conversation. */
+  conductor = false;
   /**
    * The folder's trust changed while a turn ran: the process restarts before
    * the next one, to load (or drop) the repo's settings (FE-101).
@@ -523,9 +547,14 @@ class Engine implements ConversationEngine {
   }
 
   /** Start the CLI with `settings`, and wire its output and exit. */
-  async start(settings: ComposerSettings, conductor = false): Promise<void> {
+  async start(
+    settings: ComposerSettings,
+    conductor = false,
+    inherited?: readonly string[],
+  ): Promise<void> {
     const cli = await this.deps.cli();
     const spawn = this.deps.spawn ?? spawnChild;
+    this.conductor = conductor;
     // NOTE: Asked again at every start, never cached: trust given in a
     // Claude tab counts from the next process on (FE-77/D3).
     const trusted = await (
@@ -551,6 +580,14 @@ class Engine implements ConversationEngine {
     const guarded = leadGuarded(target);
     // FE-158: this build's lwk for the kit, unless its backend is ts.
     const kit = kitMcpFor();
+    // FE-166: the connectors this process starts without, from stored names
+    // only. A worker's `--strict-mcp-config` drops the user's own `lanework`
+    // and `lanework-kit` entries too, so it needs both of ours in the args.
+    const connectors = await connectorPlan(target, "claude", {
+      conductor: asConductor,
+      inherited,
+      strictOk: Boolean(localMcp && kit),
+    });
     const child = spawn(
       cli.file,
       engineArgs(
@@ -568,6 +605,7 @@ class Engine implements ConversationEngine {
         controlMcpFor(env),
         kit,
         asConductor,
+        connectors,
       ),
       { cwd: this.folder, env, stdio: ["pipe", "pipe", "pipe"] },
     );
@@ -1015,9 +1053,34 @@ class Engine implements ConversationEngine {
       questions:
         tool === "AskUserQuestion" ? askQuestions(request.input) : null,
     };
-    this.permissions.set(id, permission);
     this.inputs.set(id, request.input ?? {});
-    this.emit({ type: "permission", request: permission });
+    const subject = claudeSubject(tool, request.input);
+    noteSubject(permission, subject);
+    const show = () => {
+      this.permissions.set(id, permission);
+      this.emit({ type: "permission", request: permission });
+    };
+    // FE-165: the project's rules first. Still waiting: its input is kept
+    // and no card is up (a turn's end clears the inputs).
+    const waiting = () => this.inputs.has(id) && !this.permissions.has(id);
+    const target = {
+      project: this.project,
+      conversation: this.conversation,
+      folder: this.folder,
+    };
+    if (!subject || !engineMayAnswer(target)) {
+      show();
+      return;
+    }
+    void autoAllow({ ...target, agent: this.agent }, subject, () => {
+      if (!waiting()) return false;
+      this.respond(id, { behavior: "allow" });
+      return true;
+    })
+      .catch(() => false)
+      .then((answered) => {
+        if (!answered && waiting()) show();
+      });
   }
 
   /**
@@ -1028,6 +1091,12 @@ class Engine implements ConversationEngine {
   answer(id: string, answer: PermissionAnswer): void {
     if (!this.permissions.has(id))
       throw new Error("That request was already answered.");
+    this.respond(id, answer);
+    this.emit({ type: "permission-done", id });
+  }
+
+  /** Write the answer to request `id`, card shown or not. */
+  private respond(id: string, answer: PermissionAnswer): void {
     const input = this.inputs.get(id);
     const response =
       answer.behavior === "allow"
@@ -1063,7 +1132,6 @@ class Engine implements ConversationEngine {
       this.applied = { ...this.applied, permission: answer.mode };
       this.deps.remember(this.conversation, this.applied);
     }
-    this.emit({ type: "permission-done", id });
   }
 
   /** Close every card: the turn or the process they belonged to has ended. */
@@ -1251,7 +1319,11 @@ class Engine implements ConversationEngine {
         }
       } else if (this.child) await this.halt();
       if (!this.child)
-        await this.start(out.settings, isConductorTurn(out.text));
+        await this.start(
+          out.settings,
+          isConductorTurn(out.text),
+          out.connectors,
+        );
       // A restart's exit cleared these.
       this.busy = true;
       this.error = null;
@@ -1350,10 +1422,10 @@ const CLOSE_STOP_MS = STOP_SETTLE_MS + 500;
 const IDLE_REAP_MS = 5 * 60_000;
 
 /**
- * How many idle CLIs may stay warm at once; past it the least recently used
- * one's process ends, as an idle reap does (invisible: the next message
- * resumes the session). Running, permission-waiting and kept chats are not
- * counted.
+ * How many idle CLIs may stay warm at once, unless Settings → Power saver
+ * says otherwise; past it the least recently used one's process ends, as an
+ * idle reap does (invisible: the next message resumes the session).
+ * Running, permission-waiting, kept and conductor chats are not counted.
  */
 const WARM_ENGINE_CAP = 3;
 
@@ -1994,14 +2066,15 @@ export function createEngines(input: EngineDeps) {
       if (!reapable(engine) || limit === null || kept.has(key)) {
         lastActive.set(key, now);
         // NOTE: Only an idle engine with no keep can be evicted by the cap:
-        // a running one, one waiting on a permission or on queued input, and
-        // a kept chat are never counted nor ended.
-        if (reapable(engine) && !kept.has(key)) warm.push([key, engine]);
+        // a running one, one waiting on a permission or on queued input, a
+        // kept chat and a conductor's are never counted nor ended.
+        if (reapable(engine) && !kept.has(key) && !engine.conductor)
+          warm.push([key, engine]);
         continue;
       }
       if (now - (lastActive.get(key) ?? now) < limit) {
         if (!lastActive.has(key)) lastActive.set(key, now);
-        warm.push([key, engine]);
+        if (!engine.conductor) warm.push([key, engine]);
         continue;
       }
       end(key, engine);
@@ -2010,11 +2083,12 @@ export function createEngines(input: EngineDeps) {
     // lets a burst of chats pile up: past the cap the least recently used
     // go first. This holds with power saver off too (`limit` null), and a
     // sweep is at most a minute late.
-    if (warm.length > WARM_ENGINE_CAP) {
+    const cap = deps.warmCap ? deps.warmCap() : WARM_ENGINE_CAP;
+    if (warm.length > cap) {
       warm.sort(
         ([a], [b]) => (lastUsed.get(a) ?? now) - (lastUsed.get(b) ?? now),
       );
-      for (const [key, engine] of warm.slice(0, warm.length - WARM_ENGINE_CAP))
+      for (const [key, engine] of warm.slice(0, warm.length - cap))
         end(key, engine);
     }
     for (const key of lastActive.keys())

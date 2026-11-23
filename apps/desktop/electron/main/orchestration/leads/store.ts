@@ -38,8 +38,11 @@ import { join, relative, sep } from "node:path";
 import {
   type ContextEntry,
   type ContextPick,
+  ControlInputError,
   contextPath,
   freeLeadId,
+  LEAD_CONNECTOR_NAME_MAX,
+  LEAD_CONNECTORS_MAX,
   LEAD_CONTEXT_FILES_MAX,
   type LeadsEvent,
   type LeadsList,
@@ -109,6 +112,80 @@ export interface LeadStore extends Omit<LeadsMainHandlers, "pickContext"> {
 interface Bucket {
   leads: TeamLead[];
   defaultId: string | null;
+  /**
+   * The connectors a user switched off on a repo conductor (FE-166), by its
+   * `repo:<id>`. The repo file is never written: this is the user's own
+   * overlay on it, merged when the leads are listed.
+   */
+  overlays: Record<string, { disabled: string[] }>;
+}
+
+/** The most repo conductors one project may overlay. */
+const OVERLAYS_MAX = REPO_LEADS_MAX;
+
+/** Connector names as `connectors.disabled` keeps them: checked, unique. */
+function disabledNames(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > LEAD_CONNECTORS_MAX)
+    throw new ControlInputError(
+      `connectors.disabled must list at most ${LEAD_CONNECTORS_MAX} names`,
+    );
+  return [
+    ...new Set(
+      value.map((entry, index) => {
+        if (
+          typeof entry !== "string" ||
+          !entry.trim() ||
+          entry.length > LEAD_CONNECTOR_NAME_MAX ||
+          /[\r\n]/.test(entry)
+        )
+          throw new ControlInputError(
+            `Connector name ${index + 1} must be one line of at most ${LEAD_CONNECTOR_NAME_MAX} characters`,
+          );
+        return entry;
+      }),
+    ),
+  ];
+}
+
+/**
+ * A repo conductor's save from the page (FE-166): only its id and its
+ * `connectors`. Any other field is refused, so a save can never carry
+ * instructions, permission or Jev points into the user's overlay.
+ *
+ * @throws {ControlInputError} On another field, or a bad value.
+ */
+export function parseRepoOverlay(value: unknown): {
+  id: string;
+  disabled: string[];
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new ControlInputError("The conductor must be an object");
+  const input = value as Record<string, unknown>;
+  for (const key of Object.keys(input))
+    if (key !== "id" && key !== "connectors")
+      throw new ControlInputError(
+        `${key} cannot be saved on a project's conductor: only connectors can`,
+      );
+  const id = leadRef(input.id);
+  if (!id.startsWith(REPO_LEAD_PREFIX))
+    throw new ControlInputError("Not a project's conductor");
+  let disabled: string[] = [];
+  if (input.connectors != null) {
+    const connectors = input.connectors as Record<string, unknown>;
+    if (typeof connectors !== "object" || Array.isArray(connectors))
+      throw new ControlInputError("connectors must be an object");
+    for (const key of Object.keys(connectors))
+      if (key !== "disabled")
+        throw new ControlInputError(`connectors.${key} is not a field`);
+    disabled = disabledNames(connectors.disabled ?? []);
+  }
+  return { id, disabled };
+}
+
+/** Whether a save from the page names a project's conductor. */
+export function isRepoOverlayInput(value: unknown): boolean {
+  const id = (value as { id?: unknown } | null)?.id;
+  return typeof id === "string" && id.startsWith(REPO_LEAD_PREFIX);
 }
 
 interface PersonalFile {
@@ -122,11 +199,38 @@ interface PersonalFile {
   legacy: Bucket | null;
 }
 
-const emptyBucket = (): Bucket => ({ leads: [], defaultId: null });
+const emptyBucket = (): Bucket => ({
+  leads: [],
+  defaultId: null,
+  overlays: {},
+});
+
+/** The stored overlays, each key and name checked; a bad entry is dropped. */
+function parseOverlays(value: unknown): Bucket["overlays"] {
+  const out: Bucket["overlays"] = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+  for (const [id, entry] of Object.entries(value)) {
+    try {
+      if (!leadRef(id).startsWith(REPO_LEAD_PREFIX)) continue;
+      const disabled = disabledNames(
+        (entry as { disabled?: unknown } | null)?.disabled,
+      );
+      if (disabled.length && Object.keys(out).length < OVERLAYS_MAX)
+        out[id] = { disabled };
+    } catch {
+      // One unreadable overlay does not cost the others.
+    }
+  }
+  return out;
+}
 
 /** One stored set, every entry checked; an unreadable one is left out. */
 function parseBucket(value: unknown): Bucket {
-  const raw = (value ?? {}) as { leads?: unknown; defaultId?: unknown };
+  const raw = (value ?? {}) as {
+    leads?: unknown;
+    defaultId?: unknown;
+    overlays?: unknown;
+  };
   const leads: TeamLead[] = [];
   for (const entry of Array.isArray(raw.leads) ? raw.leads : []) {
     try {
@@ -142,7 +246,7 @@ function parseBucket(value: unknown): Bucket {
   } catch {
     defaultId = null;
   }
-  return { leads, defaultId };
+  return { leads, defaultId, overlays: parseOverlays(raw.overlays) };
 }
 
 /** `project`'s own set, or none. */
@@ -363,7 +467,17 @@ export function createLeadStore(deps: LeadStoreDeps): LeadStore {
     // A Map keeps the first place an id took, and the last value set there.
     const merged = new Map<string, TeamLead>();
     for (const lead of personal.leads) merged.set(lead.id, lead);
-    for (const lead of repo.leads) merged.set(lead.id, lead);
+    for (const lead of repo.leads) {
+      // FE-166: the user's own overlay on a project's conductor: only its
+      // connectors, and it wins over what the file says.
+      const overlay = personal.overlays[lead.id];
+      merged.set(
+        lead.id,
+        overlay
+          ? { ...lead, connectors: { disabled: overlay.disabled } }
+          : lead,
+      );
+    }
     const defaultId =
       personal.defaultId && merged.has(personal.defaultId)
         ? personal.defaultId
@@ -439,6 +553,22 @@ export function createLeadStore(deps: LeadStoreDeps): LeadStore {
     savePersonal: (project, input) =>
       serial(() =>
         updateBucket(project, (bucket) => {
+          // FE-166: a project's conductor takes only its connectors, as the
+          // user's overlay; the repo file is never written.
+          if (isRepoOverlayInput(input)) {
+            const { id, disabled } = parseRepoOverlay(input);
+            if (
+              disabled.length &&
+              !bucket.overlays[id] &&
+              Object.keys(bucket.overlays).length >= OVERLAYS_MAX
+            )
+              throw new Error(
+                `A project keeps connector settings for at most ${OVERLAYS_MAX} of its conductors.`,
+              );
+            if (disabled.length) bucket.overlays[id] = { disabled };
+            else delete bucket.overlays[id];
+            return;
+          }
           const lead = parseTeamLead(input, "personal");
           const at = bucket.leads.findIndex((entry) => entry.id === lead.id);
           if (at === -1 && bucket.leads.length >= PERSONAL_LEADS_MAX)
@@ -516,8 +646,11 @@ export function createLeadStore(deps: LeadStoreDeps): LeadStore {
           moved += 1;
         }
         target.defaultId ??= source.defaultId;
+        // The overlays on `from`'s repo conductors go with it; `to`'s win.
+        target.overlays = { ...source.overlays, ...target.overlays };
         file.projects[to] = target;
-        if (kept.length) file.projects[from] = { leads: kept, defaultId: null };
+        if (kept.length)
+          file.projects[from] = { leads: kept, defaultId: null, overlays: {} };
         else delete file.projects[from];
         await writePersonal(file);
         changed(from);

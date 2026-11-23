@@ -12,6 +12,7 @@ import {
   SessionPreviewTrigger,
 } from "#/components/shared/agents/session-preview-card";
 import { StatusPing } from "#/components/shared/agents/status-ping";
+import { ConductorMark } from "#/components/shared/conductors/conductor-mark";
 import { useTeamLeads } from "#/components/shared/conversation/composer";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
@@ -102,12 +103,7 @@ function ConductorIcon({
 }) {
   return (
     <span className={cn("relative flex shrink-0", className)}>
-      <HugeiconsIcon
-        icon={leadIcon(lead.icon)}
-        className="size-full"
-        strokeWidth={1.5}
-        aria-hidden="true"
-      />
+      <ConductorMark lead={lead} className="size-full" strokeWidth={1.5} />
       {/* As a session's: nothing at rest, a dot under the corner else. */}
       {state !== "idle" && (
         <StatusPing
@@ -343,6 +339,11 @@ export function ConductorsNav({
       {/* A repo's conductor is its file's: copy it to make it yours. */}
       {lead.source === "personal" && (
         <Item onClick={() => openDialog({ kind: "edit", lead })}>Edit</Item>
+      )}
+      {lead.source === "repo" && (
+        <Item onClick={() => openDialog({ kind: "connectors", lead })}>
+          Connectors…
+        </Item>
       )}
       <Item onClick={() => openDialog({ kind: "duplicate", lead })}>
         Duplicate

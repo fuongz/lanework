@@ -24,6 +24,16 @@
 // Ported from Monocode's `provider/opencode.rs` and `opencode/events.rs`.
 // Nothing here imports Electron.
 //
+// NOTE: Connectors (FE-166). A conductor's disabled connectors do not reach
+// OpenCode: its only per-process switch is `OPENCODE_CONFIG_CONTENT`
+// (`opencodeConnectorConfig`), which an OpenCode started with it reads and the
+// shared service never sees. Starting a `--standalone` OpenCode per chat just
+// to carry it would cost a process per conversation, so OpenCode chats,
+// sessions and workers go through the service with every connector the user
+// configured. The app spawns no OpenCode process of its own for them (the
+// service is only asked, `opencode-service.ts`), so there is nowhere to apply
+// the builder; revisit if OpenCode gains a per-session switch.
+//
 // NOTE: Nothing the page typed becomes a path or a flag: settings are checked
 // again against the fixed lists, the id is one OpenCode named (`ses_`, FE-103
 // D6), every id in a path is encoded, and images are files main wrote.
@@ -47,6 +57,8 @@ import {
 } from "../../../shared/conversation";
 import { isAgentSessionIdOf } from "../../../shared/terminal";
 import { engineTap, safely } from "../orchestration/engine-tap";
+import { autoAllow, engineMayAnswer, noteSubject } from "../permissions/gate";
+import type { PermissionSubject } from "../permissions/matcher";
 import type { ConversationEngine } from "./conversation-engine";
 import {
   errorMessage,
@@ -308,6 +320,33 @@ function formAnswer(
 }
 
 /** One OpenCode conversation in the user's service, and the turn it runs. */
+/**
+ * An OpenCode `permission.asked` as the rules read it (FE-165): `bash` by
+ * the command it runs, `edit`, `write` and `read` by the files they name.
+ * Null for anything else, and for a file named by a pattern: those ask.
+ */
+function opencodeSubject(
+  action: string,
+  resources: string[],
+  metadata: unknown,
+): PermissionSubject | null {
+  if (action === "bash") {
+    const command = str(record(metadata).command);
+    return command ? { kind: "bash", command } : null;
+  }
+  const tool =
+    action === "edit"
+      ? "Edit"
+      : action === "write"
+        ? "Write"
+        : action === "read"
+          ? "Read"
+          : null;
+  if (!tool || !resources.length || resources.some((path) => /[*?]/.test(path)))
+    return null;
+  return { kind: "file", tool, paths: resources };
+}
+
 export class OpenCodeEngine implements ConversationEngine {
   readonly agent = "opencode" as const;
   /** OpenCode asks no trust of a folder (FE-104): never limited, never stale. */
@@ -951,9 +990,50 @@ export class OpenCodeEngine implements ConversationEngine {
         suggestMode: null,
         questions: null,
       };
-      this.permissions.set(key, permission);
       this.waiting.set(key, { kind: "permission", session, wire });
-      this.emit({ type: "permission", request: permission });
+      const subject = opencodeSubject(action, resources, request.metadata);
+      noteSubject(permission, subject);
+      const show = () => {
+        this.permissions.set(key, permission);
+        this.emit({ type: "permission", request: permission });
+      };
+      // FE-165: the project's rules first.
+      const target = {
+        project: this.project,
+        conversation: this.conversation,
+        folder: this.folder,
+      };
+      const conversation = this.conversation;
+      if (!subject || !conversation || !engineMayAnswer(target)) {
+        show();
+        return;
+      }
+      const pending = () => {
+        const entry = this.waiting.get(key);
+        return (
+          entry?.kind === "permission" &&
+          entry.wire === wire &&
+          !this.permissions.has(key)
+        );
+      };
+      void autoAllow(
+        { ...target, conversation, agent: this.agent },
+        subject,
+        () => {
+          if (!pending()) return false;
+          this.waiting.delete(key);
+          void this.request(
+            "POST",
+            `/api/session/${segment(session)}/permission/${segment(wire)}/reply`,
+            { decision: "once" },
+          ).catch(() => {});
+          return true;
+        },
+      )
+        .catch(() => false)
+        .then((answered) => {
+          if (!answered && pending()) show();
+        });
       return;
     }
     const form = record(data.form ?? data);

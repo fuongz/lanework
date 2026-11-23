@@ -21,6 +21,8 @@ import { terminalFolder } from "../../projects";
 import { testEnv } from "../../test-seams";
 import { contextPickIn, createLeadStore, type LeadStore } from "./store";
 
+export { isRepoOverlayInput } from "./store";
+
 let instance: LeadStore | null = null;
 
 /** Main's own listeners to a change of the leads, beside the pages. */

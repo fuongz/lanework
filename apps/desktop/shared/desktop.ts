@@ -2,6 +2,7 @@ import type { DesktopAgentConfigApi } from "./agent-config";
 import type { DesktopAgentSetupApi } from "./agent-setup";
 import type { DesktopAuthApi, DesktopLaneworkMcpApi } from "./auth";
 import type { DesktopConductorsApi } from "./conductor-sessions";
+import type { DesktopConnectorsApi } from "./connectors";
 import type { DesktopConversationApi } from "./conversation";
 import type { DesktopDictationApi } from "./dictation";
 import type { DesktopFsSearchApi } from "./fs-search";
@@ -17,6 +18,7 @@ import type {
   DesktopLeadsApi,
   DesktopOrchestrationApi,
 } from "./orchestration";
+import type { DesktopPermissionsApi } from "./permissions";
 import type { DesktopProjectsApi } from "./projects";
 import type { DesktopReadinessApi } from "./readiness";
 import type { DesktopStorageApi } from "./storage";
@@ -171,4 +173,8 @@ export interface DesktopApi {
   leads: DesktopLeadsApi;
   /** Stop on a conductor's rail row: every engine it still runs. */
   conductors: DesktopConductorsApi;
+  /** Always-allow / Ask-first rules for agent permission requests (FE-165). */
+  permissions: DesktopPermissionsApi;
+  /** The MCP servers each agent reaches, per conductor (FE-166). */
+  connectors: DesktopConnectorsApi;
 }

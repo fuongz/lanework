@@ -41,6 +41,17 @@ export function idleLimitMs(): number | null {
   return settings.enabled ? settings.minutes * 60_000 : null;
 }
 
+/**
+ * How many idle agents stay warm at once (Settings → Power saver).
+ *
+ * Synchronous for the sweep: until the file has been read, the default.
+ */
+export function warmCap(): number {
+  const settings = cache ?? checkPowerSettings(null);
+  if (!cache) void readPowerSettings();
+  return settings.warmCap;
+}
+
 /** How the app runs `lwk` (FE-158), as saved; for the main process's start. */
 export async function savedLwkMode(): Promise<LwkMode> {
   return (await readPowerSettings()).lwkMode;

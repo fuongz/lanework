@@ -32,6 +32,7 @@ import {
   parseJudgeRequest,
   parseProposal,
   parseTeamLead,
+  type TeamLead,
 } from "../../shared/orchestration";
 import { installControlCli } from "../control/install";
 import { isWithin, realRoots } from "../kit";
@@ -46,10 +47,12 @@ import {
   APP_DISPLAY_VERSION,
   applyChannel,
 } from "./channel";
+import { registerConnectors } from "./connectors";
 import {
   conductorEngines,
   conductorMemory,
   conductorSessionsControl,
+  pendingPermission,
   pidFileBridge,
   registerConversation,
 } from "./conversation";
@@ -78,8 +81,13 @@ import { registerAttention } from "./notifications/attention";
 import { startPullWatcher } from "./notifications/pull-watcher";
 import { orchestrationMain, setJev, startControlServer } from "./orchestration";
 import type { SessionsControl } from "./orchestration/control-server";
-import { leadsMain, moveConductors } from "./orchestration/leads";
+import {
+  isRepoOverlayInput,
+  leadsMain,
+  moveConductors,
+} from "./orchestration/leads";
 import { moveLegacyProjectsDir } from "./paths";
+import { flushPermissions, registerPermissions } from "./permissions";
 import {
   adoptMovedProjects,
   onProjectMoved,
@@ -221,9 +229,14 @@ function registerLeads(
   // A conductor is a project's own (FE-95): every write names the project.
   handle(leadsChannels.savePersonal, devUrl, (args) => {
     arity(args, 2);
+    // FE-166: a project's conductor takes only its connectors. The store
+    // checks that save field by field (`parseRepoOverlay`), refuses the rest
+    // and never writes the repo file.
     return leads.savePersonal(
       ipcSlug(args[0]),
-      parseTeamLead(args[1], "personal"),
+      isRepoOverlayInput(args[1])
+        ? (args[1] as TeamLead)
+        : parseTeamLead(args[1], "personal"),
     );
   });
   handle(leadsChannels.removePersonal, devUrl, (args) => {
@@ -551,6 +564,9 @@ app
       broadcast(channels.themeChanged, nativeTheme.shouldUseDarkColors),
     );
     registerAuth(devUrl);
+    // FE-166: `connectors.inventory` and `connectors.refresh`. Registering
+    // reads nothing; a project is scanned on the first ask.
+    registerConnectors(devUrl);
     registerProjects(devUrl);
     registerGit(devUrl);
     registerTerminal(devUrl);
@@ -564,6 +580,8 @@ app
       kill: (id) => (id.startsWith("pid:") ? pids.kill(id) : killTerminal(id)),
       onRunningChanged,
     });
+    // FE-165: no work until a project's first permission request.
+    registerPermissions(devUrl, { pendingPermission });
     registerHandoff(devUrl);
     registerReadiness(devUrl);
     registerMemory(devUrl);
@@ -677,6 +695,7 @@ app
     app.quit();
   });
 app.on("will-quit", () => {
+  void flushPermissions();
   void controlServer?.close();
   controlServer = null;
   void kitSocket?.close();

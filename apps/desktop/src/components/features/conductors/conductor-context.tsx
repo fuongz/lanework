@@ -1,6 +1,8 @@
-// The Context page of the conductor dialog (FE-96): files and folders in the
-// project the conductor reads before it answers or plans. Only their paths
-// are sent; main's chooser picks them and says which still exist.
+// "Files it always reads", on top of the conductor dialog's Memory page
+// (FE-96): files and folders in the project the conductor reads before it
+// answers or plans. Only their paths are sent; main's chooser picks them and
+// says which still exist. Once a page of its own; Memory holds it since the
+// two answer one question, what it knows of this project.
 
 import {
   Add01Icon,
@@ -92,11 +94,13 @@ export function ConductorContext({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 border-b py-2.5 pr-12 pl-5">
-        <h2 className="text-sm font-medium">Context</h2>
+    <section aria-labelledby="memory-files" className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <h3 id="memory-files" className="text-[13px] font-medium">
+          Files it always reads
+        </h3>
         <span className="text-muted-foreground min-w-0 flex-1 truncate text-xs">
-          Read before it answers or plans.
+          Before it answers or plans, at their latest version.
         </span>
         <Button
           size="sm"
@@ -108,89 +112,87 @@ export function ConductorContext({
           Add files…
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
-        {paths.length ? (
-          <ul aria-label="Context files" className="flex flex-col">
-            {paths.map((path) => {
-              const kind = kinds.get(path);
-              return (
-                <li
-                  key={path}
-                  className="hover:bg-foreground/[0.03] group flex h-8 items-center gap-2.5 rounded-md px-2"
-                >
-                  {kind ? (
-                    kind === "file" ? (
-                      <FileTypeIcon path={path} className="size-3.5 shrink-0" />
-                    ) : (
-                      <HugeiconsIcon
-                        icon={KIND_ICONS[kind]}
-                        className={cn(
-                          "size-3.5 shrink-0",
-                          kind === "missing"
-                            ? "text-destructive"
-                            : "text-muted-foreground",
-                        )}
-                        strokeWidth={1.5}
-                        aria-hidden="true"
-                      />
-                    )
+      {paths.length ? (
+        <ul
+          aria-label="Files it always reads"
+          className="flex flex-col rounded-lg border p-1"
+        >
+          {paths.map((path) => {
+            const kind = kinds.get(path);
+            return (
+              <li
+                key={path}
+                className="hover:bg-foreground/[0.03] group flex h-8 items-center gap-2.5 rounded-md px-2"
+              >
+                {kind ? (
+                  kind === "file" ? (
+                    <FileTypeIcon path={path} className="size-3.5 shrink-0" />
                   ) : (
-                    <TextSkeleton
-                      label={`Checking ${path}`}
-                      className="size-3.5 shrink-0 rounded"
-                    />
-                  )}
-                  <span
-                    title={path}
-                    className={cn(
-                      "min-w-0 flex-1 truncate font-mono text-xs",
-                      kind === "missing" && "text-muted-foreground",
-                    )}
-                  >
-                    {path}
-                    {kind === "folder" ? "/" : ""}
-                  </span>
-                  {kind === "missing" ? (
-                    <span className="text-destructive shrink-0 text-xs">
-                      Not found
-                    </span>
-                  ) : null}
-                  <button
-                    type="button"
-                    aria-label={`Remove ${path}`}
-                    title="Remove"
-                    onClick={() =>
-                      onChange(paths.filter((entry) => entry !== path))
-                    }
-                    className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/30 grid size-6 shrink-0 place-items-center rounded-md opacity-0 transition-opacity outline-none group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2"
-                  >
                     <HugeiconsIcon
-                      icon={Cancel01Icon}
-                      className="size-3.5"
+                      icon={KIND_ICONS[kind]}
+                      className={cn(
+                        "size-3.5 shrink-0",
+                        kind === "missing"
+                          ? "text-destructive"
+                          : "text-muted-foreground",
+                      )}
                       strokeWidth={1.5}
                       aria-hidden="true"
                     />
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        ) : (
-          <div className="text-muted-foreground mx-auto flex h-full max-w-xs flex-col items-center justify-center gap-1 text-center text-xs leading-relaxed">
-            <span className="text-foreground text-[13px] font-medium">
-              No context files
-            </span>
-            Add what it should know about this project, like AGENTS.md or an
-            architecture note. Only the paths are sent; it reads the latest
-            version each time.
-          </div>
-        )}
-      </div>
+                  )
+                ) : (
+                  <TextSkeleton
+                    label={`Checking ${path}`}
+                    className="size-3.5 shrink-0 rounded"
+                  />
+                )}
+                <span
+                  title={path}
+                  className={cn(
+                    "min-w-0 flex-1 truncate font-mono text-xs",
+                    kind === "missing" && "text-muted-foreground",
+                  )}
+                >
+                  {path}
+                  {kind === "folder" ? "/" : ""}
+                </span>
+                {kind === "missing" ? (
+                  <span className="text-destructive shrink-0 text-xs">
+                    Not found
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  aria-label={`Remove ${path}`}
+                  title="Remove"
+                  onClick={() =>
+                    onChange(paths.filter((entry) => entry !== path))
+                  }
+                  className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/30 grid size-6 shrink-0 place-items-center rounded-md opacity-0 transition-opacity outline-none group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2"
+                >
+                  <HugeiconsIcon
+                    icon={Cancel01Icon}
+                    className="size-3.5"
+                    strokeWidth={1.5}
+                    aria-hidden="true"
+                  />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="text-muted-foreground rounded-lg border border-dashed px-4 py-3 text-xs leading-relaxed">
+          None yet. Add what it should know about this project, like AGENTS.md
+          or an architecture note. Only the paths are sent; it reads the latest
+          version each time.
+        </p>
+      )}
       {notice ? (
-        <p role="alert" className="text-destructive border-t px-5 py-2 text-xs">
+        <p role="alert" className="text-destructive text-xs">
           {notice}
         </p>
       ) : null}
-    </div>
+    </section>
   );
 }

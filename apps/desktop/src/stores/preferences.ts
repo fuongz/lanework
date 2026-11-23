@@ -195,6 +195,13 @@ interface Preferences {
   groupProjects: boolean;
   setGroupProjects: (value: boolean) => void;
   setNamespaceCollapsed: (namespace: string, collapsed: boolean) => void;
+  /**
+   * The projects pinned in the switcher, by slug, in the order pinned. A
+   * pinned project leads the list as a row of its own, above every group and
+   * whatever the sort or the saved order.
+   */
+  pinnedProjects: string[];
+  setProjectPinned: (slug: string, pinned: boolean) => void;
   /** The language the composer's microphone listens for (FE-69/D6). */
   dictationLocale: DictationLocale;
   setDictationLocale: (value: DictationLocale) => void;
@@ -283,6 +290,14 @@ export const usePreferences = create<Preferences>()(
           else next.delete(namespace);
           return { collapsedNamespaces: readHidden([...next]) };
         }),
+      pinnedProjects: [],
+      setProjectPinned: (slug, pinned) =>
+        set((state) => {
+          const rest = state.pinnedProjects.filter((entry) => entry !== slug);
+          return {
+            pinnedProjects: readHidden(pinned ? [...rest, slug] : rest),
+          };
+        }),
       dictationLocale: "vi_VN",
       setDictationLocale: (dictationLocale) => set({ dictationLocale }),
       dictationCorrections: null,
@@ -362,6 +377,7 @@ export const usePreferences = create<Preferences>()(
         projectSort,
         collapsedNamespaces,
         groupProjects,
+        pinnedProjects,
         dictationLocale,
         dictationCorrections,
         hiddenModels,
@@ -378,6 +394,7 @@ export const usePreferences = create<Preferences>()(
         projectSort,
         collapsedNamespaces,
         groupProjects,
+        pinnedProjects,
         dictationLocale,
         dictationCorrections,
         hiddenModels,
@@ -408,6 +425,7 @@ export const usePreferences = create<Preferences>()(
             : "default",
           collapsedNamespaces: readHidden(saved?.collapsedNamespaces),
           groupProjects: saved?.groupProjects !== false,
+          pinnedProjects: readHidden(saved?.pinnedProjects),
           dictationLocale: isDictationLocale(saved?.dictationLocale)
             ? saved.dictationLocale
             : "vi_VN",

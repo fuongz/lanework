@@ -11,6 +11,7 @@ import {
   McpServerIcon,
   Mic01Icon,
   Notification01Icon,
+  Shield01Icon,
   Sun01Icon,
   UserAccountIcon,
 } from "@hugeicons/core-free-icons";
@@ -137,6 +138,13 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         icon: McpServerIcon,
         keywords:
           "mcp server servers global user claude.json config.toml stdio http sse project .mcp.json local repo",
+      },
+      {
+        to: "/settings/permissions",
+        label: "Permissions",
+        icon: Shield01Icon,
+        keywords:
+          "permissions permission rules rule allow always ask first automatic automatically seeded audit recent bash edit write read tool pattern conductor scope approve deny",
       },
       {
         to: "/settings/archived",

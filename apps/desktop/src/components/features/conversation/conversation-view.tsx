@@ -40,6 +40,7 @@ import { ContextButton } from "#/components/shared/agents/conversation-facts";
 import { RenameAgentDialog } from "#/components/shared/agents/rename-agent-dialog";
 import { useConversationFacts } from "#/components/shared/agents/use-agent-facts";
 import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
+import { ConductorMark } from "#/components/shared/conductors/conductor-mark";
 import { setChatAgent } from "#/components/shared/conversation/chat-agent";
 import {
   Composer,
@@ -86,14 +87,17 @@ import { ipcMessage } from "#/lib/ipc-error";
 import {
   conductorTurn,
   lastConductorContext,
-  leadIcon,
   readConductorEnvelope,
   readEnvelope,
 } from "#/lib/orchestration-prompt";
 import { quoteBlock, quoteOf } from "#/lib/quote";
 import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
-import { conductorMemory, withLiveContext } from "#/stores/conductor-context";
+import {
+  conductorConnectors,
+  conductorMemory,
+  withLiveContext,
+} from "#/stores/conductor-context";
 import {
   type SentMessage,
   turnsSince,
@@ -797,7 +801,8 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
             // NOT `conversation.cwd`: that is the agent's last shell
             // directory, which moves whenever it runs `cd` (FE-132).
             readProjectRoots(project),
-          ]).then(([live, memory, roots]) =>
+            conductorConnectors(project, conductor, agent),
+          ]).then(([live, memory, roots, connectors]) =>
             conductorTurn(
               typed,
               live,
@@ -810,6 +815,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
               ),
               memory,
               roots.others,
+              connectors,
             ),
           )
         : typed;
@@ -1164,11 +1170,10 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                     params={{ slug, lead: launcher.id }}
                     className="text-muted-foreground hover:text-foreground flex min-w-0 shrink items-center gap-1.5 text-[14px] leading-5 transition-colors"
                   >
-                    <HugeiconsIcon
-                      icon={leadIcon(launcher.icon)}
+                    <ConductorMark
+                      lead={launcher}
                       className="size-3.5 shrink-0"
                       strokeWidth={1.5}
-                      aria-hidden="true"
                     />
                     <span className="truncate">{launcher.name}</span>
                   </Link>
@@ -1188,11 +1193,10 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
             </span>
           ) : conductor ? (
             <span className={TITLE_MARK}>
-              <HugeiconsIcon
-                icon={leadIcon(conductor.icon)}
+              <ConductorMark
+                lead={conductor}
                 className="size-3.5"
                 strokeWidth={1.5}
-                aria-hidden="true"
               />
             </span>
           ) : (
@@ -1483,6 +1487,8 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                     requests={asking}
                     agent={label}
                     onAnswer={answer}
+                    project={project}
+                    conductor={conductorId}
                   />
                 )}
                 {asWorker && (

@@ -12,12 +12,12 @@ import {
 } from "react";
 import type { AgentSession, TerminalAgent } from "#/../shared/terminal";
 import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
+import { ConductorMark } from "#/components/shared/conductors/conductor-mark";
 import { useTeamLeads } from "#/components/shared/conversation/composer";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import { useCloseSessionTab } from "#/hooks/use-close-session-tab";
 import { useOrchestrationRuns } from "#/hooks/use-orchestration-runs";
 import { useProjectKey } from "#/hooks/use-project-key";
-import { leadIcon } from "#/lib/orchestration-prompt";
 import { cn } from "#/lib/utils";
 import { agentKey, useAgentSessions } from "#/stores/agent-sessions";
 import { useSessionTabs } from "#/stores/session-tabs";
@@ -266,11 +266,10 @@ export function SessionTabs() {
             {working ? (
               <OrbitSpinner className="text-foreground size-3.5" />
             ) : lead ? (
-              <HugeiconsIcon
-                icon={leadIcon(lead.icon)}
+              <ConductorMark
+                lead={lead}
                 className="size-3.5"
                 strokeWidth={1.5}
-                aria-hidden="true"
               />
             ) : agent ? (
               <TerminalKindIcon kind={agent} className="size-3.5" />

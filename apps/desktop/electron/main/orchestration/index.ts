@@ -125,6 +125,7 @@ function orchestrator(): Orchestrator {
     write: (write) => created.onWrite(write),
     result: (result) => created.onResult(result),
     guard: (target) => created.guardsLead(target),
+    worker: (target) => created.isWorkerTarget(target),
   });
   instance = created;
   // Saved runs are read now, not on the page's first call: until then a

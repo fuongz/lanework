@@ -1,5 +1,7 @@
 import type { ConductorMemory } from "#/../shared/conductor-sessions";
+import type { ConnectorAgent } from "#/../shared/connectors";
 import type { TeamLead } from "#/../shared/orchestration";
+import { enabledConnectorNames } from "#/lib/connectors";
 
 // A conductor's context files as they stand now (FE-96), for the prompt.
 //
@@ -44,4 +46,22 @@ export async function conductorMemory(
   const surface = window.desktop?.leads;
   if (!surface) return null;
   return surface.memory(project, lead.id).catch(() => null);
+}
+
+/**
+ * The connectors `lead` may use on `agent` in `project` besides Lanework's
+ * own (FE-166), for a turn that carries its rules.
+ *
+ * Reads only the cached inventory, never a refresh: it runs on a send, which
+ * must stay quick. Empty without a preload or when main cannot answer.
+ */
+export async function conductorConnectors(
+  project: string,
+  lead: TeamLead,
+  agent: ConnectorAgent,
+): Promise<string[]> {
+  const surface = window.desktop?.connectors;
+  if (!surface) return [];
+  const inventory = await surface.inventory(project, agent).catch(() => null);
+  return enabledConnectorNames(inventory, agent, lead);
 }

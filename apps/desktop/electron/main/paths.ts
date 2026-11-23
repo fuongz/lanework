@@ -134,3 +134,23 @@ export function moveLegacyProjectsDir(home = appHomeDir()): boolean {
     return false;
   }
 }
+
+/**
+ * A project's permission rules (FE-165): `<project folder>/permissions.json`,
+ * beside the project's other state. Only the user's rules are written; the
+ * seeded Ask rules ship with the app.
+ *
+ * @param projectFolder The project's own folder under {@link projectsDir}
+ *   (`<account>/<slug>`, as `projects/store.ts` names it).
+ */
+export function permissionRulesFile(projectFolder: string): string {
+  return join(projectFolder, "permissions.json");
+}
+
+/**
+ * A project's audit list of automatic allows (FE-165):
+ * `<project folder>/permissions-audit.json`, oldest first.
+ */
+export function permissionAuditFile(projectFolder: string): string {
+  return join(projectFolder, "permissions-audit.json");
+}

@@ -1,19 +1,21 @@
 import {
   Brain02Icon,
-  Folder01Icon,
+  McpServerIcon,
   NoteEditIcon,
   Settings01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { allModels } from "#/../shared/conversation";
-import {
-  LEAD_ICONS,
-  type LeadIcon,
-  type LeadsList,
-  type TeamLead,
-  type TeamLeadInput,
+import type {
+  LeadIcon,
+  LeadsList,
+  TeamLead,
+  TeamLeadInput,
 } from "#/../shared/orchestration";
+import type { ProjectAvatar } from "#/../shared/project-avatar";
+import { AvatarEditor } from "#/components/shared/projects/avatar-dialog";
+import { AvatarFace } from "#/components/shared/projects/project-avatar";
 import { CodeEditor } from "#/components/shared/settings/agent-config-editor";
 import { SettingsPage } from "#/components/shared/settings/settings-page";
 import { Button } from "#/components/ui/button";
@@ -25,6 +27,7 @@ import {
 } from "#/components/ui/popover";
 import { ipcMessage } from "#/lib/ipc-error";
 import { cn } from "#/lib/utils";
+import { ConductorConnectors } from "./conductor-connectors";
 import { ConductorContext } from "./conductor-context";
 import {
   blankDraft,
@@ -33,16 +36,19 @@ import {
   draftFrom,
   freeId,
   ICONS,
-  iconLabel,
   slugify,
 } from "./conductor-editor";
 import { ConductorMemory } from "./conductor-memory";
 
-/** What the dialog opens on: a new conductor, or one to edit or copy. */
+/**
+ * What the dialog opens on: a new conductor, or one to edit or copy; or, for
+ * a conductor that is its repo's file (FE-166), only its Connectors page.
+ */
 export type ConductorDialogMode =
   | { kind: "new" }
   | { kind: "edit"; lead: TeamLead }
-  | { kind: "duplicate"; lead: TeamLead };
+  | { kind: "duplicate"; lead: TeamLead }
+  | { kind: "connectors"; lead: TeamLead };
 
 /** The dialog's pages, and the editor sections each one shows. */
 const PAGES = [
@@ -61,18 +67,21 @@ const PAGES = [
     sections: [],
   },
   {
-    key: "context",
-    label: "Context",
-    icon: Folder01Icon,
-    description: "Project files it reads before it answers.",
+    // FE-166: what its agent may reach from this project.
+    key: "connectors",
+    label: "Connectors",
+    icon: McpServerIcon,
+    description: "The MCP servers it may use.",
     sections: [],
   },
   {
-    // FE-128: only a saved conductor in a project has one.
+    // FE-128: the ledger, runs and notes only a saved conductor in a
+    // project has; above them the files it always reads (FE-96), once a
+    // Context page of its own.
     key: "memory",
     label: "Memory",
     icon: Brain02Icon,
-    description: "What it keeps of this project between conversations.",
+    description: "What it reads and keeps of this project.",
     sections: [],
   },
 ] as const;
@@ -83,6 +92,7 @@ function startDraft(mode: ConductorDialogMode, taken: Set<string>): Draft {
   const models = allModels();
   if (mode.kind === "new") return blankDraft(models);
   if (mode.kind === "edit") return draftFrom(mode.lead, mode.lead.id);
+  if (mode.kind === "connectors") return draftFrom(mode.lead, mode.lead.id);
   const name = `${mode.lead.name} copy`.slice(0, 60);
   return draftFrom(mode.lead, null, {
     name,
@@ -116,13 +126,17 @@ export function ConductorDialog({
     [list],
   );
   const [draft, setDraft] = useState(() => startDraft(mode, taken));
-  const [page, setPage] = useState<PageKey>("general");
+  const connectorsOnly = mode.kind === "connectors";
+  const [page, setPage] = useState<PageKey>(
+    connectorsOnly ? "connectors" : "general",
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const editor = conductorEditor({
     draft,
     setDraft,
     takenIds: taken,
+    source: mode.kind === "connectors" ? mode.lead.source : "personal",
   });
   const { problem, parsed } = editor;
   // Who it is, on top of General: the icon to pick and the name to type, as
@@ -130,8 +144,12 @@ export function ConductorDialog({
   const identity = (
     <Identity
       icon={draft.input.icon}
+      avatar={draft.input.avatar ?? null}
       name={draft.input.name}
-      onIcon={(icon) => setDraft({ ...draft, input: { ...draft.input, icon } })}
+      onAvatar={(avatar) => {
+        const { avatar: _, ...rest } = draft.input;
+        setDraft({ ...draft, input: avatar ? { ...rest, avatar } : rest });
+      }}
       onName={(next) =>
         setDraft({
           ...draft,
@@ -152,13 +170,33 @@ export function ConductorDialog({
     ...editor.sections,
   ];
   // Memory is per conductor and project (FE-128): a new or copied conductor
-  // has none yet, and neither has one outside a project.
+  // has none yet, and neither has one outside a project. Its page still
+  // shows, for the files it always reads.
   const editing = mode.kind === "edit" && project ? mode.lead : null;
-  const pages = PAGES.filter((entry) => entry.key !== "memory" || editing);
+  const pages = PAGES.filter((entry) =>
+    connectorsOnly ? entry.key === "connectors" : true,
+  );
   const current = pages.find((entry) => entry.key === page) ?? PAGES[0];
   const name = draft.input.name.trim();
   const title =
-    mode.kind === "edit" ? `Edit ${mode.lead.name}` : name || "New conductor";
+    mode.kind === "edit"
+      ? `Edit ${mode.lead.name}`
+      : mode.kind === "connectors"
+        ? `Connectors for ${mode.lead.name}`
+        : name || "New conductor";
+
+  // Stable: the page's rows are memoized and redraw only when a switch moves.
+  const updateConnectors = useCallback(
+    (connectors: TeamLeadInput["connectors"]) =>
+      setDraft((current) => {
+        const { connectors: _old, ...rest } = current.input;
+        return {
+          ...current,
+          input: connectors ? { ...rest, connectors } : rest,
+        };
+      }),
+    [],
+  );
 
   const save = async (input: TeamLeadInput) => {
     const surface = window.desktop?.leads;
@@ -232,18 +270,29 @@ export function ConductorDialog({
                 className="min-h-0 flex-1"
               />
             </div>
-          ) : page === "memory" && editing ? (
-            <ConductorMemory project={project} conductor={editing.id} />
-          ) : page === "context" ? (
-            <ConductorContext
+          ) : page === "memory" ? (
+            <ConductorMemory
               project={project}
-              paths={draft.input.contextFiles}
-              onChange={(contextFiles) =>
-                setDraft({
-                  ...draft,
-                  input: { ...draft.input, contextFiles },
-                })
+              conductor={editing?.id ?? null}
+              files={
+                <ConductorContext
+                  project={project}
+                  paths={draft.input.contextFiles}
+                  onChange={(contextFiles) =>
+                    setDraft({
+                      ...draft,
+                      input: { ...draft.input, contextFiles },
+                    })
+                  }
+                />
               }
+            />
+          ) : page === "connectors" ? (
+            <ConductorConnectors
+              project={project}
+              agent={draft.input.lead.agent}
+              disabled={draft.input.connectors?.disabled ?? []}
+              onChange={updateConnectors}
             />
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-5 pb-6">
@@ -271,7 +320,9 @@ export function ConductorDialog({
               {error ??
                 (name
                   ? (problem ??
-                    "Only in this project. Another project makes its own.")
+                    (connectorsOnly
+                      ? "Only the connectors change; its file stays as it is."
+                      : null))
                   : "Name it to save.")}
             </p>
             <Button
@@ -296,62 +347,76 @@ export function ConductorDialog({
   );
 }
 
-/** The big icon to pick from, and the name under it, edited in place. */
+/**
+ * Its avatar, picked as a project's is (icon, emoji or letter on a colour),
+ * and the name under it, edited in place. With no avatar it wears its line
+ * icon. Only the draft changes: Save keeps it.
+ */
 function Identity({
   icon,
+  avatar,
   name,
-  onIcon,
+  onAvatar,
   onName,
 }: {
   icon: LeadIcon;
+  avatar: ProjectAvatar | null;
   name: string;
-  onIcon: (icon: LeadIcon) => void;
+  onAvatar: (avatar: ProjectAvatar | null) => void;
   onName: (name: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // Opened afresh each time, so it starts from the draft's avatar.
+  const [opened, setOpened] = useState(0);
   return (
     <div className="flex flex-col items-center gap-2">
-      <Popover open={open} onOpenChange={setOpen}>
+      {/* A popover under the avatar, not a dialog over this dialog: two
+          modals stacked read as one washed-out layer. */}
+      <Popover
+        open={open}
+        onOpenChange={(next) => {
+          if (next) setOpened((count) => count + 1);
+          setOpen(next);
+        }}
+      >
         <PopoverTrigger
           render={
             <button
               type="button"
-              aria-label={`Icon: ${iconLabel(icon)}. Change it`}
-              className="bg-foreground/[0.04] hover:bg-foreground/[0.07] border-border focus-visible:ring-ring/30 grid size-14 place-items-center rounded-xl border transition-colors outline-none focus-visible:ring-2"
-            >
+              aria-label="Change avatar"
+              title="Change avatar"
+              className="focus-visible:ring-ring/30 rounded-xl transition-opacity outline-none hover:opacity-90 focus-visible:ring-2"
+            />
+          }
+        >
+          {avatar ? (
+            <AvatarFace
+              avatar={avatar}
+              className="size-14 rounded-xl text-xl"
+            />
+          ) : (
+            <span className="bg-foreground/[0.04] border-border grid size-14 place-items-center rounded-xl border">
               <HugeiconsIcon
                 icon={ICONS[icon]}
                 className="size-6"
                 strokeWidth={1.5}
                 aria-hidden="true"
               />
-            </button>
-          }
-        />
-        <PopoverContent className="w-auto p-2">
-          <div className="grid grid-cols-6 gap-1">
-            {LEAD_ICONS.map((option) => (
-              <button
-                key={option}
-                type="button"
-                aria-label={iconLabel(option)}
-                aria-pressed={option === icon}
-                title={iconLabel(option)}
-                onClick={() => {
-                  onIcon(option);
-                  setOpen(false);
-                }}
-                className="hover:bg-foreground/[0.06] aria-pressed:bg-foreground/[0.1] grid size-9 place-items-center rounded-lg transition-colors"
-              >
-                <HugeiconsIcon
-                  icon={ICONS[option]}
-                  className="size-4.5"
-                  strokeWidth={1.5}
-                  aria-hidden="true"
-                />
-              </button>
-            ))}
-          </div>
+            </span>
+          )}
+        </PopoverTrigger>
+        <PopoverContent className="flex w-[26rem] flex-col gap-4 p-4">
+          <AvatarEditor
+            key={opened}
+            name={name}
+            start={avatar}
+            saveLabel="Done"
+            onClose={() => setOpen(false)}
+            onSave={(next) => {
+              onAvatar(next);
+              return null;
+            }}
+          />
         </PopoverContent>
       </Popover>
       <input

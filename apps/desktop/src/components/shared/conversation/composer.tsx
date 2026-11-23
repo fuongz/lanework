@@ -33,6 +33,7 @@ import {
 import { insertDictation } from "#/../shared/dictation";
 import type { LeadsList, TeamLead } from "#/../shared/orchestration";
 import { StopGlyph } from "#/components/shared/common/stop-glyph";
+import { ConductorMark } from "#/components/shared/conductors/conductor-mark";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import { BranchSwitcher } from "#/components/shared/repo/branch-switcher";
@@ -46,7 +47,6 @@ import { rememberSent } from "#/lib/attachment-previews";
 import { fileSize } from "#/lib/file-size";
 import {
   LEAD_SOURCE_LABELS,
-  leadIcon,
   readEnvelope,
   splitLead,
   visibleText,
@@ -309,11 +309,10 @@ function leadChip(lead: TeamLead): ChipSpec {
     label: lead.name,
     title: `@${lead.id}\n${lead.name}`,
     icon: (
-      <HugeiconsIcon
-        icon={leadIcon(lead.icon)}
+      <ConductorMark
+        lead={lead}
         className="size-3.5 shrink-0"
         strokeWidth={1.8}
-        aria-hidden="true"
       />
     ),
     tone: "teal",
@@ -1358,11 +1357,10 @@ export const Composer = forwardRef<
                     onPointerEnter={() => setSuggest({ ...suggest, index })}
                     className="aria-selected:bg-foreground/[0.08] flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left"
                   >
-                    <HugeiconsIcon
-                      icon={leadIcon(item.lead.icon)}
+                    <ConductorMark
+                      lead={item.lead}
                       className="text-muted-foreground size-3.5 shrink-0"
                       strokeWidth={1.8}
-                      aria-hidden="true"
                     />
                     <span className="min-w-0 truncate text-[13px]">
                       {item.lead.name}

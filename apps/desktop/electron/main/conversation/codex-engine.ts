@@ -42,12 +42,21 @@ import {
   type Turn,
 } from "../../../shared/conversation";
 import { isAgentSessionId } from "../../../shared/terminal";
+import { codexConnectorArgs } from "../connectors/flags";
 import {
   agentEnv,
+  connectorPlan,
+  type EngineTarget,
   engineTap,
   leadGuarded,
   safely,
 } from "../orchestration/engine-tap";
+import { autoAllow, engineMayAnswer, noteSubject } from "../permissions/gate";
+import {
+  isInside,
+  type PermissionSubject,
+  unwrapShell,
+} from "../permissions/matcher";
 import type { ClaudeCli } from "./claude-cli";
 import type { ConversationEngine } from "./conversation-engine";
 import {
@@ -344,6 +353,8 @@ export class CodexEngine implements ConversationEngine {
    * before the next one, to load (or drop) the repo's `.codex/` (FE-101).
    */
   stale = false;
+  /** Started as a conductor's own conversation. */
+  conductor = false;
   /** The images of the running turn and its steers, removed when it ends. */
   dirs: string[] = [];
   /** The running turn's error said `usageLimitExceeded`. */
@@ -501,9 +512,14 @@ export class CodexEngine implements ConversationEngine {
   }
 
   /** Start `codex app-server`, introduce ourselves, open the thread. */
-  async start(settings: ComposerSettings, conductor = false): Promise<void> {
+  async start(
+    settings: ComposerSettings,
+    conductor = false,
+    inherited?: readonly string[],
+  ): Promise<void> {
     const cli = await this.deps.cli();
     const spawn = this.deps.spawn ?? spawnChild;
+    this.conductor = conductor;
     // FE-121/D9: a local project's board, while Codex's config is the cloud.
     const localMcp = (await this.deps.localMcp?.(this.project)) ?? null;
     const overrides = localMcp
@@ -511,12 +527,13 @@ export class CodexEngine implements ConversationEngine {
       : [];
     // FE-87: a lead's control endpoint, a worker's scratch; never the
     // control variables for anyone else.
-    const env = agentEnv(cli.env, {
+    const target: EngineTarget = {
       project: this.project,
       conversation: this.conversation,
       folder: this.folder,
       named: () => this.conversation,
-    });
+    };
+    const env = agentEnv(cli.env, target);
     // FE-155: the conductor tools only on a conductor's process.
     const asConductor = conductor && Boolean(env[SESSIONS_ENV.token]);
     if (asConductor) env[CONTROL_ROLE_ENV] = "conductor";
@@ -527,6 +544,18 @@ export class CodexEngine implements ConversationEngine {
     // FE-158: this build's lwk for the kit, unless its backend is ts.
     const kit = kitMcpFor();
     if (kit) overrides.push(...codexKitArgs(kit));
+    // FE-166: the user's servers this process starts without, from stored
+    // names only. Codex has no strict switch, so a worker's are every cached
+    // non-Lanework server, turned off one by one. Lanework's own are never in
+    // the list.
+    //
+    // NOTE: `connectorPlan` drops a name the config no longer holds, which
+    // Codex would refuse (see `codexMcpArgs`).
+    const connectors = await connectorPlan(target, "codex", {
+      conductor: asConductor,
+      inherited,
+    });
+    if (connectors) overrides.push(...codexConnectorArgs(connectors.disabled));
     // BE-01: how to save a conductor, and which board this project is,
     // unless the user's config already gives Codex developer instructions
     // (an override would replace them).
@@ -822,11 +851,45 @@ export class CodexEngine implements ConversationEngine {
   onServerRequest(rpcId: number | string, method: string, params: Json): void {
     const key = `codex-${String(rpcId)}`;
     const mode = this.applied?.permission ?? "manual";
-    const ask = (request: Omit<PermissionRequest, "id">, waiting: Waiting) => {
+    const ask = (
+      request: Omit<PermissionRequest, "id">,
+      waiting: Waiting,
+      subject: PermissionSubject | null = null,
+    ) => {
       const permission: PermissionRequest = { id: key, ...request };
-      this.permissions.set(key, permission);
       this.waiting.set(key, { rpcId, waiting });
-      this.emit({ type: "permission", request: permission });
+      noteSubject(permission, subject);
+      const show = () => {
+        this.permissions.set(key, permission);
+        this.emit({ type: "permission", request: permission });
+      };
+      // FE-165: the project's rules first, for a command or a file change.
+      const conversation = this.conversation;
+      const target = {
+        project: this.project,
+        conversation,
+        folder: this.folder,
+      };
+      if (!subject || !conversation || !engineMayAnswer(target)) {
+        show();
+        return;
+      }
+      const pending = () =>
+        this.waiting.get(key)?.rpcId === rpcId && !this.permissions.has(key);
+      void autoAllow(
+        { ...target, conversation, agent: this.agent },
+        subject,
+        () => {
+          if (!pending()) return false;
+          this.reply(rpcId, { decision: "accept" });
+          this.waiting.delete(key);
+          return true;
+        },
+      )
+        .catch(() => false)
+        .then((answered) => {
+          if (!answered && pending()) show();
+        });
     };
     switch (method) {
       case "item/commandExecution/requestApproval": {
@@ -847,6 +910,11 @@ export class CodexEngine implements ConversationEngine {
             questions: null,
           },
           { kind: "command" },
+          // A command run in another folder than the checkout asks.
+          command &&
+            (!str(params.cwd) || isInside(this.folder, str(params.cwd) ?? ""))
+            ? { kind: "bash", command: unwrapShell(command) }
+            : null,
         );
         return;
       }
@@ -881,6 +949,9 @@ export class CodexEngine implements ConversationEngine {
             questions: null,
           },
           { kind: "file" },
+          paths.length && paths.length === changes.length
+            ? { kind: "file", tool: "Edit", paths }
+            : null,
         );
         return;
       }
@@ -1186,7 +1257,11 @@ export class CodexEngine implements ConversationEngine {
     this.emitState();
     try {
       if (!this.child) this.ready = null;
-      this.ready ??= this.start(settings, isConductorTurn(out.text));
+      this.ready ??= this.start(
+        settings,
+        isConductorTurn(out.text),
+        out.connectors,
+      );
       await this.ready;
       const { input, dir } = await inputOf(out.content);
       if (dir) this.dirs.push(dir);

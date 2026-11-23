@@ -3,6 +3,7 @@ import {
   LWK_MODES,
   type LwkMode,
   POWER_MINUTES,
+  POWER_WARM_CAP_MAX,
   type PowerMinutes,
   type PowerSettings,
 } from "#/../shared/conversation";
@@ -23,6 +24,9 @@ const MINUTE_LABELS: Record<PowerMinutes, string> = {
   60: "1 hour",
   120: "2 hours",
 };
+
+/** 1 to {@link POWER_WARM_CAP_MAX} idle agents kept warm. */
+const WARM_CAPS = Array.from({ length: POWER_WARM_CAP_MAX }, (_, i) => i + 1);
 
 const LWK_MODE_LABELS: Record<LwkMode, string> = {
   always: "Always running",
@@ -118,6 +122,35 @@ export function PowerSection() {
                     {POWER_MINUTES.map((minutes) => (
                       <SelectItem key={minutes} value={minutes}>
                         {MINUTE_LABELS[minutes]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ),
+            },
+            {
+              label: "Idle agents kept running",
+              description:
+                "Past this many idle agents, the one unused the longest stops, even with End idle chats off. Each one holds a few hundred MB. Conductors and chats set to Keep running don't count.",
+              keywords:
+                "idle agents warm cap limit max memory ram keep running conductor stop end automatically",
+              control: (
+                <Select
+                  value={settings?.warmCap ?? null}
+                  disabled={settings === null}
+                  onValueChange={(next) => change({ warmCap: next as number })}
+                >
+                  <SelectTrigger aria-label="Idle agents kept running">
+                    <SelectValue>
+                      {(current: number | null) =>
+                        current === null ? "" : String(current)
+                      }
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {WARM_CAPS.map((count) => (
+                      <SelectItem key={count} value={count}>
+                        {String(count)}
                       </SelectItem>
                     ))}
                   </SelectContent>

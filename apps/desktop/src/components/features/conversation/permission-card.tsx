@@ -7,7 +7,7 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   ANSWER_MAX,
   type AskQuestion,
@@ -15,7 +15,10 @@ import {
   type PermissionAnswer,
   type PermissionRequest,
 } from "#/../shared/conversation";
+import { PermissionAlwaysAllow } from "#/components/features/conversation/permission-always-allow";
 import { Button } from "#/components/ui/button";
+import { readProjectRoots } from "#/hooks/use-project-folders";
+import { canBeRule, seededAskFor, seededReason } from "#/lib/permission-rules";
 import { cn } from "#/lib/utils";
 
 /** Both cards' shell: a white card lifted by a soft, wide shadow. */
@@ -50,6 +53,8 @@ export function PermissionCard({
   onAnswer,
   inputOpen = true,
   pending,
+  project = null,
+  conductor = null,
 }: {
   request: PermissionRequest;
   /** Who asks, by name: Claude, Codex or OpenCode. */
@@ -59,6 +64,10 @@ export function PermissionCard({
   inputOpen?: boolean;
   /** The stack's count and Show all, by the title; none for one request. */
   pending?: ReactNode;
+  /** The project's key: "Always allow…" saves its rule there (FE-165). */
+  project?: string | null;
+  /** The conductor whose conversation this is, for "Only for this conductor". */
+  conductor?: string | null;
 }) {
   if (request.questions)
     return (
@@ -77,6 +86,8 @@ export function PermissionCard({
       onAnswer={onAnswer}
       inputOpen={inputOpen}
       pending={pending}
+      project={project}
+      conductor={conductor}
     />
   );
 }
@@ -87,12 +98,16 @@ function ToolPermissionCard({
   onAnswer,
   inputOpen,
   pending,
+  project,
+  conductor,
 }: {
   request: PermissionRequest;
   agent: string;
   onAnswer: (id: string, answer: PermissionAnswer) => Promise<void>;
   inputOpen: boolean;
   pending: ReactNode;
+  project: string | null;
+  conductor: string | null;
 }) {
   // The Input follows `inputOpen` (open alone, closed in a stack) until the
   // user opens or closes it; then it stays as they left it.
@@ -103,6 +118,31 @@ function ToolPermissionCard({
     setBusy(true);
     void onAnswer(request.id, value).finally(() => setBusy(false));
   };
+
+  // "Always allow…" (FE-165): offered for the tools a rule can name, and
+  // refused, with its reason, when a built-in Ask rule covers this request.
+  const [always, setAlways] = useState(false);
+  const ruleable = project !== null && canBeRule(request.tool);
+  // Only the rule about paths outside the checkout needs the checkout: read
+  // once, for Edit and Write, never on a timer.
+  const [checkout, setCheckout] = useState<string | null>(null);
+  const needsCheckout =
+    ruleable && (request.tool === "Edit" || request.tool === "Write");
+  useEffect(() => {
+    if (!needsCheckout) return;
+    let gone = false;
+    void readProjectRoots(project).then((roots) => {
+      if (!gone) setCheckout(roots.primary);
+    });
+    return () => {
+      gone = true;
+    };
+  }, [needsCheckout, project]);
+  const blocked = useMemo(
+    () =>
+      ruleable ? seededAskFor(request.tool, request.input, checkout) : null,
+    [ruleable, request.tool, request.input, checkout],
+  );
   return (
     <section aria-label={`Permission for ${request.tool}`} className={CARD}>
       {/* The question card's shell (AskUserQuestion): a title, its detail,
@@ -131,6 +171,16 @@ function ToolPermissionCard({
           <code>{request.input || "{}"}</code>
         </pre>
       )}
+      {always && project && (
+        <PermissionAlwaysAllow
+          project={project}
+          tool={request.tool}
+          input={request.input}
+          conductor={conductor}
+          onAllow={() => onAnswer(request.id, { behavior: "allow" })}
+          onCancel={() => setAlways(false)}
+        />
+      )}
       <div className="flex flex-wrap items-center gap-1.5">
         <button
           type="button"
@@ -150,6 +200,19 @@ function ToolPermissionCard({
           Input
         </button>
         <span className="ml-auto" />
+        {ruleable && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className={PILL}
+            aria-expanded={always}
+            aria-describedby={blocked ? `${request.id}-always` : undefined}
+            disabled={busy || blocked !== null}
+            onClick={() => setAlways(!always)}
+          >
+            Always allow…
+          </Button>
+        )}
         <Button
           size="sm"
           // Muted: the quiet answer beside Allow.
@@ -185,6 +248,14 @@ function ToolPermissionCard({
           Allow
         </Button>
       </div>
+      {blocked && (
+        <p
+          id={`${request.id}-always`}
+          className="text-muted-foreground text-xs leading-relaxed"
+        >
+          Always allow is unavailable here. {seededReason(blocked)}
+        </p>
+      )}
     </section>
   );
 }

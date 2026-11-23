@@ -34,12 +34,18 @@ export function PermissionStack({
   requests,
   agent,
   onAnswer,
+  project = null,
+  conductor = null,
 }: {
   /** Oldest first: the last one is the front card. */
   requests: PermissionRequest[];
   /** Who asks, by name: Claude, Codex or OpenCode. */
   agent: string;
   onAnswer: (id: string, answer: PermissionAnswer) => Promise<void>;
+  /** The project's key, for each card's "Always allow…" (FE-165). */
+  project?: string | null;
+  /** The conductor whose conversation this is. */
+  conductor?: string | null;
 }) {
   const stack = useRef<HTMLDivElement>(null);
   /** Show all: the stack spread out, every card answerable. */
@@ -123,6 +129,8 @@ export function PermissionStack({
               request={request}
               agent={agent}
               onAnswer={onAnswer}
+              project={project}
+              conductor={conductor}
               inputOpen={false}
               pending={index === count - 1 ? header : undefined}
             />
@@ -198,6 +206,8 @@ export function PermissionStack({
                 request={request}
                 agent={agent}
                 onAnswer={onAnswer}
+                project={project}
+                conductor={conductor}
                 // The card to answer now shows what it would run.
                 inputOpen={depth === 0}
                 pending={depth === 0 ? header : undefined}

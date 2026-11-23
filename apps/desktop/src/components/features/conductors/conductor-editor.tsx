@@ -211,10 +211,13 @@ export function conductorEditor({
   draft,
   setDraft,
   takenIds,
+  source = "personal",
 }: {
   draft: Draft;
   setDraft: (draft: Draft) => void;
   takenIds: Set<string>;
+  /** Whose file it is: a repo conductor is checked as one (FE-166). */
+  source?: LeadSource;
 }): {
   sections: SettingsSectionSpec[];
   problem: string | null;
@@ -228,10 +231,7 @@ export function conductorEditor({
   let problem: string | null = null;
   let parsed: TeamLeadInput | null = null;
   try {
-    const { source: _source, ...rest } = parseTeamLead(
-      inputOf(draft),
-      "personal",
-    );
+    const { source: _source, ...rest } = parseTeamLead(inputOf(draft), source);
     parsed = rest;
   } catch (failure) {
     problem = failure instanceof Error ? failure.message : String(failure);

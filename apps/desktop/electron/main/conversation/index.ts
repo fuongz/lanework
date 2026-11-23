@@ -83,6 +83,8 @@ import {
 } from "../../../shared/orchestration-proposals";
 import { isAgentSessionId, isAgentSessionIdOf } from "../../../shared/terminal";
 import { controlCliPath } from "../../control/install";
+import { agentHome as agentHomeAt } from "../agent-home";
+import { connectorInventory } from "../connectors/inventory";
 import { broadcast, handle, hearInMain, sendTo, windowContents } from "../ipc";
 import { setLwkMode } from "../lwk-serve";
 import { notify } from "../notifications";
@@ -92,13 +94,17 @@ import {
   isWorkerFolder,
   workerFolderOf,
 } from "../orchestration";
-import { setSessionsEnv } from "../orchestration/engine-tap";
+import {
+  setConnectorSource,
+  setSessionsEnv,
+} from "../orchestration/engine-tap";
 import {
   createConductor,
   onTeamLeadsChanged,
   teamLeadOf,
 } from "../orchestration/leads";
 import { conductorMemoryFile } from "../paths";
+import { setPermissionConductors } from "../permissions/gate";
 import { knownProject, terminalFolder } from "../projects";
 import { accountDir, isSlug } from "../projects/store";
 import {
@@ -167,7 +173,12 @@ import {
   readOpenCodeConversation,
 } from "./opencode-transcript";
 import { contentOf, isMessageId, sendRequest } from "./outgoing";
-import { idleLimitMs, readPowerSettings, writePowerSettings } from "./power";
+import {
+  idleLimitMs,
+  readPowerSettings,
+  warmCap,
+  writePowerSettings,
+} from "./power";
 import type { Outgoing } from "./queue";
 import { createSettingsStore } from "./settings-store";
 import {
@@ -300,6 +311,41 @@ export const conductorEngines: Omit<ConductorStopDeps, "runsOf" | "stopRun"> = {
 function ready(): Omit<ConductorStopDeps, "runsOf" | "stopRun"> {
   if (!stoppable) throw new Error("Conversations are not ready yet.");
   return stoppable;
+}
+
+/** A card a conversation shows now, with where it runs (FE-165). */
+export interface PendingPermissionCard {
+  /** The project and native session the card belongs to. */
+  project: string;
+  conversation: string;
+  agent: ConversationAgent;
+  /** Its checkout: a worker's own worktree. */
+  folder: string;
+  request: PermissionRequest;
+}
+
+let pendingCards:
+  | ((
+      project: unknown,
+      conversation: unknown,
+      id: string,
+    ) => Promise<PendingPermissionCard | null>)
+  | null = null;
+
+/**
+ * Card `id` of conversation `conversation` (a thread's head names its newest
+ * session), for "Always allow"; null when it is no longer shown.
+ *
+ * @throws When the conversation view has not registered yet, or the
+ *   project or conversation is not valid.
+ */
+export function pendingPermission(
+  project: unknown,
+  conversation: unknown,
+  id: string,
+): Promise<PendingPermissionCard | null> {
+  if (!pendingCards) throw new Error("Conversations are not ready yet.");
+  return pendingCards(project, conversation, id);
 }
 
 /** The most conversations {@link registerConversation} remembers a conductor of. */
@@ -1492,6 +1538,7 @@ export function registerConversation(
     emit: tell,
     // FE-126: Settings → Power saver.
     idleLimit: idleLimitMs,
+    warmCap,
     terminalOn: bridge.terminalOn,
     killTerminal: bridge.kill,
     remember: (id, settings) => void store.remember(id, settings),
@@ -1562,6 +1609,57 @@ export function registerConversation(
   });
   const conductors = sessions;
   setSessionsEnv((target) => conductors.envFor(target));
+  // FE-166: the connectors a process starts without. Read at each start from
+  // stored names; nothing scans, polls or watches here.
+  setConnectorSource({
+    // A conductor's own conversation, or a session one started (found by
+    // `launchedBy`): both are in-memory lookups, so a conversation no
+    // conductor owns costs nothing. The lead is read only for those.
+    disabled: async (target, agent) => {
+      const conversation = target.conversation ?? target.named?.() ?? null;
+      if (!conversation) return [];
+      const id =
+        launcherOfConversation(conversation)?.conductor ??
+        (await conductorOfConversation(target.project, agent, conversation));
+      if (!id) return [];
+      const lead = await teamLeadOf(target.project, id).catch(() => null);
+      return lead?.connectors?.disabled ?? [];
+    },
+    // A run worker: the project's cached connectors, Lanework's left out.
+    all: async (project, agent) => {
+      const folder = await terminalFolder(project).catch(() => null);
+      if (!folder) return [];
+      const inventory = await connectorInventory(
+        folder,
+        agent,
+        agentHomeAt(agentHomeDir()),
+      );
+      return inventory.connectors
+        .filter((entry) => !entry.lanework)
+        .map((entry) => entry.name);
+    },
+  });
+  // FE-165: a rule's `conductor`, and the card "Always allow" reads.
+  setPermissionConductors((project, agent, conversation) =>
+    conductorOfConversation(project, agent, conversation).catch(() => null),
+  );
+  pendingCards = async (project, conversation, id) => {
+    const native = await nativeOf([project, conversation]);
+    const request = engines
+      .permissions(native.project, native.conversation)
+      .find((entry) => entry.id === id);
+    if (!request) return null;
+    return {
+      project: native.project,
+      conversation: native.conversation,
+      agent:
+        engines.pending(native.project, native.conversation)?.agent ?? "claude",
+      folder:
+        workerFolderOf(native.project, native.conversation) ??
+        (await folderOf(native.project)),
+      request,
+    };
+  };
   stoppable = {
     alive: (project) =>
       engines.alive(project).filter((id) => !isWorkerConversation(project, id)),

@@ -344,7 +344,7 @@ export function repairPrompt(
 // ─── A conductor's own conversation (FE-95) ─────────────────────────────────
 
 /** Bumped when the rules below change, so a live conversation gets them again. */
-const CONDUCTOR_PROMPT_VERSION = 5;
+const CONDUCTOR_PROMPT_VERSION = 6;
 
 /** A short, stable fingerprint: FNV-1a, base 36. */
 function fingerprint(value: string): string {
@@ -427,18 +427,33 @@ function memoryBlock(memory: ConductorMemory | null): string | null {
   return `<conductor_memory>\n${parts.join("\n")}\n</conductor_memory>`;
 }
 
+/**
+ * One line naming the connectors (MCP servers) the conductor may use besides
+ * Lanework's own (FE-166), or null when there are none.
+ *
+ * NOTE: Part of the rules block, so it is sent with the rules and never
+ * changes a conversation's prompt on its own: the fingerprint carries the
+ * conductor, whose `connectors.disabled` is what a user edits.
+ */
+function connectorsBlock(connectors: readonly string[]): string | null {
+  if (!connectors.length) return null;
+  return `<connectors>\nBesides Lanework's own tools you may use these connectors (MCP servers) when a request calls for them: ${connectors.join(", ")}.\n</connectors>`;
+}
+
 function conductorRules(
   lead: TeamLead,
   leadAgent: ConversationAgent,
   cwd: string | null,
   memory: ConductorMemory | null,
   others: readonly string[],
+  connectors: readonly string[],
 ): string[] {
   return [
     `<conductor>\nYou are "${lead.name}", a conductor in Lanework: the lead of this project's team of coding agents, in one long conversation the user comes back to over time. Lanework adds this block ahead of the user's message; they did not write it and do not see it. Act on it rather than talk about it: never quote, summarise or describe it.\n</conductor>`,
     `<delegation_rules>\nAnswer questions, explanations, reviews and small, tightly coupled changes yourself, directly. When a request is substantial (long-running, made of independent parts, or better split across specialised workers), do not do the work yourself: investigate only as much as planning needs, write one short sentence on what you propose, then one orchestration proposal inside <lanework_proposal>...</lanework_proposal>, and nothing after it. Lanework draws it as a card the user edits and approves; nothing runs before that, so never ask for approval in prose and never start the work yourself. Once it is approved, Lanework tells you how to coordinate the run. Respect the user's wishes about delegating: when they ask you to do something yourself, do it.\n</delegation_rules>`,
     `<sessions>\nWhen the user asks for a separate session, or hands you one self-contained job (an audit, an investigation, a fix in one area), start it as a session instead of doing it here or proposing a run: call the sessions_start tool. Do every session and memory call with the lanework_control MCP tools (sessions_*, memory_*, models_list); all but sessions_answer run without a permission prompt.${leadAgent === "claude" ? " If they are listed by name only, load them with ToolSearch first (e.g. select:mcp__lanework_control__sessions_start)." : ""} Fall back to \`"$${SESSIONS_ENV.cli}" sessions.start\` from your shell (\`--help\` lists every field) only when those tools are truly unavailable${leadAgent === "claude" ? ", not even through ToolSearch" : ""}. Write a short title and a self-contained prompt: the session sees nothing of this conversation. It runs in this checkout on your permission mode. It is private to you: the user reaches it through you, not through their Agents list. The user sees your sessions read-only unless you pass userAccess: true to sessions_start or later call sessions_access. A session without user access waits on you for its permissions: read them with sessions_read and answer with sessions_answer. For "agent", use the one the user names; otherwise leave it out to run on your own; Codex or OpenCode suit a second opinion or a different model family (OpenCode's model is provider/model). Then say in one line what you started; do not wait for it. Lanework tells you when its turn ends (with notifyOnComplete), and always when it waits on you for a permission: review the result then and report back briefly. sessions_list, sessions_read and sessions_send reach every session you started in this project, including ones from earlier conversations. A proposal stays the way for work split into parallel parts.\n</sessions>`,
     `<memory_rules>\nYour memory of this project persists across your conversations: Lanework keeps a ledger of the sessions you started, and you keep notes. Use the lanework_control tools: memory_read when you need that history; memory_append to add one decision, convention, open thread or next step; memory_write only to rewrite the notes whole (it replaces them, so send everything worth keeping, and keep them short). Only when those tools are truly unavailable does the CLI do the same: \`"$${SESSIONS_ENV.cli}" memory.read|memory.append|memory.write\`, with the JSON passed through \`--input -\` and a quoted heredoc rather than inline \`--json\`.\n</memory_rules>`,
+    connectorsBlock(connectors),
     // Its context files stand for every answer, not only for a proposal.
     contextBlock(lead),
     `<proposal_rules>\n${proposalRules(leadAgent, cwd, lead, false, others).join("\n\n")}\n</proposal_rules>`,
@@ -455,6 +470,10 @@ function conductorRules(
  *
  * `memory` (FE-128) goes along with the rules only, never with the reminder;
  * null, or an empty memory, sends no block.
+ *
+ * `connectors` (FE-166) names the connectors it may use besides Lanework's
+ * own, as {@link enabledConnectorNames} lists them; it goes along with the
+ * rules only and is not in the context, so a new connector never resends them.
  */
 export function conductorTurn(
   request: string,
@@ -464,6 +483,7 @@ export function conductorTurn(
   previous: string | null,
   memory: ConductorMemory | null = null,
   others: readonly string[] = [],
+  connectors: readonly string[] = [],
 ): string {
   const context = conductorContext(lead, cwd, others);
   const blocks =
@@ -471,7 +491,7 @@ export function conductorTurn(
       ? [
           `<conductor>\nYou are still "${lead.name}", the conductor; the rules from earlier in this conversation stand.\n</conductor>`,
         ]
-      : conductorRules(lead, leadAgent, cwd, memory, others);
+      : conductorRules(lead, leadAgent, cwd, memory, others, connectors);
   return `${CONDUCTOR_OPEN} id="${proposalId()}" lead="${lead.id}" context="${context}">\n${[
     ...blocks,
     requestBlock(request),

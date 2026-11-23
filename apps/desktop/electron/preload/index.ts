@@ -18,6 +18,10 @@ import {
   type DesktopConductorsApi,
 } from "../../shared/conductor-sessions";
 import {
+  connectorsChannels,
+  type DesktopConnectorsApi,
+} from "../../shared/connectors";
+import {
   type ConversationEvent,
   conversationChannels,
   type DesktopConversationApi,
@@ -72,6 +76,11 @@ import {
   type OrchestrationEvent,
   orchestrationChannels,
 } from "../../shared/orchestration";
+import {
+  type DesktopPermissionsApi,
+  type PermissionsEvent,
+  permissionsChannels,
+} from "../../shared/permissions";
 import {
   type DesktopProjectsApi,
   projectChannels,
@@ -1082,6 +1091,44 @@ const fsSearch: DesktopFsSearchApi = {
     ),
 };
 
+/** Permission rules (FE-165). */
+const permissions: DesktopPermissionsApi = {
+  list: (project) => ipcRenderer.invoke(permissionsChannels.list, project),
+  save: (project, rule) =>
+    ipcRenderer.invoke(permissionsChannels.save, project, rule),
+  remove: (project, id) =>
+    ipcRenderer.invoke(permissionsChannels.remove, project, id),
+  audit: (project) => ipcRenderer.invoke(permissionsChannels.audit, project),
+  onChange: (listener) =>
+    subscribe<PermissionsEvent>(permissionsChannels.changed, listener),
+  suggest: (project, conversation, requestId) =>
+    ipcRenderer.invoke(
+      permissionsChannels.suggest,
+      project,
+      conversation,
+      requestId,
+    ),
+  allowCard: (project, conversation, requestId) =>
+    ipcRenderer.invoke(
+      permissionsChannels.allowCard,
+      project,
+      conversation,
+      requestId,
+    ),
+};
+
+/**
+ * Connectors (FE-166): the MCP servers an agent reaches from a project. A
+ * project slug and an agent name only; main finds the folder. `DesktopApi`
+ * gains `connectors` with the shared contract.
+ */
+const connectors: DesktopConnectorsApi = {
+  inventory: (project, agent) =>
+    ipcRenderer.invoke(connectorsChannels.inventory, project, agent),
+  refresh: (project, agent) =>
+    ipcRenderer.invoke(connectorsChannels.refresh, project, agent),
+};
+
 const desktop: DesktopApi = {
   getAppInfo: () => ipcRenderer.invoke(channels.appInfo),
   setTheme: (source) => ipcRenderer.invoke(channels.setTheme, source),
@@ -1113,5 +1160,7 @@ const desktop: DesktopApi = {
   leads,
   conductors,
   fsSearch,
+  permissions,
+  connectors,
 };
 contextBridge.exposeInMainWorld("desktop", desktop);

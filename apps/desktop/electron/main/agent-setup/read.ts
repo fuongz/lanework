@@ -1451,6 +1451,33 @@ export async function readAgentSetup(
 }
 
 /**
+ * The claude.ai connectors `~/.claude.json` says this account ever reached
+ * (`claudeAiMcpEverConnected`, e.g. `claude.ai Gmail`), for FE-166.
+ *
+ * NOTE: A hint, not the account's list: Claude Code appends to it and never
+ * prunes, so a connector removed on claude.ai stays here. It is the only
+ * record on disk; the live list is `claude mcp list` (`connectors/account.ts`).
+ */
+export async function readClaudeAiHint(where: AgentHome): Promise<string[]> {
+  const head = await readHead(where.claudeJson, CLAUDE_JSON_MAX);
+  if (!head || head.truncated) return [];
+  let json: unknown;
+  try {
+    json = JSON.parse(head.text);
+  } catch {
+    return [];
+  }
+  if (!isObject(json)) return [];
+  return [
+    ...new Set(
+      strings(json.claudeAiMcpEverConnected).filter(
+        (name) => name.startsWith("claude.ai ") && name.length <= 200,
+      ),
+    ),
+  ];
+}
+
+/**
  * One skill or command, capped, its frontmatter apart (FE-40/D4).
  *
  * @throws When the file is no longer there.

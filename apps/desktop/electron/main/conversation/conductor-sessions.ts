@@ -872,6 +872,17 @@ export class ConductorSessions {
       ? `Work on ${input.taskId}.\n\n${input.prompt}`
       : input.prompt;
     const out = outgoing(text, settings);
+    // FE-166: a session inherits what its conductor turned off, fixed when
+    // its process starts. A Claude session is found by the engine through
+    // `launching` below (its id is known now). A new Codex conversation is
+    // named by its CLI after the process started, so its list travels with
+    // the first turn. OpenCode runs on the shared service: nothing to apply.
+    if (agent === "codex") {
+      const disabled = (
+        await this.deps.leadOf?.(project, conductor.id).catch(() => null)
+      )?.connectors?.disabled;
+      if (disabled?.length) out.connectors = disabled;
+    }
     const fields: Omit<Launch, "session"> = {
       project,
       conductor: conductor.conversation,

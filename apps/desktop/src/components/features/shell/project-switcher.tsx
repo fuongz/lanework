@@ -2,6 +2,7 @@ import {
   Add01Icon,
   ArrowRight01Icon,
   ListOrderedIcon,
+  PinIcon,
   Search01Icon,
   Settings01Icon,
   Sorting05Icon,
@@ -29,6 +30,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "#/components/ui/context-menu";
 import {
@@ -194,6 +196,8 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
   const grouping = usePreferences((state) => state.groupProjects);
   const collapsed = usePreferences((state) => state.collapsedNamespaces);
   const setCollapsed = usePreferences((state) => state.setNamespaceCollapsed);
+  const pins = usePreferences((state) => state.pinnedProjects);
+  const setPinned = usePreferences((state) => state.setProjectPinned);
   const setSort = usePreferences((state) => state.setProjectSort);
   const allProjects = useBoard((state) => state.projects);
   const active = useBoard((state) => state.active);
@@ -252,7 +256,11 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
   // running project folded into a group would undo the sort.
   const flat = (list: Project[]): Entry[] =>
     list.map((project) => ({ kind: "project", project }));
-  const toRows = (list: Project[]): Entry[] => {
+  //
+  // Pinned projects come before all of that: flat rows on top, above every
+  // group, in the order the sort gives them.
+  const pinned = new Set(pins);
+  const unpinnedRows = (list: Project[]): Entry[] => {
     if (!grouping) return flat(list);
     if (sort !== "activate") return groupByNamespace(list);
     return [
@@ -260,6 +268,10 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
       ...groupByNamespace(list.filter((project) => !hasAgents(project))),
     ];
   };
+  const toRows = (list: Project[]): Entry[] => [
+    ...flat(list.filter((project) => pinned.has(project.slug))),
+    ...unpinnedRows(list.filter((project) => !pinned.has(project.slug))),
+  ];
   const entries = toRows(shownProjects);
   // ⌘1…⌘9 count down the list as drawn with every group open, so a key
   // keeps its project whether a group is folded or not.
@@ -352,6 +364,15 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
           className="size-4.5 rounded-[5px] text-[9.5px]"
         />
         <span className="truncate">{label}</span>
+        {/* Pinned rows lead the list; the mark says why this one is up. */}
+        {pinned.has(project.slug) && (
+          <HugeiconsIcon
+            icon={PinIcon}
+            className="text-muted-foreground size-3 shrink-0"
+            strokeWidth={1.8}
+            aria-label="Pinned"
+          />
+        )}
         {isLocalProject(project) && <LocalBadge className="h-4.5 px-1.5" />}
         <RunningAgents agents={runningIn(project)} />
       </ContextMenuTrigger>
@@ -362,6 +383,12 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
           row on close lights it as focused, so a second row
           stays highlighted beside the one under the pointer. */}
       <ContextMenuContent finalFocus={false}>
+        <ContextMenuItem
+          onClick={() => setPinned(project.slug, !pinned.has(project.slug))}
+        >
+          {pinned.has(project.slug) ? "Unpin" : "Pin to top"}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
         <ContextMenuItem
           disabled={project.id === null}
           onClick={() => {
