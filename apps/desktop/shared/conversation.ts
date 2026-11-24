@@ -479,6 +479,7 @@ export type ToolKind =
   | "search" // Grep, Glob, LS, WebSearch
   | "fetch" // WebFetch
   | "agent" // Task / Agent: a sub-agent
+  | "message" // SendMessage: a follow-up to an agent it started, or a peer
   | "mcp" // mcp__server__tool
   | "other";
 
@@ -691,7 +692,68 @@ export interface HandoffTurn {
   session?: TurnSession;
 }
 
-export type Turn = UserTurn | AssistantTurn | CompactionTurn | HandoffTurn;
+/**
+ * A message another Claude Code session on this machine sent into this one
+ * (FE-169): Claude's `SendMessage` to this session's socket. The agent acts
+ * on it like a prompt, so the chat shows it, never as the user's own.
+ */
+export interface PeerTurn {
+  role: "peer";
+  /** The transcript line's uuid. */
+  id: string;
+  /** The sender's socket, `uds:/tmp/cc-socks/<pid>.sock`. */
+  from: string;
+  /** The name the sender gave itself, when it did. */
+  name: string | null;
+  /** The sender's permission mode (`bypass`, `default`…), when said. */
+  mode: string | null;
+  /** The sender's process id, as Claude verified it; null when not said. */
+  pid: number | null;
+  /**
+   * The Lanework conversation that sent it, when the sender's pid is one of
+   * the app's engines (D2); set by main, null otherwise.
+   */
+  sender: { conversation: string; title: string | null } | null;
+  text: string;
+  /** When it arrived, as an ISO timestamp. */
+  at: string;
+  /** The session of a thread it came from ({@link TurnSession}). */
+  session?: TurnSession;
+}
+
+export type Turn =
+  | UserTurn
+  | AssistantTurn
+  | CompactionTurn
+  | HandoffTurn
+  | PeerTurn;
+
+/** The tag Claude wraps a message from another session in (FE-169). */
+const CROSS_SESSION =
+  /<cross-session-message\b([^>]*)>\n?([\s\S]*?)\n?<\/cross-session-message>/;
+
+/**
+ * A message from another Claude session out of a user line's text, or null
+ * when the text holds none.
+ */
+export function readCrossSession(text: string): {
+  from: string;
+  name: string | null;
+  mode: string | null;
+  text: string;
+} | null {
+  const match = CROSS_SESSION.exec(text);
+  if (!match) return null;
+  const attrs = match[1] ?? "";
+  const attr = (name: string) =>
+    new RegExp(`\\b${name}="([^"]*)"`).exec(attrs)?.[1] ?? null;
+  return {
+    from: attr("from") ?? "",
+    name: attr("from-name"),
+    mode: attr("from-mode"),
+    text: (match[2] ?? "").trim(),
+  };
+}
 
 export interface Conversation {
   /**
@@ -856,6 +918,8 @@ export function turnBytes(turn: Turn): number {
   if (turn.role === "compaction")
     return FIELD * 8 + (turn.summary?.length ?? 0);
   if (turn.role === "handoff") return FIELD * (8 + 4 * turn.from.length);
+  if (turn.role === "peer")
+    return FIELD * 8 + turn.text.length + turn.from.length;
   let bytes = FIELD * 8 + (turn.model?.length ?? 0);
   for (const block of turn.blocks) {
     if (block.type === "text") bytes += FIELD + block.text.length;
@@ -1713,6 +1777,130 @@ export interface WebSearch {
 export interface ConversationFacts {
   /** The web searches it ran and pages it read, newest first. */
   web: { searches: WebSearch[]; partial: boolean };
+  /** Who it talked with: other sessions and its sub-agents. */
+  contacts?: ConversationContacts;
+}
+
+/** One other Claude session a conversation messaged or heard from. */
+export interface ConversationPeer {
+  /** Its socket (`uds:…`), what both directions name it by. */
+  key: string;
+  /** The name it gave itself, once one of its messages said it. */
+  name: string | null;
+  pid: number | null;
+  /** Messages it sent here, and messages sent to it. */
+  received: number;
+  sent: number;
+  /** The newest of them, ISO. */
+  lastAt: string;
+  /** The Lanework conversation it is, while its engine runs; set by main. */
+  sender: { conversation: string } | null;
+}
+
+/** One sub-agent a conversation started (`Agent` / `Task`). */
+export interface ConversationSubagent {
+  /** Its id, once the CLI named it; what opens its transcript. */
+  id: string | null;
+  description: string;
+  at: string | null;
+  running: boolean;
+  /** Follow-ups sent to it with `SendMessage`. */
+  messages: number;
+}
+
+/** Who a conversation talked with (the session details' Talking with). */
+export interface ConversationContacts {
+  peers: ConversationPeer[];
+  subagents: ConversationSubagent[];
+}
+
+/** The `to` of a `SendMessage` call, out of its input; null when unread. */
+function sentTo(input: string): string | null {
+  try {
+    const to = (JSON.parse(input) as { to?: unknown }).to;
+    return typeof to === "string" && to ? to : null;
+  } catch {
+    return /"to":\s*"([^"]+)"/.exec(input)?.[1] ?? null;
+  }
+}
+
+/** Who `turns` talked with: other sessions, newest first, and sub-agents. */
+export function contactsOf(turns: readonly Turn[]): ConversationContacts {
+  const peers = new Map<string, ConversationPeer>();
+  const subagents: ConversationSubagent[] = [];
+  const byId = new Map<string, ConversationSubagent>();
+  const peerOf = (key: string, at: string): ConversationPeer => {
+    let peer = peers.get(key);
+    if (!peer) {
+      peer = {
+        key,
+        name: null,
+        pid: null,
+        received: 0,
+        sent: 0,
+        lastAt: at,
+        sender: null,
+      };
+      peers.set(key, peer);
+    }
+    if (at > peer.lastAt) peer.lastAt = at;
+    return peer;
+  };
+  const messages: { to: string; at: string }[] = [];
+  for (const turn of turns) {
+    if (turn.role === "peer") {
+      const peer = peerOf(turn.from || turn.name || "?", turn.at);
+      peer.received++;
+      peer.name = turn.name ?? peer.name;
+      peer.pid = turn.pid ?? peer.pid;
+      continue;
+    }
+    if (turn.role !== "assistant") continue;
+    for (const block of turn.blocks) {
+      if (block.type !== "tools") continue;
+      for (const call of block.calls) {
+        if (call.kind === "agent") {
+          const entry: ConversationSubagent = {
+            id: call.subagent,
+            description: call.summary || "Sub-agent",
+            at: call.startedAt,
+            running: call.output === null,
+            messages: 0,
+          };
+          subagents.push(entry);
+          if (call.subagent) byId.set(call.subagent, entry);
+        } else if (call.kind === "message") {
+          const to = sentTo(call.input);
+          if (to) messages.push({ to, at: call.startedAt ?? turn.at });
+        }
+      }
+    }
+  }
+  // NOTE: After every call is seen: a follow-up names a sub-agent by the id
+  // its start's result gave, read with the call.
+  for (const { to, at } of messages) {
+    const agent = byId.get(to);
+    if (agent) {
+      agent.messages++;
+      continue;
+    }
+    // `to` is a socket or the name a session gave itself: one session
+    // either way, the one its messages here came from.
+    const named = [...peers.values()].find((peer) => peer.name === to);
+    const peer = named ?? peerOf(to, at);
+    if (!named && !to.startsWith("uds:")) peer.name ??= to;
+    if (at > peer.lastAt) peer.lastAt = at;
+    peer.sent++;
+  }
+  return {
+    peers: [...peers.values()].sort((a, b) => b.lastAt.localeCompare(a.lastAt)),
+    subagents: subagents.reverse(),
+  };
+}
+
+/** A conversation's facts out of its turns. */
+export function factsOf(turns: readonly Turn[]): ConversationFacts {
+  return { web: webSourcesOf(turns), contacts: contactsOf(turns) };
 }
 
 /** The most searches and sources one panel shows. */

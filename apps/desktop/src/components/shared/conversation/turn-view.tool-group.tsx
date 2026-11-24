@@ -9,6 +9,7 @@ import {
   Plug01Icon,
   Robot02Icon,
   Search01Icon,
+  SentIcon,
   Wrench01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
@@ -59,6 +60,7 @@ const KIND_ICONS: Record<ToolKind, IconSvgElement> = {
   search: Search01Icon,
   fetch: Globe02Icon,
   agent: Robot02Icon,
+  message: SentIcon,
   mcp: Plug01Icon,
   other: Wrench01Icon,
 };
@@ -282,8 +284,65 @@ function FileChip({ path }: { path: string }) {
   );
 }
 
+/**
+ * A `SendMessage` call's fields, out of its input (pretty JSON, maybe cut):
+ * who it went to, its short title and the message. Null when it cannot be
+ * read, and the row and panel show the input as any tool's.
+ */
+function sentMessage(
+  call: ToolCall,
+): { to: string; summary: string; message: string } | null {
+  if (call.kind !== "message") return null;
+  try {
+    const input = JSON.parse(call.input) as Record<string, unknown>;
+    const text = (value: unknown) => (typeof value === "string" ? value : "");
+    return {
+      to: text(input.to),
+      summary: text(input.summary),
+      message:
+        typeof input.message === "string"
+          ? input.message
+          : JSON.stringify(input.message ?? "", null, 2),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A recipient as the row shows it: a sub-agent's id cut to 8 characters,
+ * another Claude session (its socket, `uds:…`) by what it is, a name as is.
+ */
+function recipient(to: string): string {
+  if (to.startsWith("uds:")) return "another Claude session";
+  return /^a?[0-9a-f]{12,}$/i.test(to) ? to.slice(0, 8) : to;
+}
+
 /** What one row says after its icon: a command, `Read <file>`, a pattern. */
 function CallLine({ call }: { call: ToolCall }) {
+  const sent = sentMessage(call);
+  if (sent)
+    return (
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="shrink-0">Messaged</span>
+        {sent.to && (
+          <span
+            className={cn(
+              "text-foreground/80 shrink-0",
+              !sent.to.startsWith("uds:") && "font-mono text-[12px]",
+            )}
+            title={sent.to}
+          >
+            {recipient(sent.to)}
+          </span>
+        )}
+        {(sent.summary || call.summary) && (
+          <span className="text-muted-foreground min-w-0 truncate">
+            {sent.summary || call.summary}
+          </span>
+        )}
+      </span>
+    );
   if ((call.kind === "read" || call.kind === "edit") && call.filePath)
     return (
       <span className="flex min-w-0 items-center gap-2">
@@ -358,6 +417,7 @@ function CallRow({
 }) {
   const running = call.output === null;
   const image = madeImage(call);
+  const sent = sentMessage(call);
   // NOTE: Only a result longer than the read sends (`outputCut`) is read
   // whole, when asked: the chat never holds every long output at once.
   const [full, setFull] = useState<ToolOutput | null>(null);
@@ -405,29 +465,53 @@ function CallRow({
             <Elapsed ms={elapsed} className="ms-auto" />
           )}
         </Collapsible.Trigger>
-        {call.kind === "agent" && call.subagent && (
-          <Link
-            to="/w/$slug/agents/sub/$conversation/$sub"
-            params={{ slug, conversation, sub: call.subagent }}
-            search={{ agent: "claude" }}
-            className="text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] shrink-0 rounded-md px-1.5 py-0.5 text-xs transition-colors"
-          >
-            Open
-          </Link>
-        )}
+        {(call.kind === "agent" || call.kind === "message") &&
+          call.subagent && (
+            <Link
+              to="/w/$slug/agents/sub/$conversation/$sub"
+              params={{ slug, conversation, sub: call.subagent }}
+              search={{ agent: "claude" }}
+              className="text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] shrink-0 rounded-md px-1.5 py-0.5 text-xs transition-colors"
+            >
+              Open
+            </Link>
+          )}
       </div>
       <Collapsible.Panel className={atOnce ? PANEL_AT_ONCE : PANEL}>
         {/* Wide output scrolls inside its own box; the page never scrolls sideways. */}
         <div className="bg-foreground/[0.04] my-1 ms-6 flex max-h-96 flex-col gap-2 overflow-auto rounded-lg p-3 font-mono text-[11px] leading-relaxed">
-          <pre className="whitespace-pre-wrap break-all">
-            {call.kind === "command" &&
-            call.input &&
-            !call.input.startsWith("{") ? (
-              <code>{commandText(call.input)}</code>
-            ) : (
-              <JsonCode text={call.input || "{}"} />
-            )}
-          </pre>
+          {sent ? (
+            // A message reads as prose: who it went to, its title, its text.
+            <div className="flex flex-col gap-1.5 font-sans text-[12.5px] leading-relaxed">
+              <p className="text-muted-foreground">
+                To{" "}
+                <span className="text-foreground font-mono text-[11.5px]">
+                  {sent.to || "?"}
+                </span>
+                {sent.summary && (
+                  <>
+                    {", "}
+                    <span className="text-foreground font-medium">
+                      {sent.summary}
+                    </span>
+                  </>
+                )}
+              </p>
+              <p className="text-foreground/90 whitespace-pre-wrap break-words">
+                {sent.message}
+              </p>
+            </div>
+          ) : (
+            <pre className="whitespace-pre-wrap break-all">
+              {call.kind === "command" &&
+              call.input &&
+              !call.input.startsWith("{") ? (
+                <code>{commandText(call.input)}</code>
+              ) : (
+                <JsonCode text={call.input || "{}"} />
+              )}
+            </pre>
+          )}
           {call.output !== null && (
             <>
               <div className="border-border border-t" />

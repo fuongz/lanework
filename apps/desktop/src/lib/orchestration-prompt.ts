@@ -574,7 +574,12 @@ export function visibleTurns(turns: Turn[]): Turn[] {
       if (!text && !turn.attachments.length) return [];
       return [{ ...turn, text }];
     }
-    if (turn.role === "compaction" || turn.role === "handoff") return [turn];
+    if (
+      turn.role === "compaction" ||
+      turn.role === "handoff" ||
+      turn.role === "peer"
+    )
+      return [turn];
     if (
       !turn.blocks.some(
         (block) =>

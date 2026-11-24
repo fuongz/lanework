@@ -116,6 +116,8 @@ function turnText(turn: Turn, tools: boolean): string {
       }
       return parts.join("\n\n");
     }
+    case "peer":
+      return `Message from another Claude session${turn.name ? ` (${turn.name})` : ""}:\n${turn.text}`;
     case "compaction":
       return `The conversation was compacted here. Summary it kept:\n${turn.summary?.trim() ?? "(none)"}`;
     case "handoff":

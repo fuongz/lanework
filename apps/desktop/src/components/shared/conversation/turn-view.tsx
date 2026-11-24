@@ -61,6 +61,7 @@ import {
   launchedSessions,
 } from "./turn-view.launched-session";
 import { chatLink, liveChatLink } from "./turn-view.link-chip";
+import { PeerTurnView } from "./turn-view.peer";
 import { SourcesButton, SourcesList } from "./turn-view.sources";
 import { ToolGroup } from "./turn-view.tool-group";
 
@@ -821,6 +822,13 @@ export const TurnView = memo(
       return (
         <div data-turn={turn.id} className={dim}>
           <HandoffDivider turn={turn} />
+        </div>
+      );
+    // FE-169: a message another Claude session sent here.
+    if (turn.role === "peer")
+      return (
+        <div data-turn={turn.id} className={cn(OFFSCREEN, dim)}>
+          <PeerTurnView turn={turn} slug={slug} />
         </div>
       );
     if (turn.role === "user")

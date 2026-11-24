@@ -41,6 +41,7 @@ import {
   type Permission,
   type PermissionAnswer,
   type PermissionRequest,
+  readCrossSession,
   type Turn,
 } from "../../../shared/conversation";
 import { isAgentSessionId } from "../../../shared/terminal";
@@ -173,6 +174,15 @@ interface EngineDeps {
    * turn the person (or a limit) stopped.
    */
   outcome?: (outcome: TurnOutcome) => void;
+  /**
+   * Another Claude session sent `conversation` a message (FE-169/D3): main
+   * tells the user, unless they are looking at it.
+   */
+  peerMessage?: (
+    project: string,
+    conversation: string,
+    message: { name: string | null; text: string },
+  ) => void;
 }
 
 /**
@@ -818,6 +828,16 @@ class Engine implements ConversationEngine {
             ?.content;
           const said = localStdout(content);
           if (said !== null) this.settleSoon(said);
+          // FE-169/D3: a message another Claude session sent here.
+          const peer =
+            typeof content === "string" ? readCrossSession(content) : null;
+          if (peer)
+            safely(() =>
+              this.deps.peerMessage?.(this.project, this.conversation, {
+                name: peer.name,
+                text: peer.text,
+              }),
+            );
         }
         // FE-87: a write is told as soon as the CLI names it, a sub-agent's
         // too, so a worker's write guard sees it before the tool runs.
@@ -1679,6 +1699,17 @@ export function createEngines(input: EngineDeps) {
     pids,
     state,
     startNamed,
+
+    /**
+     * The conversation whose engine runs as process `pid` (FE-169): who sent
+     * a message from another Claude session, when it is one of the app's.
+     */
+    byPid(pid: number): { project: string; conversation: string } | null {
+      for (const engine of engines.values())
+        if (engine.pid() === pid && engine.conversation)
+          return { project: engine.project, conversation: engine.conversation };
+      return null;
+    },
 
     /** The settings `conversation` last ran with here, or null. */
     settingsOf(conversation: string): ComposerSettings | null {

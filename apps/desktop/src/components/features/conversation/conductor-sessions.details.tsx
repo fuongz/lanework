@@ -7,9 +7,11 @@ import {
   GitBranchIcon,
   GitCommitIcon,
   Globe02Icon,
+  MessageMultiple01Icon,
+  Robot02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import {
   type ReactNode,
   useCallback,
@@ -20,6 +22,11 @@ import {
   useRef,
   useState,
 } from "react";
+import type {
+  ConversationContacts,
+  ConversationPeer,
+  ConversationSubagent,
+} from "#/../shared/conversation";
 import {
   type AgentCommit,
   type AgentFiles,
@@ -42,6 +49,10 @@ import {
   PanelPages,
   usePanelPage,
 } from "#/components/shared/common/panel-pages";
+import {
+  initials,
+  toneOf,
+} from "#/components/shared/conversation/turn-view.peer";
 import { splitPath } from "#/components/shared/diff/diff-file-header";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
@@ -70,6 +81,8 @@ interface Reads {
   files: AgentFiles | null;
   /** The web searches it ran and pages it read; null when unread. */
   web: { searches: WebSearch[]; partial: boolean } | null;
+  /** Who it talked with, and the conversation it is (for its sub-agents). */
+  contacts: (ConversationContacts & { conversation: string }) | null;
   /** Both reads failed: why. */
   error: string | null;
 }
@@ -128,6 +141,10 @@ function useReads(project: string, slug: string, sources: ReadSource[]) {
           workspace: workspace.status === "fulfilled" ? workspace.value : null,
           files: files.status === "fulfilled" ? files.value : null,
           web: chat.status === "fulfilled" ? chat.value.web : null,
+          contacts:
+            chat.status === "fulfilled" && chat.value.contacts
+              ? { ...chat.value.contacts, conversation: id }
+              : null,
           error:
             workspace.status === "rejected" && files.status === "rejected"
               ? ipcMessage(workspace.reason, "This session could not be read.")
@@ -177,7 +194,30 @@ function merge(reads: Reads[]) {
   const commits = new Map<string, AgentCommit>();
   let partial = false;
   let webPartial = false;
+  const peers = new Map<string, ConversationPeer>();
+  const subagents: (ConversationSubagent & { conversation: string })[] = [];
   for (const read of reads) {
+    for (const peer of read.contacts?.peers ?? []) {
+      const known = peers.get(peer.key);
+      peers.set(
+        peer.key,
+        known
+          ? {
+              ...known,
+              name: known.name ?? peer.name,
+              sender: known.sender ?? peer.sender,
+              received: known.received + peer.received,
+              sent: known.sent + peer.sent,
+              lastAt: peer.lastAt > known.lastAt ? peer.lastAt : known.lastAt,
+            }
+          : peer,
+      );
+    }
+    for (const agent of read.contacts?.subagents ?? [])
+      subagents.push({
+        ...agent,
+        conversation: read.contacts?.conversation ?? "",
+      });
     webPartial ||= read.web?.partial ?? false;
     const where = read.workspace?.worktree;
     if (where) {
@@ -220,6 +260,8 @@ function merge(reads: Reads[]) {
       searches: mergeWebSearches(reads.map((read) => read.web?.searches ?? [])),
       partial: webPartial,
     },
+    peers: [...peers.values()].sort((a, b) => b.lastAt.localeCompare(a.lastAt)),
+    subagents,
   };
 }
 
@@ -384,7 +426,7 @@ function Facts({
   merged: ReturnType<typeof merge>;
   tasks: ReactNode;
 }) {
-  const { workspaces, files, commits, web } = merged;
+  const { workspaces, files, commits, web, peers, subagents } = merged;
   const pages = new Set(
     web.searches.flatMap((search) => search.sources.map((s) => s.url)),
   ).size;
@@ -437,6 +479,8 @@ function Facts({
     commits.length > 0 ||
     files.files.length > 0 ||
     web.searches.length > 0 ||
+    peers.length > 0 ||
+    subagents.length > 0 ||
     tasks ? (
       <Section>
         {commits.length > 0 && <CommitsGroup commits={commits} now={now} />}
@@ -453,6 +497,10 @@ function Facts({
           <Group icon={Globe02Icon} label="Sources" count={pages}>
             <SourceRows searches={web.searches} partial={web.partial} />
           </Group>
+        )}
+        {peers.length > 0 && <PeersGroup slug={slug} peers={peers} />}
+        {subagents.length > 0 && (
+          <SubagentsGroup slug={slug} subagents={subagents} />
         )}
         {tasks}
       </Section>
@@ -482,6 +530,114 @@ function BranchName({ branch }: { branch: string | null }) {
     </span>
   ) : (
     <span className="text-muted-foreground">Detached HEAD</span>
+  );
+}
+
+/**
+ * The other Claude sessions it talked with (FE-169), as the chat draws
+ * them: avatar and name in the sender's colour, how many each way, and
+ * Open when it is one of the app's conversations.
+ */
+function PeersGroup({
+  slug,
+  peers,
+}: {
+  slug: string;
+  peers: ConversationPeer[];
+}) {
+  return (
+    <Group
+      icon={MessageMultiple01Icon}
+      label="Talking with"
+      count={peers.length}
+    >
+      {peers.map((peer) => {
+        const name =
+          peer.name ?? (peer.pid ? `process ${peer.pid}` : "Claude session");
+        const tone = toneOf(peer.name ?? peer.key);
+        const counts = [
+          peer.received ? `${peer.received} in` : null,
+          peer.sent ? `${peer.sent} out` : null,
+        ]
+          .filter(Boolean)
+          .join(", ");
+        return (
+          <li key={peer.key} className={SUB_ROW} title={peer.key}>
+            <span
+              aria-hidden="true"
+              className={cn(
+                "grid size-5 shrink-0 place-items-center rounded-full text-[9px] font-semibold",
+                tone.avatar,
+              )}
+            >
+              {initials(name)}
+            </span>
+            <span
+              className={cn("min-w-0 flex-1 truncate font-medium", tone.name)}
+            >
+              {name}
+            </span>
+            <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
+              {counts}
+            </span>
+            {peer.sender && (
+              <Link
+                to="/w/$slug/agents/chat/$conversation"
+                params={{ slug, conversation: peer.sender.conversation }}
+                className="text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] shrink-0 rounded-md px-1.5 py-0.5 text-xs transition-colors"
+              >
+                Open
+              </Link>
+            )}
+          </li>
+        );
+      })}
+    </Group>
+  );
+}
+
+/** The sub-agents it started, newest first, each opening its transcript. */
+function SubagentsGroup({
+  slug,
+  subagents,
+}: {
+  slug: string;
+  subagents: (ConversationSubagent & { conversation: string })[];
+}) {
+  const running = subagents.filter((agent) => agent.running).length;
+  return (
+    <Group
+      icon={Robot02Icon}
+      label="Sub-agents"
+      count={running ? `${running} running` : subagents.length}
+      live={running > 0}
+    >
+      {subagents.map((agent, index) => (
+        <li key={agent.id ?? `pending-${index}`} className={SUB_ROW}>
+          <span className="min-w-0 flex-1 truncate" title={agent.description}>
+            {agent.description}
+          </span>
+          {agent.running ? (
+            <span className="text-tone-blue shrink-0 text-[11px]">Running</span>
+          ) : agent.messages > 0 ? (
+            <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
+              {agent.messages}{" "}
+              {agent.messages === 1 ? "follow-up" : "follow-ups"}
+            </span>
+          ) : null}
+          {agent.id && agent.conversation && (
+            <Link
+              to="/w/$slug/agents/sub/$conversation/$sub"
+              params={{ slug, conversation: agent.conversation, sub: agent.id }}
+              search={{ agent: "claude" }}
+              className="text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] shrink-0 rounded-md px-1.5 py-0.5 text-xs transition-colors"
+            >
+              Open
+            </Link>
+          )}
+        </li>
+      ))}
+    </Group>
   );
 }
 

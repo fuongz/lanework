@@ -44,6 +44,8 @@ export function turnText(turn: Turn): string {
   // A compaction's divider is not something said, nor is a handoff's
   // marker between a thread's sessions.
   if (turn.role === "compaction" || turn.role === "handoff") return "";
+  // Another session's message: its own text, as a user turn's is.
+  if (turn.role === "peer") return turn.text;
   return turn.blocks
     .filter((block) => block.type === "text")
     .map((block) => block.text)
@@ -132,6 +134,9 @@ export function groupTitle(calls: ToolCall[]): string {
         break;
       case "agent":
         parts.push(`Ran ${plural(n, "a sub-agent", "sub-agents")}`);
+        break;
+      case "message":
+        parts.push(`Messaged ${plural(n, "an agent", "agents")}`);
         break;
       case "mcp":
         parts.push(

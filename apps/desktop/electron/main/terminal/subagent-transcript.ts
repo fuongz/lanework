@@ -235,6 +235,13 @@ export function claudeStepSummary(
       return typeof input.description === "string" ? input.description : "";
     case "Skill":
       return typeof input.skill === "string" ? input.skill : "";
+    case "SendMessage":
+      // Its own short title, else the message's first line.
+      return typeof input.summary === "string" && input.summary.trim()
+        ? input.summary
+        : typeof input.message === "string"
+          ? firstLine(input.message)
+          : "";
     case "TodoWrite":
       return Array.isArray(input.todos)
         ? `${input.todos.length} item${input.todos.length === 1 ? "" : "s"}`

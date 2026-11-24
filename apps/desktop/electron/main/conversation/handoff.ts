@@ -138,6 +138,9 @@ function renderTurn(
 ): string | null {
   const tag = ref ? ` [${ref}]` : "";
   if (turn.role === "compaction") return null;
+  // FE-169: what another Claude session sent; the agent acted on it.
+  if (turn.role === "peer")
+    return `### Message from another Claude session${turn.name ? ` (${turn.name})` : ""} (${turn.at})${tag}\n${turn.text.trim()}`;
   if (turn.role === "handoff")
     return `### Handed off to ${AGENT_LABELS[turn.to.agent]}${turn.to.model ? ` (${turn.to.model})` : ""} (${turn.at})`;
   if (turn.role === "user") {

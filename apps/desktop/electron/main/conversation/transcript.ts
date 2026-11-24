@@ -15,7 +15,10 @@ import {
   type CompactionTurn,
   type Conversation,
   type ConversationFacts,
+  factsOf,
   isLaneworkEnvelope,
+  type PeerTurn,
+  readCrossSession,
   spanMs,
   TOOL_OUTPUT_FULL_MAX,
   TOOL_TEXT_MAX,
@@ -25,7 +28,6 @@ import {
   type Turn,
   type TurnUsage,
   type UserTurn,
-  webSourcesOf,
 } from "../../../shared/conversation";
 import type { TeamLead } from "../../../shared/orchestration";
 import { latestReadyProposal } from "../../../shared/orchestration-proposals";
@@ -108,6 +110,8 @@ function toolKind(tool: string): ToolKind {
     case "Task":
     case "Agent":
       return "agent";
+    case "SendMessage":
+      return "message";
     default:
       return "other";
   }
@@ -236,6 +240,49 @@ function steered(line: Line): Line | null {
     ...line,
     type: "user",
     message: { role: "user", content: attachment.prompt },
+  };
+}
+
+/**
+ * A message another Claude session sent into this one (FE-169), or null:
+ * a user line whose origin is a peer, or whose text is Claude's
+ * `<cross-session-message>` wrapper.
+ */
+function peerOf(
+  line: Line,
+): Omit<PeerTurn, "role" | "id" | "at" | "sender"> | null {
+  if (line.type !== "user" || line.isSidechain) return null;
+  const origin = record(line.origin);
+  const content = (line.message as { content?: unknown } | undefined)?.content;
+  const text =
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? (content as Record<string, unknown>[])
+            .map((part) =>
+              part?.type === "text" && typeof part.text === "string"
+                ? part.text
+                : "",
+            )
+            .join("\n")
+        : "";
+  if (origin.kind !== "peer" && !text.includes("<cross-session-message"))
+    return null;
+  const read = readCrossSession(text);
+  if (!read) return null;
+  const pid = origin.verifiedPeerPid;
+  const fromSocket = /\/(\d+)\.sock$/.exec(read.from)?.[1];
+  return {
+    from: read.from,
+    name: read.name ?? (typeof origin.name === "string" ? origin.name : null),
+    mode: read.mode,
+    pid:
+      typeof pid === "number" && Number.isInteger(pid)
+        ? pid
+        : fromSocket
+          ? Number(fromSocket)
+          : null,
+    text: read.text,
   };
 }
 
@@ -621,6 +668,21 @@ export function turnFold(folder: string): TurnFold {
       command = null;
       return;
     }
+    // FE-169: a message another Claude session sent here. A meta line, so
+    // `promptOf` drops it, but the agent acts on it: it is shown.
+    const peer = peerOf(line);
+    if (peer) {
+      close();
+      command = null;
+      turns.push({
+        role: "peer",
+        id: typeof line.uuid === "string" ? line.uuid : `p-${turns.length}`,
+        ...peer,
+        sender: null,
+        at: at ?? "",
+      } satisfies PeerTurn);
+      return;
+    }
     const prompt = promptOf(steered(line) ?? line);
     if (prompt) {
       close();
@@ -699,7 +761,16 @@ export function turnFold(folder: string): TurnFold {
                   ? input.notebook_path
                   : null
               : null,
-            subagent: null,
+            // A follow-up to a sub-agent it started (its id, `a` and hex):
+            // its row opens it too. A name, or another session's socket
+            // (`uds:…`), opens nothing.
+            subagent:
+              part.name === "SendMessage" &&
+              typeof input.to === "string" &&
+              /^a?[0-9a-f]{12,}$/.test(input.to) &&
+              isClaudeSubagentId(input.to)
+                ? input.to
+                : null,
             startedAt: at,
             durationMs: null,
           };
@@ -1419,7 +1490,7 @@ export function foldedFacts(
 ): Promise<ConversationFacts> {
   return inTurn(file, async () => {
     const { entry } = await refreshFold(file, folder, max, kind);
-    entry.facts ??= { web: webSourcesOf(entry.fold.peek()) };
+    entry.facts ??= factsOf(entry.fold.peek());
     return entry.facts;
   });
 }

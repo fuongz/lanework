@@ -467,7 +467,7 @@ export interface ThreadReadInput {
 /** One turn as `thread.read` returns it. */
 export interface ThreadReadTurn {
   ref: string;
-  role: "user" | "assistant" | "compaction";
+  role: "user" | "assistant" | "compaction" | "peer";
   at: string;
   model?: string;
   /** At most {@link THREAD_READ_TURN_CHARS} characters of it. */

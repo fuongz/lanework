@@ -46,6 +46,7 @@ import {
   conversationChannels,
   type EarlierProposal,
   type EngineState,
+  factsOf,
   type HandoffTurn,
   type ImagePreview,
   isOpenableUrl,
@@ -68,7 +69,6 @@ import {
   type TurnSession,
   turnBytes,
   type UsageLimitsState,
-  webSourcesOf,
   windowStart,
 } from "../../../shared/conversation";
 import {
@@ -1106,7 +1106,9 @@ async function imageScope(
   const attachments = turns.flatMap((turn) =>
     turn.role === "user"
       ? turn.attachments.flatMap((entry) => (entry.path ? [entry.path] : []))
-      : turn.role === "compaction" || turn.role === "handoff"
+      : turn.role === "compaction" ||
+          turn.role === "handoff" ||
+          turn.role === "peer"
         ? []
         : turn.blocks.flatMap((block) =>
             block.type === "tools"
@@ -1661,6 +1663,24 @@ export function registerConversation(
     // A turn the CLI died in (a crash, a kill after an unanswered Stop) left
     // its transcript open: recorded as cut off, so every "working" read lets
     // it go; the watchers hear it, and the chat reads again at once.
+    // FE-169/D3: another Claude session messaged a conversation: the user
+    // is told, unless a focused window already shows it (`notify`).
+    peerMessage: (project, conversation, message) =>
+      void (async () => {
+        const { project: found } = await knownProject(project);
+        if (!found) return;
+        const line = message.text.split("\n").find((text) => text.trim()) ?? "";
+        await notify({
+          kind: "sessions",
+          title: `Message from ${message.name ?? "another Claude session"}`,
+          body: line.length > 160 ? `${line.slice(0, 157)}...` : line,
+          target: {
+            kind: "session",
+            slug: found.slug,
+            conversation: handoffs.now.headOf(conversation),
+          },
+        });
+      })().catch(() => {}),
     processEnded: (agent, project, folder, conversation) =>
       void (async () => {
         const file =
@@ -1911,6 +1931,18 @@ export function registerConversation(
     // read of new lines would change what this one answers.
     const settings = await store.of(conversation);
     const read = await readAny(folder, conversation);
+    // FE-169/D2: a message from another Claude session names the Lanework
+    // conversation that sent it, while its engine runs. Set on the turn
+    // itself, so a fold's turn objects stay the same ones (`tagged`).
+    for (const turn of read.turns)
+      if (turn.role === "peer" && turn.pid !== null && !turn.sender) {
+        const from = engines.byPid(turn.pid);
+        if (from && from.project === project)
+          turn.sender = {
+            conversation: handoffs.now.headOf(from.conversation),
+            title: null,
+          };
+      }
     // OpenCode's running turn, newer than its database (FE-104).
     if (agent === "opencode" && pending?.working)
       return {
@@ -2158,40 +2190,70 @@ export function registerConversation(
       if (args.length !== 2)
         throw new Error("A project and a conversation are required");
       const { project, conversation } = conversationOf(args);
-      // NOTE: A thread's facts are every session's: read stitched, without
-      // the per-transcript fold a lone conversation keeps its answer in.
-      if ((await threadOf(project, conversation)).chain.length)
-        return {
-          web: webSourcesOf((await readWhole(project, conversation)).turns),
-        };
-      const folder =
-        workerFolderOf(project, conversation) ?? (await folderOf(project));
-      const agent = await agentOf(folder, conversation);
-      const pending = engines.pending(project, conversation);
-      if (pending && !agent) return { web: webSourcesOf(pending.turns) };
-      switch (agent) {
-        case "opencode": {
-          // No file to fold: the database is read, as `read` does.
-          const read = await readOpenCodeConversation(
-            opencodeData(),
-            folder,
-            conversation,
-          );
-          return {
-            web: webSourcesOf(
-              pending?.working
-                ? withLive(read.turns, pending.turns)
-                : read.turns,
-            ),
-          };
-        }
-        case "codex":
-          return codexFacts(agentHome(), folder, conversation);
-        default:
-          return claudeFacts(agentHome(), folder, conversation);
-      }
+      return withSenders(project, await factsFor(project, conversation));
     },
   );
+
+  /** A conversation's facts (`summary`): read as `read` reads it. */
+  async function factsFor(
+    project: string,
+    conversation: string,
+  ): Promise<ConversationFacts> {
+    // NOTE: A thread's facts are every session's: read stitched, without
+    // the per-transcript fold a lone conversation keeps its answer in.
+    if ((await threadOf(project, conversation)).chain.length)
+      return factsOf((await readWhole(project, conversation)).turns);
+    const folder =
+      workerFolderOf(project, conversation) ?? (await folderOf(project));
+    const agent = await agentOf(folder, conversation);
+    const pending = engines.pending(project, conversation);
+    if (pending && !agent) return factsOf(pending.turns);
+    switch (agent) {
+      case "opencode": {
+        // No file to fold: the database is read, as `read` does.
+        const read = await readOpenCodeConversation(
+          opencodeData(),
+          folder,
+          conversation,
+        );
+        return factsOf(
+          pending?.working ? withLive(read.turns, pending.turns) : read.turns,
+        );
+      }
+      case "codex":
+        return codexFacts(agentHome(), folder, conversation);
+      default:
+        return claudeFacts(agentHome(), folder, conversation);
+    }
+  }
+
+  /**
+   * `facts` with each other session that is one of the app's conversations
+   * named (FE-169/D2): a copy, never the fold's cached answer.
+   */
+  function withSenders(
+    project: string,
+    facts: ConversationFacts,
+  ): ConversationFacts {
+    if (!facts.contacts?.peers.length) return facts;
+    return {
+      ...facts,
+      contacts: {
+        ...facts.contacts,
+        peers: facts.contacts.peers.map((peer) => {
+          const from = peer.pid === null ? null : engines.byPid(peer.pid);
+          return from && from.project === project
+            ? {
+                ...peer,
+                sender: {
+                  conversation: handoffs.now.headOf(from.conversation),
+                },
+              }
+            : peer;
+        }),
+      },
+    };
+  }
 
   handle(
     conversationChannels.toolOutput,
