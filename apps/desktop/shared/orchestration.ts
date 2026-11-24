@@ -972,7 +972,15 @@ export function parseProposal(value: unknown): OrchestrationProposal {
     project: input.project,
     lead: input.lead,
     leadAgent: leadAgent(input.leadAgent),
-    request: text(input.request, "request", PROMPT_MAX),
+    // NOTE: Cut, never refused: it is the user's message as they sent it,
+    // which the composer lets run longer, and a run only shows it.
+    request: text(
+      typeof input.request === "string"
+        ? input.request.trim().slice(0, PROMPT_MAX)
+        : input.request,
+      "request",
+      PROMPT_MAX,
+    ),
     status: "ready",
     title: text(input.title, "title", TITLE_MAX),
     summary: text(input.summary, "summary", 2000),
