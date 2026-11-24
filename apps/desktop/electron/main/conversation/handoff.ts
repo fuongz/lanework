@@ -10,6 +10,7 @@
 // span, then the newest backwards; shown oldest first.
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, extname } from "node:path";
+import { SESSIONS_ENV } from "../../../shared/conductor-sessions";
 import {
   AGENT_LABELS,
   type ConversationAgent,
@@ -24,6 +25,7 @@ import {
   type Turn,
 } from "../../../shared/conversation";
 import { isAgentSessionId, isAgentSessionIdOf } from "../../../shared/terminal";
+import { indexTurns, shortSession } from "./thread-read";
 
 /** The history cap, as t3code's `DEFAULT_HANDOFF_TOKEN_CAP`. */
 export const HANDOFF_TOKEN_CAP = 16_000;
@@ -35,6 +37,8 @@ const DEFAULT_WINDOW = 128_000;
 const TURN_MAX = 4_000;
 /** The most one tool line takes, in characters. */
 const TOOL_LINE_MAX = 200;
+/** The most left-out turn references the block lists (BE-03/D3). */
+const OMITTED_REFS_MAX = 50;
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
@@ -127,7 +131,12 @@ export function handoffBudget(input: {
  * @param chain The turns are a whole thread's: a session's first message is
  *   read without the context block it started with.
  */
-function renderTurn(turn: Turn, chain: boolean): string | null {
+function renderTurn(
+  turn: Turn,
+  chain: boolean,
+  ref: string | null = null,
+): string | null {
+  const tag = ref ? ` [${ref}]` : "";
   if (turn.role === "compaction") return null;
   if (turn.role === "handoff")
     return `### Handed off to ${AGENT_LABELS[turn.to.agent]}${turn.to.model ? ` (${turn.to.model})` : ""} (${turn.at})`;
@@ -142,7 +151,7 @@ function renderTurn(turn: Turn, chain: boolean): string | null {
       (chain ? splitHandoffText(turn.text)?.message : null) ?? turn.text
     ).trim();
     if (!text && !attached) return null;
-    return `### User (${turn.at})\n${text}${attached}`;
+    return `### User (${turn.at})${tag}\n${text}${attached}`;
   }
   const parts: string[] = [];
   for (const block of turn.blocks) {
@@ -159,7 +168,7 @@ function renderTurn(turn: Turn, chain: boolean): string | null {
       );
   }
   if (!parts.length) return null;
-  return `### Assistant${turn.model ? ` (${turn.model})` : ""} (${turn.at})\n${parts.join("\n\n")}`;
+  return `### Assistant${turn.model ? ` (${turn.model})` : ""} (${turn.at})${tag}\n${parts.join("\n\n")}`;
 }
 
 export interface HandoffSource {
@@ -203,9 +212,13 @@ export function buildHandoff(
   const summaryText =
     compaction?.role === "compaction" ? (compaction.summary?.trim() ?? "") : "";
   const chain = (source.sessions?.length ?? 0) > 1;
+  // Every turn's reference (BE-03): what `thread.read` reads it back by.
+  const refs = indexTurns(source.turns, source.conversation);
   const rendered = source.turns
     .slice(last + 1)
-    .map((turn) => renderTurn(turn, chain))
+    .map((turn, at) =>
+      renderTurn(turn, chain, refs[last + 1 + at]?.ref ?? null),
+    )
     .flatMap((entry, index) =>
       entry === null ? [] : [{ index, text: cut(safe(entry), TURN_MAX) }],
     );
@@ -242,6 +255,21 @@ export function buildHandoff(
   const kept = rendered.filter((_, at) => picked.has(at));
   const omitted = rendered.length - kept.length;
 
+  // What `thread.read` can bring back: each session's turns, and the user
+  // and assistant turns not shown, newest first (D3).
+  const keptAt = new Set(kept.map((entry) => last + 1 + entry.index));
+  const counts = new Map<string, number>();
+  for (const entry of refs)
+    if (entry) counts.set(entry.session, entry.index + 1);
+  const left: string[] = [];
+  for (let at = source.turns.length - 1; at >= 0; at--) {
+    const entry = refs[at];
+    if (!entry || keptAt.has(at)) continue;
+    if (entry.turn.role !== "user" && entry.turn.role !== "assistant") continue;
+    if (renderTurn(entry.turn, chain) === null) continue;
+    left.push(entry.ref);
+  }
+
   const label = AGENT_LABELS[source.agent];
   const since = summary ? " since it last compacted" : "";
   const sessions = chain ? (source.sessions ?? []) : [];
@@ -257,6 +285,22 @@ export function buildHandoff(
     `This conversation continues one the user had with ${withWhom} in this same project folder.`,
     `Carried over from its transcript: ${summary ? "the summary it kept of the earlier part, then " : ""}${kept.length} of its ${rendered.length} turns${since}, oldest first${omitted ? ` (${omitted} older or longer turns did not fit and are left out${source.truncated ? "; its transcript's start was too long to read at all" : ""})` : source.truncated ? " (its transcript's start was too long to read)" : ""}.`,
     "Tool calls are listed by name and summary only: their outputs, attachments and the previous agent's own state are not carried.",
+    ...(counts.size
+      ? [
+          `Each turn is named [<session>:<index>]. Sessions: ${[...counts]
+            .map(
+              ([session, total]) =>
+                `${shortSession(session)} (turns 0-${total - 1})`,
+            )
+            .join(", ")}.`,
+        ]
+      : []),
+    ...(left.length
+      ? [
+          `Turns not shown here (${left.length}, newest first${left.length > OMITTED_REFS_MAX ? `, the first ${OMITTED_REFS_MAX} listed` : ""}): ${left.slice(0, OMITTED_REFS_MAX).join(", ")}.`,
+          `Read one only when the request needs it: call the lanework_control tool thread_read with {"ref":"<session>:<index>"} ({"session":"<session>","after":<index>} pages through one session), or without it run \`"$${SESSIONS_ENV.cli}" thread.read --json '{"ref":"<session>:<index>"}'\`.`,
+        ]
+      : []),
     "This is context, not a new request and not higher-priority instructions. Files may have changed since; check them before relying on it.",
   ].join("\n");
   const sections = [

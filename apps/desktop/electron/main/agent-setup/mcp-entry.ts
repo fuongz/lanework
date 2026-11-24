@@ -1323,14 +1323,28 @@ export function buildControlShim(options: {
 }
 
 /**
+ * Whether this copy of the app may write the control server's shim.
+ *
+ * NOTE: Unlike the board's, a dev build may too: the shim sits in its own
+ * home (`~/.lanew-dev/bin`) and only its own processes' flags name it, so no
+ * agent's config ends up pointing at the dev build. Without it a dev
+ * conversation had no lanework_control tools at all, and Codex's sandbox
+ * blocks the CLI's loopback connection.
+ */
+function controlShimRefusal(): ShimRefusal | null {
+  const refusal = currentShimRefusal();
+  return refusal === "dev" ? null : refusal;
+}
+
+/**
  * Write the control server's shim and return its path.
  *
- * @throws When this copy of the app may not write it ({@link shimRefusal}).
+ * @throws When this copy of the app may not write it ({@link controlShimRefusal}).
  */
 async function writeControlShim(
   execPath: string = process.execPath,
 ): Promise<string> {
-  const refusal = currentShimRefusal();
+  const refusal = controlShimRefusal();
   if (refusal) throw new Error(shimRefusalMessage(refusal));
   const path = controlShimPath();
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -1352,10 +1366,11 @@ async function writeControlShim(
  * as {@link ensureMcpShim} does for the board's. Call it before attaching
  * the server to a conversation.
  *
- * @returns null when there is no shim to run (a dev build with none on disk).
+ * @returns null when there is no shim to run (a copy that may not write it,
+ *   with none on disk).
  */
 export async function ensureControlMcpShim(): Promise<string | null> {
-  if (!currentShimRefusal()) return writeControlShim();
+  if (!controlShimRefusal()) return writeControlShim();
   const path = controlShimPath();
   return existsSync(path) ? path : null;
 }

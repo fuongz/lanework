@@ -66,8 +66,8 @@ import {
 /**
  * Every action a conversation's sessions token carries, in the order
  * `--help` lists them. `sessions.*` and `memory.*` (FE-128) are a
- * conductor's own; `conductors.create` (BE-01, PD-04) any conversation the
- * app started may call.
+ * conductor's own; `conductors.create` (BE-01, PD-04) and `thread.read`
+ * (BE-03) any conversation the app started may call.
  */
 export const SESSION_ACTIONS = [
   "sessions.start",
@@ -81,6 +81,7 @@ export const SESSION_ACTIONS = [
   "memory.write",
   "models.list",
   "conductors.create",
+  "thread.read",
 ] as const;
 export type SessionAction = (typeof SESSION_ACTIONS)[number];
 
@@ -117,6 +118,15 @@ export const WAITING_ASK_MAX = 300;
 export const READ_CHARS_DEFAULT = 1500;
 export const READ_CHARS_MIN = 200;
 export const READ_CHARS_MAX = 6000;
+
+/** The most turns one `thread.read` returns (BE-03). */
+export const THREAD_READ_LIMIT_MAX = 20;
+/** The most text one `thread.read` returns in all, in bytes. */
+export const THREAD_READ_BYTES_MAX = 32 * 1024;
+/** Each turn's text per `thread.read`; `textOffset` reads on. */
+export const THREAD_READ_TURN_CHARS = 4000;
+/** A turn reference: `<session>:<index>`. */
+export const THREAD_REF_PATTERN = /^[A-Za-z0-9_-]{4,64}:\d{1,6}$/;
 
 /** The most ledger entries a conductor's memory keeps, newest first. */
 export const MEMORY_LEDGER_MAX = 30;
@@ -195,6 +205,8 @@ export interface SessionInputs {
   "memory.write": { notes: string };
   /** The catalog a proposal may name, narrowed by agent or id text. */
   "models.list": { agent?: TerminalAgent; query?: string };
+  /** Turns of the caller's own thread (BE-03); see {@link ThreadReadInput}. */
+  "thread.read": ThreadReadInput;
   /**
    * A personal conductor of the caller's project. Every field left out takes
    * the default the rail's dialog gives, or the caller's own agent and model.
@@ -419,6 +431,7 @@ export interface SessionResults {
   /** As `memory.write`: the notes' new length, not the notes. */
   "memory.append": { notesLength: number; updatedAt: number };
   "models.list": ModelsListing;
+  "thread.read": ThreadReadResult;
   "conductors.create": {
     /** Its id, picked by the app: never one already taken. */
     id: string;
@@ -430,6 +443,52 @@ export interface SessionResults {
     contextFiles: string[];
     permission: Permission | null;
   };
+}
+
+/**
+ * `thread.read`'s input: nothing for the sessions, `ref` for one turn,
+ * `session` for its turns after `after`.
+ */
+export interface ThreadReadInput {
+  /** One turn, `<session>:<index>`. */
+  ref?: string;
+  /** With `ref`: where its text reads on from (`nextTextOffset`). */
+  textOffset?: number;
+  /** A session's reference prefix, or its whole id. */
+  session?: string;
+  /** With `session`: the turns after this index; absent: from its start. */
+  after?: number;
+  /** With `session`: at most this many (1-{@link THREAD_READ_LIMIT_MAX}). */
+  limit?: number;
+  /** Tool calls' outputs too; by default only their name and summary. */
+  includeTools?: boolean;
+}
+
+/** One turn as `thread.read` returns it. */
+export interface ThreadReadTurn {
+  ref: string;
+  role: "user" | "assistant" | "compaction";
+  at: string;
+  model?: string;
+  /** At most {@link THREAD_READ_TURN_CHARS} characters of it. */
+  text: string;
+  /** Where the rest reads on from; null when this is its end. */
+  nextTextOffset: number | null;
+}
+
+export interface ThreadReadResult {
+  sessions: {
+    /** The prefix its references use. */
+    session: string;
+    conversation: string;
+    agent: string;
+    model: string | null;
+    /** How many turns it has, when the call read it whole. */
+    turns?: number;
+  }[];
+  turns: ThreadReadTurn[];
+  /** The next page of `session`'s turns; null when there is none. */
+  next: { session: string; after: number } | null;
 }
 
 function fail(message: string): never {
@@ -617,6 +676,46 @@ const SCHEMAS: {
           fail("query must be a string of at most 120 characters");
         if (input.query.trim()) out.query = input.query.trim();
       }
+      return out;
+    },
+  },
+  "thread.read": {
+    fields: ["ref", "textOffset", "session", "after", "limit", "includeTools"],
+    parse: (input) => {
+      const out: SessionInputs["thread.read"] = {};
+      if (input.ref !== undefined) {
+        if (
+          typeof input.ref !== "string" ||
+          !THREAD_REF_PATTERN.test(input.ref)
+        )
+          fail('ref must be a turn reference such as "1135a96a:42"');
+        out.ref = input.ref;
+        if (input.textOffset !== undefined)
+          out.textOffset = count(
+            input.textOffset,
+            "textOffset",
+            0,
+            10_000_000,
+            0,
+          );
+      } else if (input.textOffset !== undefined)
+        fail("textOffset goes with ref");
+      if (input.session !== undefined) {
+        if (out.ref) fail("Give ref or session, not both");
+        if (
+          typeof input.session !== "string" ||
+          !/^[A-Za-z0-9_-]{4,64}$/.test(input.session)
+        )
+          fail('session must be a session prefix such as "1135a96a"');
+        out.session = input.session;
+        if (input.after !== undefined)
+          out.after = count(input.after, "after", -1, 999_999, -1);
+        if (input.limit !== undefined)
+          out.limit = count(input.limit, "limit", 1, THREAD_READ_LIMIT_MAX, 10);
+      } else if (input.after !== undefined || input.limit !== undefined)
+        fail("after and limit go with session");
+      if (input.includeTools !== undefined)
+        out.includeTools = flag(input.includeTools, "includeTools", false);
       return out;
     },
   },
@@ -955,6 +1054,18 @@ export const SESSION_HELP: Record<SessionAction, string> = {
             conductor with its own workers gets those only, with their
             tier, and every conductor how each model fared in its runs.
             Both fields are optional.`,
+  "thread.read": `  thread.read {"session":"1135a96a","after":-1,"limit":10}
+            Any conversation Lanework started. Read the turns of your own
+            thread: its earlier sessions (after a switch of agent) and the
+            conversation it was handed off from. A handoff block names
+            each turn as <session>:<index> and lists the ones it left out.
+            {} lists the sessions with their turn counts; {"ref":"1135a96a:42"}
+            reads one turn (each cut at ${THREAD_READ_TURN_CHARS} characters:
+            pass "textOffset":<nextTextOffset> to read on); {"session":...}
+            pages through one session (at most ${THREAD_READ_LIMIT_MAX} turns,
+            32 KB a call; follow "next"). Tool calls come as name and
+            summary; "includeTools":true adds their outputs. Read a turn
+            only when the request needs it.`,
   "memory.write": `  memory.write {"notes":"Decisions, open threads, what to check next"}
             Conductors only. Replace your notes for this project, at most
             ${MEMORY_NOTES_MAX} characters: send everything worth keeping, the

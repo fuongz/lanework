@@ -11,7 +11,7 @@
     },
     "apps/desktop": {
       "name": "@lanework/desktop",
-      "version": "0.11.0",
+      "version": "0.13.0",
       "dependencies": {
         "electron-updater": "^6.8.11",
       },
@@ -34,7 +34,7 @@
         "@fontsource-variable/inter": "^5.3.0",
         "@hugeicons/core-free-icons": "^4.3.0",
         "@hugeicons/react": "^1.1.10",
-        "@lanework/contracts": "0.5.3",
+        "@lanework/contracts": "0.5.4",
         "@lezer/highlight": "^1.2.3",
         "@lydell/node-pty": "1.2.0-beta.15",
         "@parcel/watcher": "2.6.0",
@@ -344,7 +344,7 @@
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
-    "@lanework/contracts": ["@lanework/contracts@0.5.3", "", {}, "sha512-1msKZbTpuFVC3Bbec7MnKa8uhtPBcn4ssnP5CB6WVyj0Aj0UJqhfxuk6jqFZY0s9oPclfV4bAJtpA2W04IZ2vQ=="],
+    "@lanework/contracts": ["@lanework/contracts@0.5.4", "", {}, "sha512-ml53vBbAwrYJzT6rL16ZbSO+p5TjJOeonjdl84MOdFQg0lQPKOJAFINtQW0qXK7U9MQUfjEfvQLfpaF1d2gFCg=="],
 
     "@lanework/desktop": ["@lanework/desktop@workspace:apps/desktop"],
 

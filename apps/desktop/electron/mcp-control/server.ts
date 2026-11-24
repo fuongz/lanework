@@ -48,7 +48,7 @@ const INSTRUCTIONS_LEAD =
 const INSTRUCTIONS_BOTH =
   "lanework-control reaches the Lanework app that started this conversation: sessions_* start and follow separate sessions of your own, memory_* keep what you know of this project across conversations, conductors_create saves a conductor. As this run's lead: run_list, then run_delegate workers, then end your turn. Lanework sends you a turn when a task or session needs you; do not poll, and never loop on run_wait.";
 const INSTRUCTIONS_ANY =
-  "lanework-control reaches the Lanework app that started this conversation: conductors_create saves a conductor, models_list lists the models a task may name.";
+  "lanework-control reaches the Lanework app that started this conversation: conductors_create saves a conductor, models_list lists the models a task may name, thread_read reads back the turns a handoff left out.";
 const INSTRUCTIONS_NONE =
   "lanework-control is unavailable here: only a conversation the Lanework app started has its credentials, so this server offers no tools.";
 

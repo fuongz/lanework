@@ -55,22 +55,32 @@ export const CONDUCTOR_ALLOWED_TOOLS = [
   "memory_append",
   "memory_write",
   "models_list",
+  "thread_read",
 ] as const;
 
 /**
- * Claude Code's `--allowedTools` for a conductor's process: the
- * {@link CONDUCTOR_ALLOWED_TOOLS} under the control server's prefix.
+ * The control tools EVERY process with the control server calls without a
+ * permission prompt: `thread_read` (BE-03) only reads back the caller's own
+ * thread, which its transcript already holds.
+ */
+export const ANY_ALLOWED_TOOLS = ["thread_read"] as const;
+
+/**
+ * Claude Code's `--allowedTools` for a process with the control server: the
+ * {@link CONDUCTOR_ALLOWED_TOOLS} on a conductor's, the
+ * {@link ANY_ALLOWED_TOOLS} on any other, under the server's prefix.
  *
  * NOTE: An allow rule only skips the prompt in the asking modes; a deny
  * rule (a guarded lead's `--disallowedTools`, the user's settings) still
  * wins over it, so the two flags need no merging.
  */
-export function claudeConductorAllowArgs(): string[] {
+export function claudeControlAllowArgs(conductor = false): string[] {
+  const tools: readonly string[] = conductor
+    ? CONDUCTOR_ALLOWED_TOOLS
+    : ANY_ALLOWED_TOOLS;
   return [
     "--allowedTools",
-    CONDUCTOR_ALLOWED_TOOLS.map(
-      (tool) => `mcp__${CONTROL_SERVER}__${tool}`,
-    ).join(","),
+    tools.map((tool) => `mcp__${CONTROL_SERVER}__${tool}`).join(","),
   ];
 }
 
@@ -96,8 +106,9 @@ export function controlMcpFor(
   env: Record<string, string | undefined>,
 ): string | null {
   if (!env[SESSIONS_ENV.token] && !env[CONTROL_ENV.token]) return null;
-  // The app writes it at launch (`ensureControlMcpShim`); a build that may
-  // not (dev) attaches nothing rather than a server that cannot start.
+  // The app writes it at launch (`ensureControlMcpShim`); a copy that may
+  // not (a DMG, an AppImage) attaches nothing rather than a server that
+  // cannot start.
   const shim = controlShimPath();
   return existsSync(shim) ? shim : null;
 }
@@ -201,15 +212,16 @@ export function claudeMcpArgs(
  * cleared environment; `env_vars` names the variables it copies from its own.
  *
  * A `conductor`'s process approves the {@link CONDUCTOR_ALLOWED_TOOLS}
- * up front, as Claude's `--allowedTools` does: Codex takes an
- * `approval_mode` per MCP tool (`approve` skips the prompt). Every other
- * tool keeps Codex's default, so `sessions_answer` asks as the session's
- * policy says.
+ * up front, any other the {@link ANY_ALLOWED_TOOLS}, as Claude's
+ * `--allowedTools` does: Codex takes an `approval_mode` per MCP tool
+ * (`approve` skips the prompt). Every other tool keeps Codex's default, so
+ * `sessions_answer` asks as the session's policy says.
  */
 export function codexControlArgs(control: string, conductor = false): string[] {
-  const tools = conductor
-    ? `,tools={${CONDUCTOR_ALLOWED_TOOLS.map((tool) => `${tool}={approval_mode="approve"}`).join(",")}}`
-    : "";
+  const allowed: readonly string[] = conductor
+    ? CONDUCTOR_ALLOWED_TOOLS
+    : ANY_ALLOWED_TOOLS;
+  const tools = `,tools={${allowed.map((tool) => `${tool}={approval_mode="approve"}`).join(",")}}`;
   return [
     "-c",
     `mcp_servers.${CONTROL_SERVER}={command=${JSON.stringify(control)},args=[],env_vars=${JSON.stringify([...CONTROL_FORWARD])}${tools}}`,

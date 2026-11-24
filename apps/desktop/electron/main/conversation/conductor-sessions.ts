@@ -231,6 +231,15 @@ export interface ConductorSessionsDeps {
   knowModels?: (agent: ConversationAgent, model?: string) => Promise<void>;
   /** A conductor of the project, for its own workers (FE-156); null if gone. */
   leadOf?: (project: string, id: string) => Promise<TeamLead | null>;
+  /**
+   * `thread.read` (BE-03) for the caller's own conversation: refused with an
+   * error whose message is told to the caller.
+   */
+  readThread?: (
+    project: string,
+    conversation: string,
+    input: SessionInputs["thread.read"],
+  ) => Promise<SessionResults["thread.read"]>;
 }
 
 /** A session a conductor started. */
@@ -529,6 +538,22 @@ export class ConductorSessions {
     // Any conversation may ask which models a proposal may name (FE-156);
     // a conductor's own also gets its workers and how its runs went.
     if (call.action === "models.list") return this.models(caller, call.input);
+    // Any conversation may read back its own thread (BE-03).
+    if (call.action === "thread.read") {
+      const conversation = caller.conversation();
+      if (!conversation)
+        refuse("This conversation has no id yet. Try again in a moment.");
+      if (!this.deps.readThread) refuse("thread.read is not available here.");
+      try {
+        return await this.deps.readThread(
+          caller.project,
+          conversation,
+          call.input,
+        );
+      } catch (error) {
+        refuse(error instanceof Error ? error.message : String(error));
+      }
+    }
     const memory =
       call.action === "memory.read" ||
       call.action === "memory.append" ||

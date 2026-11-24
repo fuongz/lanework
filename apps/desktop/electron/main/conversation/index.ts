@@ -187,6 +187,7 @@ import {
   rankCommands,
   suggestFiles,
 } from "./suggest";
+import { readThread, type ThreadSession } from "./thread-read";
 import {
   claudeFacts,
   latestClaudeProposal,
@@ -352,6 +353,8 @@ export function pendingPermission(
 const CONDUCTOR_SEEN_MAX = 256;
 /** The most permission requests remembered as notified to the person. */
 const NOTIFIED_ASKS_MAX = 500;
+/** The most sessions `thread.read` follows back through handoffs (BE-03). */
+const THREAD_SESSIONS_MAX = 16;
 
 /**
  * Where conductor `conductorId` keeps its memory of `project` (FE-128): in
@@ -1621,6 +1624,14 @@ export function registerConversation(
     createConductor,
     memory: conductorMemory,
     leadOf: (project, id) => teamLeadOf(project, id).catch(() => null),
+    readThread: (project, conversation, input) =>
+      readThread(
+        {
+          sessions: () => threadSessions(project, conversation),
+          turns: async (id) => (await readSession(project, id)).turns,
+        },
+        input,
+      ),
     knowModels: async (agent, model) => {
       await ready.catch(() => {});
       if (agent === "codex") await codexModels();
@@ -1629,6 +1640,45 @@ export function registerConversation(
     },
   });
   const conductors = sessions;
+  /**
+   * The sessions `thread.read` lets `conversation` read, oldest first: its
+   * thread's, and those of every conversation handed off into it (a
+   * handoff to a NEW conversation is no thread's), followed back.
+   */
+  const threadSessions = async (
+    project: string,
+    conversation: string,
+  ): Promise<ThreadSession[]> => {
+    const folder = await folderOf(project);
+    const seen = new Set<string>();
+    const out: ThreadSession[] = [];
+    let at: string | null = conversation;
+    while (at && !seen.has(at) && out.length < THREAD_SESSIONS_MAX) {
+      const chain = await handoffs.chainOf(project, at);
+      const sessions: ThreadSession[] = chain.length
+        ? chain.map((entry) => ({
+            conversation: entry.conversation,
+            agent: entry.agent,
+            model: entry.model,
+          }))
+        : [
+            {
+              conversation: at,
+              agent:
+                (await agentOf(folder, at).catch(() => null)) ??
+                engines.pending(project, at)?.agent ??
+                "claude",
+              model: null,
+            },
+          ];
+      for (const session of sessions) seen.add(session.conversation);
+      out.unshift(...sessions);
+      const head: string = sessions[0]?.conversation ?? at;
+      const { from } = await handoffs.links(project, head);
+      at = from && !from.thread ? from.from.conversation : null;
+    }
+    return out;
+  };
   setSessionsEnv((target) => conductors.envFor(target));
   // FE-166: the connectors a process starts without. Read at each start from
   // stored names; nothing scans, polls or watches here.

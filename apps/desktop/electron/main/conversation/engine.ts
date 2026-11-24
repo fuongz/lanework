@@ -68,7 +68,7 @@ import type { ConversationEngine } from "./conversation-engine";
 import {
   boardHint,
   CONTROL_ROLE_ENV,
-  claudeConductorAllowArgs,
+  claudeControlAllowArgs,
   claudeMcpArgs,
   controlMcpFor,
   isConductorTurn,
@@ -188,8 +188,8 @@ interface EngineDeps {
  * A `guarded` lead (its run active or paused, FE-136/D1) starts without its
  * edit tools: it delegates instead.
  *
- * A `conductor`'s process with the control tools runs its safe ones without
- * asking (`claudeConductorAllowArgs`).
+ * A process with the control tools runs their safe ones without asking: a
+ * conductor's all of its own, any other `thread_read` (`claudeControlAllowArgs`).
  *
  * `connectors` (FE-166) are the MCP servers this process starts without, as
  * `connectorPlan` says: fixed for the process's life, never changed mid-session.
@@ -243,7 +243,7 @@ export function engineArgs(
   // BE-01: what this process may ask of the app, fixed for its life.
   if (hint) args.push("--append-system-prompt", hint);
   if (guarded) args.push("--disallowedTools", [...WRITE_TOOLS].join(","));
-  if (conductor && controlMcp) args.push(...claudeConductorAllowArgs());
+  if (controlMcp) args.push(...claudeControlAllowArgs(conductor));
   if (!connectors) return args;
   // FE-166: a run worker holds only the servers `--mcp-config` names.
   if (connectors.strict) args.push("--strict-mcp-config");

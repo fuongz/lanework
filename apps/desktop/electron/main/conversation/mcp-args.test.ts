@@ -23,6 +23,7 @@ const SAFE = [
   "memory_append",
   "memory_write",
   "models_list",
+  "thread_read",
 ];
 
 /** The value after `flag`, or null when the flag is absent. */
@@ -61,7 +62,7 @@ describe("the control tools a conductor runs without asking", () => {
     );
   });
 
-  test("Claude: none for a plain session, or without the control server", () => {
+  test("Claude: thread_read only for a plain session, none without the control server", () => {
     const plain = engineArgs(
       session,
       DEFAULT_SETTINGS,
@@ -72,7 +73,10 @@ describe("the control tools a conductor runs without asking", () => {
       false,
       "/shim",
     );
-    assert.equal(plain.includes("--allowedTools"), false);
+    assert.equal(
+      flagValue(plain, "--allowedTools"),
+      `mcp__${CONTROL_SERVER}__thread_read`,
+    );
     const noServer = engineArgs(
       session,
       DEFAULT_SETTINGS,
@@ -109,13 +113,14 @@ describe("the control tools a conductor runs without asking", () => {
     );
   });
 
-  test("Codex: approval_mode approve per safe tool on a conductor's only", () => {
+  test("Codex: approval_mode approve per safe tool on a conductor's, thread_read on any", () => {
     const [, conductor] = codexControlArgs("/shim", true);
     for (const tool of SAFE)
       assert.ok(conductor?.includes(`${tool}={approval_mode="approve"}`), tool);
     assert.equal(conductor?.includes("sessions_answer"), false);
     assert.equal(conductor?.includes("conductors_create"), false);
     const [, plain] = codexControlArgs("/shim");
-    assert.equal(plain?.includes("tools="), false);
+    assert.ok(plain?.includes('tools={thread_read={approval_mode="approve"}}'));
+    assert.equal(plain?.includes("sessions_start"), false);
   });
 });
