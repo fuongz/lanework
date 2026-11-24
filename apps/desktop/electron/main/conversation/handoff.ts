@@ -191,6 +191,22 @@ export interface HandoffSource {
   }[];
   /** The thread's id (its head's), with {@link sessions}. */
   thread?: string;
+  /**
+   * Set when `turns` are only the newest session's (BE-04): the thread's
+   * earlier sessions, oldest first, with their turn counts. Their turns
+   * were handed over before and are read back with `thread.read`.
+   */
+  earlier?: readonly {
+    conversation: string;
+    agent: ConversationAgent;
+    turns: number;
+  }[];
+  /**
+   * Set when the new session is a fork of this earlier session of the
+   * thread (BE-05): the agent already holds its history, and `turns` are
+   * only those since it last ran.
+   */
+  resumed?: string;
 }
 
 /**
@@ -253,6 +269,9 @@ export function buildHandoff(
   tryAdd(rendered.findIndex((entry) => roleOf(entry.index) === "user"));
   for (let at = rendered.length - 1; at >= 0; at--) tryAdd(at);
   const kept = rendered.filter((_, at) => picked.has(at));
+  // The last turn the source had: a later switch carries what follows it.
+  let through: string | undefined;
+  for (const entry of refs) if (entry) through = entry.ref;
   const omitted = rendered.length - kept.length;
 
   // What `thread.read` can bring back: each session's turns, and the user
@@ -295,6 +314,23 @@ export function buildHandoff(
             .join(", ")}.`,
         ]
       : []),
+    ...(source.resumed
+      ? [
+          `You are continuing your own earlier session of this thread (${shortSession(source.resumed)}): you already hold everything up to where it was handed off. Only the turns since then are carried below.`,
+        ]
+      : []),
+    ...(source.earlier?.length
+      ? [
+          `Only the latest session's turns are carried here. The thread's earlier sessions were handed over before: ${source.earlier
+            .map(
+              (session) =>
+                `${shortSession(session.conversation)} (${AGENT_LABELS[session.agent]}, turns 0-${Math.max(0, session.turns - 1)})`,
+            )
+            .join(
+              ", ",
+            )}. Read their turns with thread_read when the request needs them.`,
+        ]
+      : []),
     ...(left.length
       ? [
           `Turns not shown here (${left.length}, newest first${left.length > OMITTED_REFS_MAX ? `, the first ${OMITTED_REFS_MAX} listed` : ""}): ${left.slice(0, OMITTED_REFS_MAX).join(", ")}.`,
@@ -320,6 +356,7 @@ export function buildHandoff(
       turns: kept.length,
       omitted,
       bytes: bytes(context),
+      ...(through ? { through } : {}),
     },
   };
 }
@@ -379,6 +416,10 @@ function storedLink(value: unknown): ConversationHandoff | null {
       turns: count(carried.turns),
       omitted: count(carried.omitted),
       bytes: count(carried.bytes),
+      ...(typeof carried.through === "string" &&
+      /^[A-Za-z0-9_-]{1,64}:\d{1,6}$/.test(carried.through)
+        ? { through: carried.through }
+        : {}),
     },
     // NOTE: Links written before limits had a scope were the whole
     // account's.
@@ -387,6 +428,27 @@ function storedLink(value: unknown): ConversationHandoff | null {
         ? { ...limit, scope: limit.scope ?? null }
         : null,
     ...(v.thread === true ? { thread: true } : {}),
+    ...(forkedOf(v.forked) ?? {}),
+  };
+}
+
+/** A link's `forked` off the file, checked; null when it has none. */
+function forkedOf(
+  value: unknown,
+): { forked: NonNullable<ConversationHandoff["forked"]> } | null {
+  const v = value as Record<string, unknown> | null | undefined;
+  if (!v || typeof v !== "object" || !isId(v.from)) return null;
+  const turns =
+    typeof v.turns === "number" && Number.isInteger(v.turns) && v.turns >= 0
+      ? v.turns
+      : null;
+  if (turns === null) return null;
+  return {
+    forked: {
+      from: v.from,
+      lastTurn: typeof v.lastTurn === "string" ? v.lastTurn : null,
+      turns,
+    },
   };
 }
 

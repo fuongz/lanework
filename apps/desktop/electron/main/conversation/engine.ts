@@ -1567,10 +1567,17 @@ export function createEngines(input: EngineDeps) {
     project: string,
     conversation: string | null,
     folder: string,
+    forkFrom: string | null = null,
   ): ConversationEngine {
     switch (agent) {
       case "codex":
-        return new CodexEngine(project, conversation, folder, codexDeps());
+        return new CodexEngine(
+          project,
+          conversation,
+          folder,
+          codexDeps(),
+          forkFrom,
+        );
       case "opencode":
         return new OpenCodeEngine(
           project,
@@ -1621,6 +1628,8 @@ export function createEngines(input: EngineDeps) {
    *
    * Answers once the CLI has named it.
    *
+   * @param forkFrom Codex only (BE-05): start it as a fork of this earlier
+   *   conversation, its whole history included, instead of an empty one.
    * @throws When the CLI fails, or names no conversation within 30 seconds.
    */
   async function startNamed(
@@ -1628,8 +1637,15 @@ export function createEngines(input: EngineDeps) {
     project: string,
     folder: string,
     out: Outgoing,
+    forkFrom: string | null = null,
   ): Promise<{ conversation: string; engine: EngineState }> {
-    const engine = make(agent, project, null, folder);
+    const engine = make(
+      agent,
+      project,
+      null,
+      folder,
+      agent === "codex" ? forkFrom : null,
+    );
     await engine.deliver(out);
     let timer: NodeJS.Timeout | undefined;
     const conversation = await Promise.race([

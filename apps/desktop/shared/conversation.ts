@@ -1355,6 +1355,13 @@ export interface HandoffCarried {
   omitted: number;
   /** The context block's size, in UTF-8 bytes. */
   bytes: number;
+  /**
+   * The reference (`<session>:<index>`, BE-03) of the last turn the source
+   * had, set since BE-04: the block named its turns, so the thread's next
+   * switch carries only what came after it and points to `thread.read` for
+   * the rest. Absent on older links, which a later switch rebuilds whole.
+   */
+  through?: string;
 }
 
 /**
@@ -1384,6 +1391,14 @@ export interface ConversationHandoff {
    * conversation (`handoff`).
    */
   thread?: boolean;
+  /**
+   * `to` was forked from `from`, an earlier session of the thread on the
+   * same CLI (BE-05), not started empty: its transcript starts with a copy
+   * of that one's turns, which the thread reads under `from`, not again.
+   * `lastTurn` is the id of the last turn copied (null when it had none);
+   * `turns` how many there were, for when the id is not found.
+   */
+  forked?: { from: string; lastTurn: string | null; turns: number };
 }
 
 /**

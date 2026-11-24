@@ -377,6 +377,11 @@ export class CodexEngine implements ConversationEngine {
     public conversation: string | null,
     readonly folder: string,
     readonly deps: CodexEngineDeps,
+    /**
+     * A new conversation only (BE-05): `thread/fork` this earlier thread,
+     * its history included, instead of `thread/start` an empty one.
+     */
+    readonly forkFrom: string | null = null,
   ) {
     this.named = new Promise((resolve, reject) => {
       this.name = resolve;
@@ -673,9 +678,15 @@ export class CodexEngine implements ConversationEngine {
       }
       return;
     }
-    const started = await this.request("thread/start", thread);
+    const started = this.forkFrom
+      ? await this.request("thread/fork", {
+          ...thread,
+          threadId: this.forkFrom,
+          excludeTurns: true,
+        })
+      : await this.request("thread/start", thread);
     const id = record(record(started).thread).id;
-    if (!isAgentSessionId(id))
+    if (!isAgentSessionId(id) || id === this.forkFrom)
       throw new Error("Codex did not name the conversation.");
     this.conversation = id;
     this.name(id);

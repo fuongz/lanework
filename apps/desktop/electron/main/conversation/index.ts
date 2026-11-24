@@ -36,6 +36,7 @@ import {
   type ConversationAgent,
   type ConversationEvent,
   type ConversationFacts,
+  type ConversationHandoff,
   type ConversationHandoffLinks,
   type ConversationPage,
   type ConversationReplay,
@@ -187,7 +188,7 @@ import {
   rankCommands,
   suggestFiles,
 } from "./suggest";
-import { readThread, type ThreadSession } from "./thread-read";
+import { indexTurns, readThread, type ThreadSession } from "./thread-read";
 import {
   claudeFacts,
   latestClaudeProposal,
@@ -353,6 +354,83 @@ export function pendingPermission(
 const CONDUCTOR_SEEN_MAX = 256;
 /** The most permission requests remembered as notified to the person. */
 const NOTIFIED_ASKS_MAX = 500;
+/**
+ * What a switch of a thread carries when its newest session was handed a
+ * block that named its turns (BE-04): only that session's turns, and the
+ * earlier sessions with their turn counts for the pointer to `thread.read`.
+ * Null for a lone conversation, or a thread whose last link is older than
+ * that (rebuilt whole, BE-04/D2).
+ *
+ * @param turns The whole thread's, stitched (`readWhole`).
+ * @param newest The newest session, the source of the switch.
+ */
+function deltaOf(
+  chain: readonly ChainSession[],
+  turns: readonly Turn[],
+  newest: string,
+): {
+  turns: Turn[];
+  earlier: { conversation: string; agent: ConversationAgent; turns: number }[];
+} | null {
+  if (chain.length < 2 || !chain.at(-1)?.link?.carried.through) return null;
+  const counts = new Map<string, number>();
+  for (const entry of indexTurns(turns, newest))
+    if (entry) counts.set(entry.session, entry.index + 1);
+  return {
+    turns: turns.filter(
+      (turn) =>
+        turn.role !== "handoff" &&
+        (turn.session?.conversation ?? newest) === newest,
+    ),
+    earlier: chain
+      .filter((entry) => entry.conversation !== newest)
+      .map((entry) => ({
+        conversation: entry.conversation,
+        agent: entry.agent,
+        turns: counts.get(entry.conversation) ?? 0,
+      })),
+  };
+}
+
+/**
+ * The most context, in tokens, an earlier session may hold to be forked
+ * for a switch back to its CLI (BE-05/D3): its last turn's size plus the
+ * turns since. Conservative, as the app knows no model's window; a session
+ * past it gets a fresh one and the handoff block, as before.
+ */
+const FORK_CONTEXT_MAX = 150_000;
+
+/**
+ * A session's own turns: a fork's (BE-05) without the copy of the earlier
+ * session it starts with, which the thread reads under that one.
+ *
+ * @param link The handoff that started the session; null for the head.
+ */
+function ownTurns(
+  link: ConversationHandoff | null | undefined,
+  turns: Turn[],
+): Turn[] {
+  const forked = link?.forked;
+  if (!forked) return turns;
+  const at = forked.lastTurn
+    ? turns.findIndex((turn) => turn.id === forked.lastTurn)
+    : -1;
+  return turns.slice(at >= 0 ? at + 1 : Math.min(forked.turns, turns.length));
+}
+
+/**
+ * About how many tokens of context `turns` hold: the last answer's usage
+ * (its input, cached and output), else their text at 4 bytes a token.
+ */
+function contextOf(turns: readonly Turn[]): number {
+  for (let at = turns.length - 1; at >= 0; at--) {
+    const turn = turns[at];
+    if (turn?.role === "assistant" && turn.usage)
+      return turn.usage.input + turn.usage.cached + turn.usage.output;
+  }
+  return Math.ceil(Buffer.byteLength(JSON.stringify(turns)) / 4);
+}
+
 /** The most sessions `thread.read` follows back through handoffs (BE-03). */
 const THREAD_SESSIONS_MAX = 16;
 
@@ -1624,14 +1702,20 @@ export function registerConversation(
     createConductor,
     memory: conductorMemory,
     leadOf: (project, id) => teamLeadOf(project, id).catch(() => null),
-    readThread: (project, conversation, input) =>
-      readThread(
+    readThread: async (project, conversation, input) => {
+      const sessions = await threadSessions(project, conversation);
+      return readThread(
         {
-          sessions: () => threadSessions(project, conversation),
-          turns: async (id) => (await readSession(project, id)).turns,
+          sessions: async () => sessions,
+          turns: async (id) =>
+            ownTurns(
+              sessions.find((session) => session.conversation === id)?.link,
+              (await readSession(project, id)).turns,
+            ),
         },
         input,
-      ),
+      );
+    },
     knowModels: async (agent, model) => {
       await ready.catch(() => {});
       if (agent === "codex") await codexModels();
@@ -1648,18 +1732,21 @@ export function registerConversation(
   const threadSessions = async (
     project: string,
     conversation: string,
-  ): Promise<ThreadSession[]> => {
+  ): Promise<(ThreadSession & { link?: ConversationHandoff | null })[]> => {
     const folder = await folderOf(project);
     const seen = new Set<string>();
-    const out: ThreadSession[] = [];
+    const out: (ThreadSession & { link?: ConversationHandoff | null })[] = [];
     let at: string | null = conversation;
     while (at && !seen.has(at) && out.length < THREAD_SESSIONS_MAX) {
       const chain = await handoffs.chainOf(project, at);
-      const sessions: ThreadSession[] = chain.length
+      const sessions: (ThreadSession & {
+        link?: ConversationHandoff | null;
+      })[] = chain.length
         ? chain.map((entry) => ({
             conversation: entry.conversation,
             agent: entry.agent,
             model: entry.model,
+            link: entry.link,
           }))
         : [
             {
@@ -1905,7 +1992,8 @@ export function registerConversation(
       if (!read) continue;
       truncated ||= read.truncated;
       const sessionTag = tagOf(session);
-      for (const turn of read.turns) turns.push(tag(turn, sessionTag));
+      for (const turn of ownTurns(session.link, read.turns))
+        turns.push(tag(turn, sessionTag));
     }
     const marker = markerOf(chain, chain.length - 1);
     if (marker) turns.push(marker);
@@ -1913,7 +2001,8 @@ export function registerConversation(
     // `readSession` reads its own transcript (see its NOTE).
     const last = await readSession(project, newest.conversation);
     const newestTag = tagOf(newest);
-    for (const turn of last.turns) turns.push(tag(turn, newestTag));
+    for (const turn of ownTurns(newest.link, last.turns))
+      turns.push(tag(turn, newestTag));
     return {
       ...last,
       id: head.conversation,
@@ -2266,6 +2355,128 @@ export function registerConversation(
   }
 
   /**
+   * The fork a switch of a thread to `target` starts from (BE-05), or null
+   * for a fresh session: the target CLI's newest earlier session of the
+   * thread, read whole (not truncated) and small enough with the turns
+   * since (D3), Claude or Codex only (D2: OpenCode cannot fork by id). Its
+   * block carries only the turns after that session.
+   */
+  async function forkPlan(
+    project: string,
+    source: Awaited<ReturnType<typeof handoffSource>>,
+    from: string,
+    target: ConversationAgent,
+    text: string,
+    budget: number,
+    head: string,
+  ): Promise<{
+    prior: string;
+    built: ReturnType<typeof buildHandoff>;
+    forked: NonNullable<ConversationHandoff["forked"]>;
+  } | null> {
+    if (target === "opencode") return null;
+    const chain = source.thread.chain;
+    let at = -1;
+    for (let index = chain.length - 1; index >= 0; index--) {
+      const entry = chain[index];
+      if (entry && entry.conversation !== from && entry.agent === target) {
+        at = index;
+        break;
+      }
+    }
+    const prior = chain[at];
+    if (!prior) return null;
+    // Its transcript as the fork copies it: every line, its own copy of an
+    // earlier session included.
+    const raw = await readSession(project, prior.conversation).catch(
+      () => null,
+    );
+    if (!raw || raw.truncated) return null;
+    const after = new Set(
+      chain.slice(at + 1).map((entry) => entry.conversation),
+    );
+    const turns = source.turns.filter(
+      (turn) =>
+        turn.role !== "handoff" &&
+        after.has(turn.session?.conversation ?? from),
+    );
+    const built = buildHandoff(
+      {
+        agent: source.from,
+        conversation: from,
+        model: source.model,
+        turns,
+        truncated: false,
+        sessions: source.sessions,
+        thread: head,
+        resumed: prior.conversation,
+      },
+      text,
+      budget,
+    );
+    if (
+      contextOf(raw.turns) + Math.ceil(built.carried.bytes / 4) >
+      FORK_CONTEXT_MAX
+    )
+      return null;
+    return {
+      prior: prior.conversation,
+      built,
+      forked: {
+        from: prior.conversation,
+        lastTurn: raw.turns.at(-1)?.id ?? null,
+        turns: raw.turns.length,
+      },
+    };
+  }
+
+  /**
+   * Start a switch's new session as a fork of `prior` (BE-05): Claude's by
+   * copying its transcript to a new id main picks (`forkConversation`),
+   * Codex's by `thread/fork`. `join` places it in the thread before its
+   * first events go out.
+   *
+   * @throws When the CLI cannot fork it; the caller starts a fresh one.
+   */
+  async function startFork(
+    request: SendRequest,
+    prior: string,
+    folder: string,
+    join: (native: string) => void,
+  ): Promise<{ conversation: string; engine: EngineState; forked: true }> {
+    const agent = agentOfModel(request.settings.model);
+    let started: { conversation: string; engine: EngineState };
+    if (agent === "claude") {
+      const fork = await forkConversation(agentHome(), folder, prior, {
+        title: false,
+      });
+      join(fork);
+      const out = await outgoingOf({ ...request, conversation: fork });
+      started = {
+        conversation: fork,
+        engine: await engines.send(request.project, fork, folder, out, agent),
+      };
+    } else if (agent === "codex") {
+      const out = await outgoingOf(request);
+      started = await engines.startNamed(
+        agent,
+        request.project,
+        folder,
+        out,
+        prior,
+      );
+      join(started.conversation);
+    } else throw new Error("OpenCode cannot fork a session.");
+    await registerAgentSession(
+      request.project,
+      agent,
+      started.conversation,
+      folder,
+    ).catch(() => undefined);
+    return { ...started, forked: true };
+  }
+
+  /**
    * What a handoff of `id` carries: its thread's turns (a lone
    * conversation's own), and who wrote its newest session.
    *
@@ -2495,19 +2706,37 @@ export function registerConversation(
         const sessions = source.sessions.length
           ? source.sessions
           : [{ conversation: from, agent: source.from, model: source.model }];
-        const built = buildHandoff(
-          {
-            agent: source.from,
-            conversation: from,
-            model: source.model,
-            turns: source.turns,
-            truncated: source.truncated,
-            sessions,
-            thread: head,
-          },
+        const budget = handoffBudget({ text, attachments });
+        // BE-05: back to a CLI the thread already ran on, its newest
+        // session there is forked (its history whole) and told only what
+        // came since; else a fresh session gets the block (BE-04 delta).
+        const fork = await forkPlan(
+          project,
+          source,
+          from,
+          target,
           text,
-          handoffBudget({ text, attachments }),
+          budget,
+          head,
         );
+        /** A fresh session's block: the delta, or the whole thread. */
+        const freshBlock = () => {
+          const delta = deltaOf(source.thread.chain, source.turns, from);
+          return buildHandoff(
+            {
+              agent: source.from,
+              conversation: from,
+              model: source.model,
+              turns: delta?.turns ?? source.turns,
+              truncated: source.truncated,
+              sessions,
+              thread: head,
+              ...(delta ? { earlier: delta.earlier } : {}),
+            },
+            text,
+            budget,
+          );
+        };
         const join = (native: string) => {
           joined.push(native);
           joining.set(native, {
@@ -2526,19 +2755,38 @@ export function registerConversation(
             ],
           });
         };
-        const request = sendRequest({
-          project,
-          conversation: randomUUID(),
-          text: built.text,
-          attachments,
-          settings,
-        });
-        // Claude's id is main's own: its very first event is the thread's.
-        // Codex and OpenCode name theirs, placed as soon as they do.
-        if (target === "claude") join(request.conversation);
-        const started = await startNew(request, null, (native) => {
-          if (!joined.includes(native)) join(native);
-        });
+        const requestOf = (block: string) =>
+          sendRequest({
+            project,
+            conversation: randomUUID(),
+            text: block,
+            attachments,
+            settings,
+          });
+        const forkedStart = fork
+          ? await startFork(
+              requestOf(fork.built.text),
+              fork.prior,
+              source.folder,
+              join,
+            ).catch(() => null)
+          : null;
+        // NOTE: A fork that could not start gets the fresh block, never the
+        // fork's: that one assumes the earlier session's history is held.
+        const built = forkedStart && fork ? fork.built : freshBlock();
+        const started =
+          forkedStart ??
+          (await (async () => {
+            const request = requestOf(built.text);
+            // Claude's id is main's own: its very first event is the
+            // thread's. Codex and OpenCode name theirs, placed as soon as
+            // they do.
+            if (target === "claude") join(request.conversation);
+            return startNew(request, null, (native) => {
+              if (!joined.includes(native)) join(native);
+            });
+          })());
+        const forked = forkedStart && fork ? fork.forked : null;
         await handoffs.record({
           project,
           from: { conversation: from, agent: source.from, model: source.model },
@@ -2551,6 +2799,7 @@ export function registerConversation(
           carried: built.carried,
           limit: limitOver(limits.state().limits, source.from, source.model),
           thread: true,
+          ...(forked ? { forked } : {}),
         });
         done = true;
         // The settings follow the newest session: a Codex or OpenCode

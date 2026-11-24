@@ -106,6 +106,7 @@ export interface SessionEngines {
     project: string,
     folder: string,
     out: Outgoing,
+    forkFrom?: string | null,
   ): Promise<{ conversation: string; engine: EngineState }>;
   send(
     project: string,

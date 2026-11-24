@@ -40,6 +40,7 @@ function firstPrompt(rows: Line[]): string | null {
 /**
  * Copy conversation `id` of `folder` to a new one.
  *
+ * @param options.title False to leave out the "(fork)" title line.
  * @returns The new conversation's id.
  * @throws When the conversation has no transcript or is too long to fork.
  */
@@ -47,6 +48,7 @@ export async function forkConversation(
   home: string,
   folder: string,
   id: string,
+  options: { title?: boolean } = {},
 ): Promise<string> {
   const file = transcriptPath(home, folder, id);
   const info = await stat(file).catch(() => null);
@@ -65,7 +67,9 @@ export async function forkConversation(
     );
   }
   const name = title ? tidy(title) : firstPrompt(rows);
-  if (name)
+  // A switch back to Claude (BE-05) forks a thread's own session: it is no
+  // conversation of its own to name.
+  if (name && options.title !== false)
     out.push(
       JSON.stringify({
         type: "ai-title",
