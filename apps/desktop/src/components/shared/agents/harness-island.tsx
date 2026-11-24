@@ -26,6 +26,7 @@ import {
   type HarnessAgent,
   type HarnessInfo,
   hasPendingUpdate,
+  needsUpdate,
 } from "../../../../shared/harness";
 
 export const HARNESS_NAMES: Record<HarnessAgent, string> = {
@@ -98,7 +99,7 @@ function Spinner({ className }: { className?: string }) {
 
 type Row = HarnessInfo & {
   /** What this row is showing, after "done" has had its two seconds. */
-  shown: "available" | "updating" | "done" | "failed";
+  shown: "available" | "outdated" | "updating" | "done" | "failed";
 };
 
 /**
@@ -146,6 +147,8 @@ function useRows(): Row[] {
       info.latest !== info.dismissed
     )
       rows.push({ ...info, shown: "failed" });
+    // FE-168: older than Lanework's floor, before a plain newer version.
+    else if (needsUpdate(info)) rows.push({ ...info, shown: "outdated" });
     else if (hasPendingUpdate(info)) rows.push({ ...info, shown: "available" });
   }
   return rows;
@@ -153,7 +156,13 @@ function useRows(): Row[] {
 
 /** The one state the folded pill speaks for: the most urgent row's. */
 function lead(rows: Row[]): Row | undefined {
-  for (const shown of ["updating", "failed", "done", "available"] as const) {
+  for (const shown of [
+    "updating",
+    "failed",
+    "outdated",
+    "done",
+    "available",
+  ] as const) {
     const row = rows.find((item) => item.shown === shown);
     if (row) return row;
   }
@@ -170,6 +179,8 @@ function announce(row: Row | undefined): string {
       return `${name} updated to ${row.version ?? row.latest}.`;
     case "failed":
       return `${name} update failed.`;
+    case "outdated":
+      return `${name} ${row.version} is older than Lanework needs (${row.minimum} or newer).`;
     default:
       return `${name} ${row.latest} is available.`;
   }
@@ -181,6 +192,7 @@ const TONE: Record<Row["shown"], IslandTone> = {
   updating: "loading",
   done: "success",
   failed: "error",
+  outdated: "warning",
   available: "info",
 };
 
@@ -286,6 +298,15 @@ function Pill({
       );
       text = <span>Update failed</span>;
       break;
+    case "outdated":
+      glyph = <HarnessIcon agent={row.agent} className="size-3.5" />;
+      text = (
+        <>
+          <span>{name}</span>
+          <span className="text-amber-300">needs an update</span>
+        </>
+      );
+      break;
     default:
       glyph = <HarnessIcon agent={row.agent} className="size-3.5" />;
       text = (
@@ -306,10 +327,13 @@ function Pill({
       {glyph}
       {text}
       {more > 0 && <span className="text-white/50">+{more}</span>}
-      {row.shown === "available" && (
+      {(row.shown === "available" || row.shown === "outdated") && (
         <span
           aria-hidden="true"
-          className="ml-0.5 size-1.5 rounded-full bg-sky-400"
+          className={cn(
+            "ml-0.5 size-1.5 rounded-full",
+            row.shown === "outdated" ? "bg-amber-400" : "bg-sky-400",
+          )}
         />
       )}
     </button>
@@ -330,6 +354,7 @@ function Panel({ rows, onClose }: { rows: Row[]; onClose: () => void }) {
   const dismiss = useHarness((state) => state.dismiss);
   const openInTerminal = useHarness((state) => state.openInTerminal);
   const anyFailed = rows.some((row) => row.shown === "failed");
+  const anyOutdated = rows.some((row) => row.shown === "outdated");
   return (
     <section
       aria-label="Harness updates"
@@ -337,7 +362,11 @@ function Panel({ rows, onClose }: { rows: Row[]; onClose: () => void }) {
     >
       <header className="flex items-center justify-between gap-2">
         <h2 className="text-[13px] font-semibold tracking-tight">
-          {anyFailed ? "Harness update failed" : "Harness update available"}
+          {anyFailed
+            ? "Harness update failed"
+            : anyOutdated
+              ? "Harness update needed"
+              : "Harness update available"}
         </h2>
         <Button
           variant="ghost"
@@ -349,7 +378,9 @@ function Panel({ rows, onClose }: { rows: Row[]; onClose: () => void }) {
             for (const row of rows)
               if (
                 row.latest &&
-                (row.shown === "available" || row.shown === "failed")
+                (row.shown === "available" ||
+                  row.shown === "outdated" ||
+                  row.shown === "failed")
               )
                 void dismiss(row.agent, row.latest);
             onClose();
@@ -378,7 +409,9 @@ function Panel({ rows, onClose }: { rows: Row[]; onClose: () => void }) {
               <span className="truncate font-mono text-[11.5px] text-white/60 tabular-nums">
                 {row.shown === "done"
                   ? `${row.version ?? row.latest} — up to date`
-                  : `${row.version ?? "?"} → ${row.latest ?? "?"}`}
+                  : row.shown === "outdated"
+                    ? `${row.version} — needs ${row.minimum} or newer`
+                    : `${row.version ?? "?"} → ${row.latest ?? "?"}`}
               </span>
             </div>
             <RowAction
@@ -408,7 +441,9 @@ function Panel({ rows, onClose }: { rows: Row[]; onClose: () => void }) {
         ) : null,
       )}
       <p className="text-[12px] text-white/50">
-        New models often need the latest version.
+        {anyOutdated
+          ? "Until then, Lanework turns off what the older version lacks."
+          : "New models often need the latest version."}
       </p>
     </section>
   );

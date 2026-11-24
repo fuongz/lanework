@@ -9,6 +9,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { app, shell } from "electron";
 import {
+  belowMinimum,
+  CLI_MINIMUMS,
   type HarnessAgent,
   type HarnessInfo,
   harnessChannels,
@@ -22,6 +24,7 @@ import { opencodeUsageNow } from "../terminal/usage";
 import { agentHomeDir } from "../test-seams";
 import { harnessAccounts } from "./accounts";
 import { latestVersion } from "./latest";
+import { noteVersion } from "./minimums";
 import { probeAgent } from "./probe";
 import {
   cleanVersion,
@@ -69,7 +72,7 @@ const METHODS: readonly InstallMethod[] = [
   "unknown",
 ];
 
-type Entry = HarnessInfo;
+type Entry = Omit<HarnessInfo, "minimum" | "belowMinimum">;
 
 const entries = new Map<HarnessAgent, Entry>(
   TERMINAL_AGENTS.map((agent) => [
@@ -91,7 +94,12 @@ const entries = new Map<HarnessAgent, Entry>(
 function list(): HarnessInfo[] {
   return TERMINAL_AGENTS.map((agent) => {
     const entry = entries.get(agent) as Entry;
-    return { ...entry, update: { ...entry.update } };
+    return {
+      ...entry,
+      update: { ...entry.update },
+      minimum: CLI_MINIMUMS[agent].version,
+      belowMinimum: belowMinimum(agent, entry.version),
+    };
   });
 }
 
@@ -152,7 +160,12 @@ async function probeOne(agent: HarnessAgent): Promise<void> {
   // found stands until one answers.
   if (!found.answered && entry.path !== null) return;
   entry.path = found.path;
-  entry.version = found.version;
+  // FE-168/V3: a dev build may pretend an older CLI, to show the warning.
+  const pretend = app.isPackaged
+    ? undefined
+    : process.env[`LANEWORK_HARNESS_VERSION_${agent.toUpperCase()}`];
+  entry.version = (pretend && cleanVersion(pretend)) || found.version;
+  noteVersion(agent, entry.version);
   if (testing()) {
     const method = testEnv(agent, "METHOD") as InstallMethod;
     entry.installMethod =

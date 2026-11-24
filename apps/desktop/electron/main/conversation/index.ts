@@ -86,6 +86,7 @@ import { isAgentSessionId, isAgentSessionIdOf } from "../../../shared/terminal";
 import { controlCliPath } from "../../control/install";
 import { agentHome as agentHomeAt } from "../agent-home";
 import { connectorInventory } from "../connectors/inventory";
+import { belowMinimumNow } from "../harness/minimums";
 import { broadcast, handle, hearInMain, sendTo, windowContents } from "../ipc";
 import { setLwkMode } from "../lwk-serve";
 import { notify } from "../notifications";
@@ -2374,7 +2375,8 @@ export function registerConversation(
     built: ReturnType<typeof buildHandoff>;
     forked: NonNullable<ConversationHandoff["forked"]>;
   } | null> {
-    if (target === "opencode") return null;
+    // FE-168/D2: an older CLI than Lanework's floor gets a fresh session.
+    if (target === "opencode" || belowMinimumNow(target)) return null;
     const chain = source.thread.chain;
     let at = -1;
     for (let index = chain.length - 1; index >= 0; index--) {

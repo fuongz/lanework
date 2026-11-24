@@ -130,6 +130,7 @@ import {
 } from "./conversation-view.earlier";
 import { HandoffLine, useHandoffLinks } from "./conversation-view.handoff";
 import { ManagedNotice } from "./conversation-view.managed";
+import { OutdatedNotice, useOutdated } from "./conversation-view.outdated";
 import { RollingText } from "./conversation-view.rolling";
 import { useStopShortcut } from "./conversation-view.stop";
 import { FileOpenerProvider } from "./file-opener";
@@ -227,6 +228,8 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   }, [headId, id, navigate, slug]);
   // The CLI whose conversation it is — Claude Code or Codex — once read.
   const agent = conversation?.agent ?? null;
+  // FE-168: its CLI is older than Lanework needs.
+  const outdated = useOutdated(conversation?.agent ?? null);
   const label = AGENT_LABELS[agent ?? "claude"];
   useEffect(() => {
     setChatAgent(agent);
@@ -1524,12 +1527,25 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                   <div className={asking.length ? "hidden" : "flex flex-col"}>
                     <MessageQueue
                       lead={
-                        untrusted && agent ? (
-                          <TrustNotice
-                            agent={agent}
-                            trusting={trusting}
-                            onTrust={() => setTrustAsk({ agent, on: true })}
-                          />
+                        (untrusted && agent) || outdated ? (
+                          <>
+                            {untrusted && agent && (
+                              <TrustNotice
+                                agent={agent}
+                                trusting={trusting}
+                                onTrust={() => setTrustAsk({ agent, on: true })}
+                              />
+                            )}
+                            {outdated && conversation?.agent && (
+                              <div
+                                className={
+                                  untrusted ? "border-border/60 border-t" : ""
+                                }
+                              >
+                                <OutdatedNotice agent={conversation.agent} />
+                              </div>
+                            )}
+                          </>
                         ) : undefined
                       }
                       queue={queue}

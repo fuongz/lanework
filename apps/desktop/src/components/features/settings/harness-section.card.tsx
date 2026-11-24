@@ -13,6 +13,7 @@ import { Button } from "#/components/ui/button";
 import { type UsageView, updatedText } from "#/lib/agent-usage";
 import { cn } from "#/lib/utils";
 import {
+  CLI_MINIMUMS,
   compareVersions,
   type HarnessAccount,
   type HarnessAgent,
@@ -66,6 +67,8 @@ export function HarnessCard({
     info.latest !== null &&
     compareVersions(info.latest, info.version) > 0;
   const signedIn = !!account?.signedIn;
+  // FE-168: older than Lanework's floor.
+  const outdated = !!info?.belowMinimum;
 
   return (
     <SettingsCard>
@@ -95,7 +98,7 @@ export function HarnessCard({
               className="text-muted-foreground flex items-center gap-2 text-[13px]"
               title={INSTALLED_WITH[info.installMethod]}
             >
-              {info.version && info.latest && !newer && (
+              {info.version && info.latest && !newer && !outdated && (
                 <span className="flex items-center gap-1">
                   <HugeiconsIcon
                     icon={Tick02Icon}
@@ -108,7 +111,12 @@ export function HarnessCard({
               )}
               <span
                 data-testid={`harness-version-${kind}`}
-                className="bg-foreground/[0.05] text-foreground/80 rounded-md px-1.5 font-mono text-[12px] tabular-nums"
+                className={cn(
+                  "rounded-md px-1.5 font-mono text-[12px] tabular-nums",
+                  outdated
+                    ? "bg-tone-amber/10 text-tone-amber"
+                    : "bg-foreground/[0.05] text-foreground/80",
+                )}
               >
                 {!info.version ? (
                   "Version unknown"
@@ -122,7 +130,7 @@ export function HarnessCard({
                 )}
               </span>
             </div>
-            {newer && info.updateCommand && (
+            {(newer || outdated) && info.updateCommand && (
               <Button
                 size="sm"
                 variant="outline"
@@ -154,7 +162,26 @@ export function HarnessCard({
           {name} is not installed, or its version could not be read.
         </p>
       )}
-      {newer && !info?.updateCommand && (
+      {outdated && info && (
+        <div
+          role="status"
+          data-testid={`harness-outdated-${kind}`}
+          className="text-muted-foreground px-4 py-3 text-[13px] leading-relaxed"
+        >
+          <p>
+            <span className="text-tone-amber font-medium">
+              Older than Lanework needs ({info.minimum} or newer).
+            </span>{" "}
+            It still runs; until it is updated, Lanework goes without:
+          </p>
+          <ul className="mt-1 list-disc pl-5">
+            {CLI_MINIMUMS[kind].needs.map((need) => (
+              <li key={need}>{need}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {(newer || outdated) && !info?.updateCommand && (
         <p className="text-muted-foreground px-4 py-3 text-[13px] leading-relaxed">
           Update it the way you installed it.
         </p>

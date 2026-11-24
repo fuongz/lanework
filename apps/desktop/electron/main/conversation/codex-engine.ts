@@ -43,6 +43,7 @@ import {
 } from "../../../shared/conversation";
 import { isAgentSessionId } from "../../../shared/terminal";
 import { codexConnectorArgs } from "../connectors/flags";
+import { belowMinimumNow } from "../harness/minimums";
 import {
   agentEnv,
   connectorPlan,
@@ -545,7 +546,11 @@ export class CodexEngine implements ConversationEngine {
     // FE-155: the control tools, for a process holding a control token; a
     // conductor's runs its safe ones without asking.
     const control = controlMcpFor(env);
-    if (control) overrides.push(...codexControlArgs(control, asConductor));
+    // FE-168/D2: an older Codex asks before thread_read as before.
+    if (control)
+      overrides.push(
+        ...codexControlArgs(control, asConductor, !belowMinimumNow("codex")),
+      );
     // FE-158: this build's lwk for the kit, unless its backend is ts.
     const kit = kitMcpFor();
     if (kit) overrides.push(...codexKitArgs(kit));

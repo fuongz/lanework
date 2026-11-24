@@ -1,10 +1,12 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 import { findDesktopSurface } from "#/server/desktop";
-import type {
-  DesktopHarnessApi,
-  HarnessAgent,
-  HarnessInfo,
+import {
+  belowMinimum,
+  CLI_MINIMUMS,
+  type DesktopHarnessApi,
+  type HarnessAgent,
+  type HarnessInfo,
 } from "../../shared/harness";
 
 /**
@@ -155,6 +157,8 @@ function makeFake(): DesktopHarnessApi | null {
     dismissed: null,
     update: { state: "idle" },
     checkedAt: new Date().toISOString(),
+    minimum: CLI_MINIMUMS[agent].version,
+    belowMinimum: belowMinimum(agent, version),
   });
   let list: HarnessInfo[] = [
     entry("codex", "0.162.1", "0.163.0"),

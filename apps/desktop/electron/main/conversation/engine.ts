@@ -48,6 +48,7 @@ import {
   claudeDisallowedTools,
   withDisallowedTools,
 } from "../connectors/flags";
+import { belowMinimumNow } from "../harness/minimums";
 import {
   agentEnv,
   type ConnectorPlan,
@@ -243,7 +244,9 @@ export function engineArgs(
   // BE-01: what this process may ask of the app, fixed for its life.
   if (hint) args.push("--append-system-prompt", hint);
   if (guarded) args.push("--disallowedTools", [...WRITE_TOOLS].join(","));
-  if (controlMcp) args.push(...claudeControlAllowArgs(conductor));
+  // FE-168/D2: an older Claude Code asks before thread_read as before.
+  if (controlMcp)
+    args.push(...claudeControlAllowArgs(conductor, !belowMinimumNow("claude")));
   if (!connectors) return args;
   // FE-166: a run worker holds only the servers `--mcp-config` names.
   if (connectors.strict) args.push("--strict-mcp-config");

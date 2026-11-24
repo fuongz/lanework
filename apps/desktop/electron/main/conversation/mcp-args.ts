@@ -66,6 +66,18 @@ export const CONDUCTOR_ALLOWED_TOOLS = [
 export const ANY_ALLOWED_TOOLS = ["thread_read"] as const;
 
 /**
+ * The control tools a process runs without asking: a conductor's or any
+ * other's list, `thread_read` left out when `threadRead` is false (a CLI
+ * older than Lanework's floor, FE-168/D2).
+ */
+function allowedTools(conductor: boolean, threadRead: boolean): string[] {
+  const tools: readonly string[] = conductor
+    ? CONDUCTOR_ALLOWED_TOOLS
+    : ANY_ALLOWED_TOOLS;
+  return tools.filter((tool) => threadRead || tool !== "thread_read");
+}
+
+/**
  * Claude Code's `--allowedTools` for a process with the control server: the
  * {@link CONDUCTOR_ALLOWED_TOOLS} on a conductor's, the
  * {@link ANY_ALLOWED_TOOLS} on any other, under the server's prefix.
@@ -74,10 +86,12 @@ export const ANY_ALLOWED_TOOLS = ["thread_read"] as const;
  * rule (a guarded lead's `--disallowedTools`, the user's settings) still
  * wins over it, so the two flags need no merging.
  */
-export function claudeControlAllowArgs(conductor = false): string[] {
-  const tools: readonly string[] = conductor
-    ? CONDUCTOR_ALLOWED_TOOLS
-    : ANY_ALLOWED_TOOLS;
+export function claudeControlAllowArgs(
+  conductor = false,
+  threadRead = true,
+): string[] {
+  const tools = allowedTools(conductor, threadRead);
+  if (!tools.length) return [];
   return [
     "--allowedTools",
     tools.map((tool) => `mcp__${CONTROL_SERVER}__${tool}`).join(","),
@@ -217,11 +231,15 @@ export function claudeMcpArgs(
  * (`approve` skips the prompt). Every other tool keeps Codex's default, so
  * `sessions_answer` asks as the session's policy says.
  */
-export function codexControlArgs(control: string, conductor = false): string[] {
-  const allowed: readonly string[] = conductor
-    ? CONDUCTOR_ALLOWED_TOOLS
-    : ANY_ALLOWED_TOOLS;
-  const tools = `,tools={${allowed.map((tool) => `${tool}={approval_mode="approve"}`).join(",")}}`;
+export function codexControlArgs(
+  control: string,
+  conductor = false,
+  threadRead = true,
+): string[] {
+  const allowed = allowedTools(conductor, threadRead);
+  const tools = allowed.length
+    ? `,tools={${allowed.map((tool) => `${tool}={approval_mode="approve"}`).join(",")}}`
+    : "";
   return [
     "-c",
     `mcp_servers.${CONTROL_SERVER}={command=${JSON.stringify(control)},args=[],env_vars=${JSON.stringify([...CONTROL_FORWARD])}${tools}}`,

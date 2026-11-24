@@ -44,6 +44,67 @@ export interface HarnessInfo {
   update: HarnessUpdateState;
   /** ISO time of the last check; null before the first one finishes. */
   checkedAt: string | null;
+  /** The oldest version Lanework runs on ({@link CLI_MINIMUMS}, FE-168). */
+  minimum: string;
+  /**
+   * The installed version is older than {@link minimum}. False when the
+   * version could not be read (FE-168/D4): that is no reason to warn.
+   */
+  belowMinimum: boolean;
+}
+
+/**
+ * The oldest version of each CLI Lanework runs on (FE-168), and what an
+ * older one goes without. The floors are the versions last verified with
+ * the app (D3), lowered as older ones are checked. Below one the CLI still
+ * runs (D2): the app warns, and turns off what needs the newer one.
+ */
+export const CLI_MINIMUMS: Record<
+  HarnessAgent,
+  { version: string; needs: readonly string[] }
+> = {
+  claude: {
+    version: "2.1.331",
+    needs: [
+      "Lanework's tools allowed by name (thread_read, the conductor's)",
+      "forking its earlier session when a thread switches back to Claude",
+    ],
+  },
+  codex: {
+    version: "0.170.0",
+    needs: [
+      "forking its earlier session when a thread switches back to Codex (thread/fork)",
+      "per-tool approval for Lanework's tools",
+    ],
+  },
+  opencode: {
+    version: "2.0.15",
+    needs: ["the chat itself (its background service)"],
+  },
+};
+
+/** Whether `version` of `agent` is older than its floor; false when unknown. */
+export function belowMinimum(
+  agent: HarnessAgent,
+  version: string | null,
+): boolean {
+  return (
+    version !== null &&
+    compareVersions(version, CLI_MINIMUMS[agent].version) < 0
+  );
+}
+
+/**
+ * Whether the island should ask for an update because the CLI is too old
+ * (FE-168/D1): it can be updated, and the offer was not closed on its
+ * latest version.
+ */
+export function needsUpdate(info: HarnessInfo): boolean {
+  return (
+    info.belowMinimum &&
+    info.updateCommand !== null &&
+    (info.latest === null || info.latest !== info.dismissed)
+  );
 }
 
 /** Whether a harness has an update the island should offer. */

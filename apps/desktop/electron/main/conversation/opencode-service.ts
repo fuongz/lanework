@@ -14,15 +14,17 @@
 // else.
 import { execFile } from "node:child_process";
 import { homedir } from "node:os";
+import { CLI_MINIMUMS } from "../../../shared/harness";
 import type { ClaudeCli } from "./claude-cli";
 import type { OpenCodeService } from "./opencode-client";
 
-/** The oldest OpenCode the chat runs on. */
-const MINIMUM = [2, 0, 15] as const;
+/** The oldest OpenCode the chat runs on: its floor in `CLI_MINIMUMS` (FE-168). */
+const MINIMUM = CLI_MINIMUMS.opencode.version
+  .split(".")
+  .map((part) => Number.parseInt(part, 10) || 0);
 
 /** What the chat says when OpenCode is older than {@link MINIMUM}. */
-export const OPENCODE_TOO_OLD =
-  "Chat needs OpenCode 2.0.15 or newer. Update it in Settings › Harness.";
+export const OPENCODE_TOO_OLD = `Chat needs OpenCode ${CLI_MINIMUMS.opencode.version} or newer. Update it in Settings › Harness.`;
 
 /** What `service` throws when asked not to start a service that is down. */
 export const OPENCODE_NOT_RUNNING =
