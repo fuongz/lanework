@@ -1104,6 +1104,27 @@ export function registerConversation(
   // (`placeNow`), and the rail folds threads from what is loaded
   // (`setRailThreads` below).
   void handoffs.ready().catch(() => undefined);
+  /**
+   * The conductor whose own conversation native session `conversation` is,
+   * or null. A conductor is bound to its thread's head: after an in-place
+   * handoff (`switchAgent`) its engine runs a newer session, under another
+   * id and maybe another agent, that is still the conductor's own.
+   */
+  const conductorOfThread = async (
+    project: string,
+    agent: ConversationAgent,
+    conversation: string,
+  ): Promise<string | null> => {
+    const own = await conductorOfConversation(
+      project,
+      agent,
+      conversation,
+    ).catch(() => null);
+    if (own) return own;
+    const head = (await handoffs.chainOf(project, conversation))[0];
+    if (!head || head.conversation === conversation) return null;
+    return conductorOfConversation(project, head.agent, head.conversation);
+  };
   const previews = createLinkPreviews({
     dir: join(app.getPath("userData"), "link-previews"),
   });
@@ -1217,7 +1238,7 @@ export function registerConversation(
   };
   /** The conductor whose own conversation this is now, or null. */
   const conductorNow = (project: string, conversation: string) =>
-    conductorOfConversation(
+    conductorOfThread(
       project,
       engines.pending(project, conversation)?.agent ?? "claude",
       conversation,
@@ -1576,7 +1597,7 @@ export function registerConversation(
     agentOf,
     read: readAny,
     storedSettings: (conversation) => store.of(conversation),
-    conductorOf: conductorOfConversation,
+    conductorOf: conductorOfThread,
     name: nameConversation,
     register: (project, agent, id, folder, launchedBy) =>
       registerAgentSession(project, agent, id, folder, null, launchedBy),
@@ -1620,7 +1641,7 @@ export function registerConversation(
       if (!conversation) return [];
       const id =
         launcherOfConversation(conversation)?.conductor ??
-        (await conductorOfConversation(target.project, agent, conversation));
+        (await conductorOfThread(target.project, agent, conversation));
       if (!id) return [];
       const lead = await teamLeadOf(target.project, id).catch(() => null);
       return lead?.connectors?.disabled ?? [];
@@ -1641,7 +1662,7 @@ export function registerConversation(
   });
   // FE-165: a rule's `conductor`, and the card "Always allow" reads.
   setPermissionConductors((project, agent, conversation) =>
-    conductorOfConversation(project, agent, conversation).catch(() => null),
+    conductorOfThread(project, agent, conversation).catch(() => null),
   );
   pendingCards = async (project, conversation, id) => {
     const native = await nativeOf([project, conversation]);
