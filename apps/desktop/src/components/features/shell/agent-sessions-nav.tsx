@@ -1,7 +1,11 @@
-import { Add01Icon, Search01Icon } from "@hugeicons/core-free-icons";
+import {
+  Add01Icon,
+  ArrowDown01Icon,
+  Search01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { AgentSession, TerminalAgent } from "#/../shared/terminal";
 import { RenameAgentDialog } from "#/components/shared/agents/rename-agent-dialog";
 import { StatusPing } from "#/components/shared/agents/status-ping";
@@ -28,6 +32,7 @@ import {
 import { TooltipProvider } from "#/components/ui/tooltip";
 import { useCloseSessionTab } from "#/hooks/use-close-session-tab";
 import { ipcMessage } from "#/lib/ipc-error";
+import { readStored, writeStored } from "#/lib/stored";
 import { agentKey, useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useSessionTabs } from "#/stores/session-tabs";
@@ -152,6 +157,9 @@ export function AgentSessionsNav({
   );
 }
 
+/** Where the Sessions group remembers that it is folded. */
+const COLLAPSED_KEY = "lanework.rail.sessions-collapsed";
+
 /** The full rail's Sessions group, and its dialogs. */
 function AgentSessionsList({
   project,
@@ -187,7 +195,17 @@ function AgentSessionsList({
   const stop = useAgentTerminals((state) => state.stop);
   const remove = useAgentSessions((state) => state.remove);
   const pull = useSessionsPull(project);
+  const listId = useId();
   const [expanded, setExpanded] = useState(false);
+  /** The whole group folded to its header, remembered across launches. */
+  const [collapsed, setCollapsed] = useState(
+    () => readStored(COLLAPSED_KEY) === "1",
+  );
+  const toggleCollapsed = () =>
+    setCollapsed((value) => {
+      writeStored(COLLAPSED_KEY, value ? null : "1");
+      return !value;
+    });
   const [searching, setSearching] = useState(false);
   /** Conversations whose sub-agents are all shown, past the fold (FE-33/D4). */
   const [allSubagents, setAllSubagents] = useState<ReadonlySet<string>>(
@@ -274,10 +292,25 @@ function AgentSessionsList({
         fresh.length > 0 ||
         hasFolder) && (
         <nav aria-label="Sessions" className="flex flex-col gap-0.5">
-          <div className="flex min-w-0 items-center justify-between gap-2 pt-4 pb-1 pr-1">
-            <span className="text-muted-foreground shrink-0 px-2 text-[11px] font-medium tracking-wide uppercase">
+          <div className="group/header flex min-w-0 items-center justify-between gap-2 pt-4 pb-1 pr-1">
+            {/* The caret shows on hover, and stays while folded so the fold
+              is never hidden. */}
+            <button
+              type="button"
+              aria-expanded={!collapsed}
+              aria-controls={listId}
+              title={collapsed ? "Show sessions" : "Hide sessions"}
+              onClick={toggleCollapsed}
+              className="text-muted-foreground hover:text-foreground flex shrink-0 items-center gap-1 rounded-md px-2 text-[11px] font-medium tracking-wide uppercase transition-colors"
+            >
               Sessions
-            </span>
+              <HugeiconsIcon
+                icon={ArrowDown01Icon}
+                aria-hidden
+                className={`size-3 transition-[opacity,rotate] duration-150 ease-out motion-reduce:transition-none ${collapsed ? "-rotate-90 opacity-100" : "opacity-0 group-hover/header:opacity-100 group-focus-within/header:opacity-100"}`}
+                strokeWidth={2}
+              />
+            </button>
             <span className="flex min-w-0 items-center gap-0.5">
               {/* A Pull reading this project takes Search's and the menu's
                 place: how far it has got, and Cancel (FE-112). */}
@@ -327,80 +360,82 @@ function AgentSessionsList({
               )}
             </span>
           </div>
-          {empty && <SessionsEmpty pull={pull} agents={agents} />}
-          {pinned.map((session) => sessionRow(session))}
-          {pending.map((entry) => (
-            <button
-              key={entry.key}
-              type="button"
-              aria-current={entry.current ? "page" : undefined}
-              aria-label={`Open “${entry.label}”`}
-              aria-busy={entry.working || undefined}
-              title={`${entry.label}\n${TERMINAL_KIND_LABELS[entry.agent]}, ${entry.working ? "starting" : "new"}`}
-              onClick={entry.open}
-              className={`${row} w-full text-left ${entry.current ? activeClass : ""}`}
-            >
-              <span className="relative flex shrink-0">
-                <TerminalKindIcon
-                  kind={entry.agent}
-                  className="size-3 shrink-0"
-                />
-                {entry.working && <StatusPing tone="working" />}
-              </span>
-              <span
-                className={`min-w-0 flex-1 truncate ${entry.working ? "text-breathe" : "text-muted-foreground"}`}
+          <div id={listId} hidden={collapsed} className="flex flex-col gap-0.5">
+            {empty && <SessionsEmpty pull={pull} agents={agents} />}
+            {pinned.map((session) => sessionRow(session))}
+            {pending.map((entry) => (
+              <button
+                key={entry.key}
+                type="button"
+                aria-current={entry.current ? "page" : undefined}
+                aria-label={`Open “${entry.label}”`}
+                aria-busy={entry.working || undefined}
+                title={`${entry.label}\n${TERMINAL_KIND_LABELS[entry.agent]}, ${entry.working ? "starting" : "new"}`}
+                onClick={entry.open}
+                className={`${row} w-full text-left ${entry.current ? activeClass : ""}`}
               >
-                {entry.label}
-              </span>
-            </button>
-          ))}
-          {fresh.map((entry) => {
-            const agent = TERMINAL_KIND_LABELS[entry.kind];
-            const current = entry.id === terminalId;
-            return (
-              <div key={entry.id} className="group/row relative">
-                <ContextMenu>
-                  <ContextMenuTrigger
-                    render={
-                      <button
-                        type="button"
-                        aria-current={current ? "page" : undefined}
-                        aria-label={`Open new ${agent} session`}
-                        onClick={() => go(entry)}
-                        className={`${row} w-full text-left ${current ? activeClass : ""}`}
-                      />
-                    }
-                  >
-                    <span className="relative flex shrink-0">
-                      <TerminalKindIcon
-                        kind={entry.kind}
-                        className="size-3 shrink-0"
-                      />
-                      <StatusPing tone="running" />
-                    </span>
-                    <span className="text-muted-foreground min-w-0 flex-1 truncate">
-                      New {agent} session
-                    </span>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent>
-                    <StopItem onStop={() => void stop(project, entry.id)} />
-                  </ContextMenuContent>
-                </ContextMenu>
-              </div>
-            );
-          })}
-          {runningUnpinned.map((session) => sessionRow(session))}
-          {shown.map((session) => sessionRow(session))}
-          {rest.length > FOLDED && (
-            <button
-              type="button"
-              onClick={() => setExpanded((value) => !value)}
-              aria-expanded={expanded}
-              className={`${row} text-muted-foreground w-full text-left text-xs`}
-            >
-              {expanded ? "Show less" : `Show ${rest.length - FOLDED} more`}
-            </button>
-          )}
+                <span className="relative flex shrink-0">
+                  <TerminalKindIcon
+                    kind={entry.agent}
+                    className="size-3 shrink-0"
+                  />
+                  {entry.working && <StatusPing tone="working" />}
+                </span>
+                <span
+                  className={`min-w-0 flex-1 truncate ${entry.working ? "text-breathe" : "text-muted-foreground"}`}
+                >
+                  {entry.label}
+                </span>
+              </button>
+            ))}
+            {fresh.map((entry) => {
+              const agent = TERMINAL_KIND_LABELS[entry.kind];
+              const current = entry.id === terminalId;
+              return (
+                <div key={entry.id} className="group/row relative">
+                  <ContextMenu>
+                    <ContextMenuTrigger
+                      render={
+                        <button
+                          type="button"
+                          aria-current={current ? "page" : undefined}
+                          aria-label={`Open new ${agent} session`}
+                          onClick={() => go(entry)}
+                          className={`${row} w-full text-left ${current ? activeClass : ""}`}
+                        />
+                      }
+                    >
+                      <span className="relative flex shrink-0">
+                        <TerminalKindIcon
+                          kind={entry.kind}
+                          className="size-3 shrink-0"
+                        />
+                        <StatusPing tone="running" />
+                      </span>
+                      <span className="text-muted-foreground min-w-0 flex-1 truncate">
+                        New {agent} session
+                      </span>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent>
+                      <StopItem onStop={() => void stop(project, entry.id)} />
+                    </ContextMenuContent>
+                  </ContextMenu>
+                </div>
+              );
+            })}
+            {runningUnpinned.map((session) => sessionRow(session))}
+            {shown.map((session) => sessionRow(session))}
+            {rest.length > FOLDED && (
+              <button
+                type="button"
+                onClick={() => setExpanded((value) => !value)}
+                aria-expanded={expanded}
+                className={`${row} text-muted-foreground w-full text-left text-xs`}
+              >
+                {expanded ? "Show less" : `Show ${rest.length - FOLDED} more`}
+              </button>
+            )}
+          </div>
         </nav>
       )}
       <AgentSessionSearch
