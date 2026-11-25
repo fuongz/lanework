@@ -102,12 +102,12 @@ export const AUTONOMY_COPY: Record<
 
 /**
  * The permission an agent the app starts on its own (an assigned card, an
- * automation run) may have in a folder (FE-173/D3).
+ * routine run) may have in a folder (FE-173/D3).
  *
  * NOTE: A folder its CLI does not trust still hands the agent the repo's own
  * words: CLAUDE.md, AGENTS.md, the code. With nobody approving commands,
  * those words could steer it into running anything, so an untrusted folder
- * starts Supervised whatever the dial or the automation says.
+ * starts Supervised whatever the dial or the routine says.
  */
 export function permissionInFolder(
   permission: Permission,

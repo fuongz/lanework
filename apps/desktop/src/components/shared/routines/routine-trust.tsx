@@ -1,23 +1,23 @@
 import { SecurityCheckIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
-import type { AutomationAgent } from "#/../shared/automations";
+import type { RoutineAgent } from "#/../shared/routines";
 import { Button } from "#/components/ui/button";
 import { ipcMessage } from "#/lib/ipc-error";
 
 /** What trusting loads, in the words the chat's own notice uses. */
-const LOADS: Record<AutomationAgent, string> = {
+const LOADS: Record<RoutineAgent, string> = {
   claude: "the project’s .claude settings",
   codex: "the project’s .codex config and AGENTS.md",
 };
 
-const NAMES: Record<AutomationAgent, string> = {
+const NAMES: Record<RoutineAgent, string> = {
   claude: "Claude",
   codex: "Codex",
 };
 
 /**
- * Says when the automation's agent does not trust the project's folder
+ * Says when the routine's agent does not trust the project's folder
  * (FE-173/D4), with a button to trust it. Nothing while trusted, or while
  * the read is pending or failed.
  *
@@ -25,12 +25,12 @@ const NAMES: Record<AutomationAgent, string> = {
  * (FE-173/D3), so it may wait on a permission until its timeout. Trusting
  * writes the CLI's own record (FE-101), the one its trust screen writes.
  */
-export function AutomationTrust({
+export function RoutineTrust({
   slug,
   agent,
 }: {
   slug: string | null;
-  agent: AutomationAgent;
+  agent: RoutineAgent;
 }) {
   const [trusted, setTrusted] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);

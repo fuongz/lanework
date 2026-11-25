@@ -307,6 +307,8 @@ export function useAssignAgent(card: BoardCard) {
         text,
         attachments: [],
         settings,
+        // FE-175: the board tools of the card workflow go unasked.
+        card: current.taskId ?? current.id,
       });
       end(project, conversation);
       useSessionTabs.getState().open(slug, conversation);

@@ -1,45 +1,55 @@
-// Automations in main (FE-99): the scheduler, the runner and the page's IPC.
+// Routines in main (FE-99): the scheduler, the runner and the page's IPC.
 //
-// - The scheduler ticks every 30 s and on a wake from sleep. An automation
+// - The scheduler ticks every 30 s and on a wake from sleep. A routine
 //   is due once its stored `nextRunAt` has passed; `planSlots` (pure, in
 //   `slots.ts`) turns the slots since then into at most one run and a list
 //   of skipped ones, and gives the next slot.
 // - A run is a fresh headless conversation (Claude or Codex) started through
-//   the chat's engines, named `Automation: <name>` on the rail. At most
-//   AUTOMATION_MAX_CONCURRENT run at once across the app; the rest wait as
-//   `queued`. One automation never has two runs going.
-// - Its end is heard from the chat's own events (`automations.onEvent`,
+//   the chat's engines, named `Routine: <name>` on the rail. At most
+//   ROUTINE_MAX_CONCURRENT run at once across the app; the rest wait as
+//   `queued`. One routine never has two runs going.
+// - Its end is heard from the chat's own events (`routines.onEvent`,
 //   called beside the conductor's in `conversation/index.ts`). A last answer
 //   of exactly NOTHING_TO_REPORT archives the conversation quietly; any
 //   other end notifies.
 // - A run's engine is gone once the app quits: a run left `running` or
 //   `queued` by an earlier process is closed as `failed` at start.
+// - A self-paced `loop` (FE-172) has no slots: a due `nextRunAt` queues one
+//   run. Its process gets the schedule_next / schedule_stop tools
+//   (`routineLoop`, through the conductor sessions' control channel); the
+//   run's end sets `nextRunAt` from what the agent asked, else the loop's
+//   default, or turns the routine off on a stop.
 
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { app, powerMonitor } from "electron";
-import {
-  AUTOMATION_MAX_CONCURRENT,
-  AUTOMATION_RUNS_KEPT,
-  type Automation,
-  type AutomationInput,
-  type AutomationRun,
-  type AutomationRunStatus,
-  type AutomationsChange,
-  type AutomationTrigger,
-  automationsChannels,
-  checkAutomationInput,
-  NOTHING_TO_REPORT,
-  runPrompt,
-} from "../../../shared/automations";
 import { permissionInFolder } from "../../../shared/autonomy";
+import type {
+  SessionInputs,
+  SessionResults,
+} from "../../../shared/conductor-sessions";
 import type {
   ConversationEvent,
   EngineState,
   Turn,
 } from "../../../shared/conversation";
+import {
+  checkRoutineInput,
+  NOTHING_TO_REPORT,
+  ROUTINE_MAX_CONCURRENT,
+  ROUTINE_RUNS_KEPT,
+  type Routine,
+  type RoutineInput,
+  type RoutineRun,
+  type RoutineRunStatus,
+  type RoutinesChange,
+  type RoutineTokens,
+  type RoutineTrigger,
+  routineRunPrompt,
+  routinesChannels,
+} from "../../../shared/routines";
 import { AGENT_NAME_MAX } from "../../../shared/terminal";
 import type { SessionStore } from "../../session-store";
 import { trust as projectTrust } from "../agent-setup";
@@ -87,23 +97,23 @@ function store(): SessionStore {
   return sessionStore();
 }
 
-function changed(project: string, automationId: string): void {
-  broadcast(automationsChannels.changed, {
+function changed(project: string, routineId: string): void {
+  broadcast(routinesChannels.changed, {
     project,
-    automationId,
-  } satisfies AutomationsChange);
+    routineId,
+  } satisfies RoutinesChange);
 }
 
 // ── Runs going on ───────────────────────────────────────────────────────────
 
 interface Live {
   runId: string;
-  automation: Automation;
+  routine: Routine;
   /** Its native conversation, once known. */
   conversation: string | null;
   /**
    * The project's id, as the engines, the rail and the chat key it; null
-   * until resolved. The automation itself keeps the slug the page gave.
+   * until resolved. The routine itself keeps the slug the page gave.
    */
   key: string | null;
   /** The project's folder: the git root a worktree is made from. */
@@ -122,9 +132,21 @@ interface Live {
    * it for a sign-in to redo (`claude-auth`). Told before the idle.
    */
   failure: string | null;
-  /** Its automation was deleted: nothing is recorded or told. */
+  /** Its routine was deleted: nothing is recorded or told. */
   removed: boolean;
   ending: boolean;
+  /**
+   * What the agent last asked of a self-paced loop (FE-172): the next run
+   * in `minutes`, or no more runs. Null: the loop's default.
+   */
+  pace:
+    | { kind: "next"; minutes: number; reason: string | null }
+    | { kind: "stop"; reason: string | null }
+    | null;
+  /** Its turns' tokens so far (FE-177); null until a turn tells some. */
+  tokens: RoutineTokens | null;
+  /** Its turns' cost so far in USD; null until a turn tells one. */
+  costUSD: number | null;
 }
 
 /** Run id → the run going on. */
@@ -159,7 +181,7 @@ function finalAnswer(run: Live): string {
   const engines = sharedEngines();
   const turns =
     run.conversation && engines
-      ? (engines.pending(run.key ?? run.automation.project, run.conversation)
+      ? (engines.pending(run.key ?? run.routine.project, run.conversation)
           ?.turns ?? [])
       : [];
   for (let at = turns.length - 1; at >= 0; at--) {
@@ -204,20 +226,20 @@ function oneLine(text: string, max = 160): string {
 
 async function notifyEnd(
   run: Live,
-  status: AutomationRunStatus,
+  status: RoutineRunStatus,
   detail: string,
 ): Promise<void> {
   if (!run.conversation) return;
-  const { project: found } = await knownProject(run.automation.project);
-  const name = run.automation.name;
+  const { project: found } = await knownProject(run.routine.project);
+  const name = run.routine.name;
   const title =
     status === "succeeded"
-      ? `Automation: ${name}`
+      ? `Routine: ${name}`
       : status === "timed_out"
-        ? `Automation timed out: ${name}`
-        : `Automation failed: ${name}`;
+        ? `Routine timed out: ${name}`
+        : `Routine failed: ${name}`;
   await notify({
-    kind: "automations",
+    kind: "routines",
     title,
     body: oneLine(detail) || "Finished.",
     target: {
@@ -239,9 +261,9 @@ async function finish(run: Live, error: string | null): Promise<void> {
   run.ending = true;
   if (run.timer) clearTimeout(run.timer);
   run.timer = null;
-  const { project } = run.automation;
+  const { project } = run.routine;
   const answer = finalAnswer(run);
-  const status: AutomationRunStatus = run.timedOut
+  const status: RoutineRunStatus = run.timedOut
     ? "timed_out"
     : error !== null
       ? "failed"
@@ -263,12 +285,12 @@ async function finish(run: Live, error: string | null): Promise<void> {
     await archiveAgentTranscript(
       agentHomeDir(),
       run.folder,
-      run.automation.agent,
+      run.routine.agent,
       run.conversation,
       runCodex,
       store(),
     ).catch((cause: unknown) =>
-      console.warn("Unable to archive an automation's conversation", cause),
+      console.warn("Unable to archive a routine's conversation", cause),
     );
   if (run.tree && run.root) {
     // NOTE: A worktree the agent changed is kept, branch and all: removing
@@ -285,25 +307,60 @@ async function finish(run: Live, error: string | null): Promise<void> {
   if (run.conversation)
     byConversation.delete(keyOf(run.key ?? project, run.conversation));
   if (!run.removed && !closed) {
-    store().updateAutomationRun(run.runId, {
+    const endedAt = new Date();
+    store().updateRoutineRun(run.runId, {
       status,
-      endedAt: new Date().toISOString(),
+      endedAt: endedAt.toISOString(),
       error: run.timedOut
-        ? `Stopped after ${run.automation.timeoutMinutes} minutes.`
+        ? `Stopped after ${run.routine.timeoutMinutes} minutes.`
         : error,
+      ...(run.pace?.reason ? { note: run.pace.reason } : {}),
+      tokens: run.tokens,
+      costUSD: run.costUSD,
     });
-    changed(project, run.automation.id);
+    reschedule(run, endedAt);
+    changed(project, run.routine.id);
     if (status !== "nothing_to_report")
       void notifyEnd(run, status, error ?? answer).catch(() => {});
   }
   pump();
 }
 
+/**
+ * After a run of a self-paced loop (FE-172): turn it off on a stop, else
+ * set its next run from `endedAt`, by what the agent asked or the loop's
+ * default. A failed or timed-out run paces the loop all the same, so one
+ * bad run does not end it.
+ *
+ * NOTE: Read from the store, not the run's copy: the person may have
+ * edited, turned off or deleted the routine while the run went.
+ */
+function reschedule(run: Live, endedAt: Date): void {
+  const current = store().getRoutine(run.routine.id);
+  if (current?.schedule.kind !== "loop") return;
+  if (run.pace?.kind === "stop") {
+    store().saveRoutine({
+      ...current,
+      enabled: false,
+      nextRunAt: null,
+      updatedAt: endedAt.toISOString(),
+    });
+    return;
+  }
+  // Turned off meanwhile (or a manual run of an off loop): stays off.
+  if (!current.enabled) return;
+  const minutes = run.pace?.minutes ?? current.schedule.minutes;
+  store().setRoutineNextRun(
+    current.id,
+    new Date(endedAt.getTime() + minutes * 60_000).toISOString(),
+  );
+}
+
 /** Hear the conversation `run` started, from here on. */
 function attach(run: Live, conversation: string): void {
   run.conversation = conversation;
   byConversation.set(
-    keyOf(run.key ?? run.automation.project, conversation),
+    keyOf(run.key ?? run.routine.project, conversation),
     run.runId,
   );
 }
@@ -328,13 +385,13 @@ function endedWith(run: Live, engine: EngineState): void {
 }
 
 /**
- * Start queued run `runId` of `automation`. Synchronous up to its first
+ * Start queued run `runId` of `routine`. Synchronous up to its first
  * await, so {@link pump} counts it at once.
  */
-function launch(automation: Automation, runId: string): void {
+function launch(routine: Routine, runId: string): void {
   const run: Live = {
     runId,
-    automation,
+    routine,
     conversation: null,
     key: null,
     root: null,
@@ -347,33 +404,36 @@ function launch(automation: Automation, runId: string): void {
     removed: false,
     ending: false,
     failure: null,
+    pace: null,
+    tokens: null,
+    costUSD: null,
   };
   live.set(runId, run);
-  store().updateAutomationRun(runId, {
+  store().updateRoutineRun(runId, {
     status: "running",
     startedAt: new Date().toISOString(),
   });
-  changed(automation.project, automation.id);
+  changed(routine.project, routine.id);
   // Armed before the start: a worktree or a slow CLI counts too.
   run.timer = setTimeout(() => {
     run.timedOut = true;
     void finish(run, null);
-  }, automation.timeoutMinutes * 60_000);
+  }, routine.timeoutMinutes * 60_000);
   void start(run).catch((error: unknown) =>
     finish(run, error instanceof Error ? error.message : String(error)),
   );
 }
 
 async function start(run: Live): Promise<void> {
-  const { automation } = run;
-  const { agent } = automation;
+  const { routine } = run;
+  const { agent } = routine;
   const engines = sharedEngines();
   if (!engines) throw new Error("Conversations are not ready yet.");
   // NOTE: The page names the project by slug, but the engines, the rail and
   // the chat key a project by its id: a run started under the slug was a
   // conversation no rail listed and no chat could answer (its permission
   // prompts went unseen and the run hung).
-  const { project: found } = await knownProject(automation.project);
+  const { project: found } = await knownProject(routine.project);
   // As the page's `useProjectKey`: the id, or the slug of a project with none.
   const project = found.id ?? found.slug;
   run.key = project;
@@ -381,11 +441,11 @@ async function start(run: Live): Promise<void> {
   if (!root) throw new Error("This project has no folder here.");
   run.root = root;
   run.folder = root;
-  if (automation.workspace === "worktree") {
-    const branch = `lanework/automation/${run.runId}`;
+  if (routine.workspace === "worktree") {
+    const branch = `lanework/routine/${run.runId}`;
     const path = join(
       app.getPath("userData"),
-      "automations",
+      "routines",
       "worktrees",
       run.runId,
     );
@@ -397,25 +457,28 @@ async function start(run: Live): Promise<void> {
       await removeWorktree(root, tree.path, branch).catch(() => {});
       return;
     }
-    store().updateAutomationRun(run.runId, { worktree: tree.path });
+    store().updateRoutineRun(run.runId, { worktree: tree.path });
   }
   const folder = run.folder;
   // FE-173/D3: nobody watches a run, so a folder its CLI does not trust runs
   // Supervised. Read for the project's own folder: a worktree is a copy of
   // the same repository, and the CLI keeps no trust record for it. A read
   // that fails counts as untrusted.
-  const trusted = await projectTrust(automation.project)
+  const trusted = await projectTrust(routine.project)
     .then((found) => found[agent].trusted)
     .catch(() => false);
+  const prompt = routineRunPrompt(routine);
   const out: Outgoing = {
     id: randomUUID(),
-    text: runPrompt(automation.prompt),
+    text: prompt,
     attachments: [],
-    content: [{ type: "text", text: runPrompt(automation.prompt) }],
+    content: [{ type: "text", text: prompt }],
     settings: {
-      ...automation.settings,
-      permission: permissionInFolder(automation.settings.permission, trusted),
+      ...routine.settings,
+      permission: permissionInFolder(routine.settings.permission, trusted),
     },
+    // FE-172: a loop's process lists schedule_next / schedule_stop.
+    routine: routine.schedule.kind === "loop",
   };
   let engine: EngineState;
   if (agent === "claude") {
@@ -443,8 +506,8 @@ async function start(run: Live): Promise<void> {
     // Ended while its CLI started: `finish` may have missed the engine.
     await engines.close(project, conversation).catch(() => {});
   } else {
-    store().updateAutomationRun(run.runId, { conversation });
-    changed(automation.project, automation.id);
+    store().updateRoutineRun(run.runId, { conversation });
+    changed(routine.project, routine.id);
   }
   // NOTE: A worktree run is registered without a folder: a folder here
   // would move the project's transcript watch onto the worktree.
@@ -457,7 +520,7 @@ async function start(run: Live): Promise<void> {
   await nameConversation(
     agent,
     conversation,
-    `Automation: ${automation.name}`.slice(0, AGENT_NAME_MAX).trim(),
+    `Routine: ${routine.name}`.slice(0, AGENT_NAME_MAX).trim(),
   ).catch(() => {});
   // A turn that ended before it was heard (a quick Codex refusal).
   if (
@@ -471,56 +534,59 @@ async function start(run: Live): Promise<void> {
 /** Start queued runs, oldest first, while there is room. */
 function pump(): void {
   if (closed) return;
-  let queued: AutomationRun[];
+  let queued: RoutineRun[];
   try {
     queued = store()
-      .activeAutomationRuns()
+      .activeRoutineRuns()
       .filter((run) => run.status === "queued" && !live.has(run.id));
   } catch {
     return;
   }
   for (const run of queued) {
-    if (live.size >= AUTOMATION_MAX_CONCURRENT) return;
-    const automation = store().getAutomation(run.automationId);
-    if (!automation) continue;
-    launch(automation, run.id);
+    if (live.size >= ROUTINE_MAX_CONCURRENT) return;
+    const routine = store().getRoutine(run.routineId);
+    if (!routine) continue;
+    launch(routine, run.id);
   }
 }
 
-/** Whether `automationId` has a run queued or going. */
-function busy(automationId: string): boolean {
+/** Whether `routineId` has a run queued or going. */
+function busy(routineId: string): boolean {
   return store()
-    .activeAutomationRuns()
-    .some((run) => run.automationId === automationId);
+    .activeRoutineRuns()
+    .some((run) => run.routineId === routineId);
 }
 
 function newRun(
-  automation: Automation,
-  trigger: AutomationTrigger,
+  routine: Routine,
+  trigger: RoutineTrigger,
   scheduledFor: string,
-  status: AutomationRunStatus,
+  status: RoutineRunStatus,
   error: string | null = null,
-): AutomationRun {
+): RoutineRun {
   const over = status === "skipped";
   return {
     id: randomUUID(),
-    automationId: automation.id,
+    routineId: routine.id,
     trigger,
     scheduledFor,
     startedAt: null,
     endedAt: over ? new Date().toISOString() : null,
     status,
-    agent: automation.agent,
+    agent: routine.agent,
     conversation: null,
     worktree: null,
     error,
+    note: null,
+    tokens: null,
+    costUSD: null,
   };
 }
 
 // ── The chat's events ───────────────────────────────────────────────────────
 
 /** What `conversation/index.ts` tells of every engine event. */
-export const automations = {
+export const routines = {
   onEvent(event: ConversationEvent): void {
     if (typeof event.conversation !== "string" || !byConversation.size) return;
     const runId = byConversation.get(keyOf(event.project, event.conversation));
@@ -544,10 +610,67 @@ export const automations = {
 };
 
 /**
- * The worktree an automation's conversation ran in, or null: its transcript
+ * The running run of a self-paced loop that `conversation` is, for
+ * `loop.next` / `loop.stop`.
+ *
+ * @throws With the message the agent is told, when it is not one.
+ */
+function loopRunOf(project: string, conversation: string): Live {
+  const runId = byConversation.get(keyOf(project, conversation));
+  const run = runId ? live.get(runId) : undefined;
+  if (!run || run.ending || run.removed)
+    throw new Error(
+      "Only a running routine's own run can set when it runs next.",
+    );
+  const current = store().getRoutine(run.routine.id);
+  if (current?.schedule.kind !== "loop")
+    throw new Error(
+      "This routine runs on a fixed schedule; only a self-paced (loop) routine sets its own next run.",
+    );
+  return run;
+}
+
+/**
+ * A self-paced routine's pace (FE-172), as its run's agent sets it with
+ * schedule_next / schedule_stop. Kept on the live run until it ends; the
+ * last call wins. Handed to `ConductorSessions` as its `loop` dep.
+ */
+export const routineLoop = {
+  next(
+    project: string,
+    conversation: string,
+    input: SessionInputs["loop.next"],
+  ): SessionResults["loop.next"] {
+    const run = loopRunOf(project, conversation);
+    const reason = input.reason ?? null;
+    run.pace = { kind: "next", minutes: input.minutes, reason };
+    return {
+      minutes: input.minutes,
+      reason,
+      next: `The next run starts ${input.minutes} minutes after this one ends. Calling schedule_next or schedule_stop again replaces this.`,
+    };
+  },
+  stop(
+    project: string,
+    conversation: string,
+    input: SessionInputs["loop.stop"],
+  ): SessionResults["loop.stop"] {
+    const run = loopRunOf(project, conversation);
+    const reason = input.reason ?? null;
+    run.pace = { kind: "stop", reason };
+    return {
+      stopped: true,
+      reason,
+      next: "No run is scheduled after this one; the routine turns off when it ends, until the user turns it on again.",
+    };
+  },
+};
+
+/**
+ * The worktree a routine's conversation ran in, or null: its transcript
  * is kept under that folder, not the project's.
  */
-export function automationFolderOf(conversation: string): string | null {
+export function routineFolderOf(conversation: string): string | null {
   return runFolders.get(conversation) ?? null;
 }
 
@@ -556,39 +679,43 @@ export function automationFolderOf(conversation: string): string | null {
 let ticking = false;
 
 /**
- * Look at every enabled automation whose next slot has passed: record the
+ * Look at every enabled routine whose next slot has passed: record the
  * slots that will not run, queue the one that will, move `nextRunAt` on.
  */
 function tick(now = new Date()): void {
   if (ticking || closed) return;
   ticking = true;
   try {
-    for (const automation of store().allAutomations()) {
-      if (!automation.enabled || !automation.nextRunAt) continue;
-      const due = Date.parse(automation.nextRunAt);
+    for (const routine of store().allRoutines()) {
+      if (!routine.enabled || !routine.nextRunAt) continue;
+      const due = Date.parse(routine.nextRunAt);
       if (Number.isNaN(due) || due > now.getTime()) continue;
+      if (routine.schedule.kind === "loop") {
+        tickLoop(routine, now);
+        continue;
+      }
       let plan: ReturnType<typeof planSlots>;
       try {
-        plan = planSlots(automation, new Date(due - 1), now);
+        plan = planSlots(routine, new Date(due - 1), now);
       } catch (error) {
-        console.warn("An automation's schedule no longer parses", error);
-        store().setAutomationNextRun(automation.id, null);
-        changed(automation.project, automation.id);
+        console.warn("A routine's schedule no longer parses", error);
+        store().setRoutineNextRun(routine.id, null);
+        changed(routine.project, routine.id);
         continue;
       }
       const reason = plan.run
         ? "A later missed slot ran instead."
         : "Missed by more than the grace period.";
       for (const slot of plan.skipped)
-        store().addAutomationRun(
-          newRun(automation, "schedule", slot, "skipped", reason),
+        store().addRoutineRun(
+          newRun(routine, "schedule", slot, "skipped", reason),
           slot,
         );
       if (plan.run) {
-        if (busy(automation.id))
-          store().addAutomationRun(
+        if (busy(routine.id))
+          store().addRoutineRun(
             newRun(
-              automation,
+              routine,
               plan.run.trigger,
               plan.run.slot,
               "skipped",
@@ -596,19 +723,37 @@ function tick(now = new Date()): void {
             ),
           );
         else
-          store().addAutomationRun(
-            newRun(automation, plan.run.trigger, plan.run.slot, "queued"),
+          store().addRoutineRun(
+            newRun(routine, plan.run.trigger, plan.run.slot, "queued"),
           );
       }
-      store().setAutomationNextRun(automation.id, plan.next);
-      changed(automation.project, automation.id);
+      store().setRoutineNextRun(routine.id, plan.next);
+      changed(routine.project, routine.id);
     }
   } catch (error) {
-    console.warn("The automations tick failed", error);
+    console.warn("The routines tick failed", error);
   } finally {
     ticking = false;
   }
   pump();
+}
+
+/**
+ * A self-paced loop whose `nextRunAt` has passed (FE-172): queue one run,
+ * unless one still goes. Never `planSlots`: a loop has no slots to skip, and
+ * a run missed while the app was closed runs once now, whatever its grace.
+ *
+ * NOTE: `nextRunAt` moves to the default after now meanwhile, so a run
+ * cut off by a quit (closed as failed at the next launch, never reaching
+ * `reschedule`) does not end the loop; its end replaces it.
+ */
+function tickLoop(routine: Routine, now: Date): void {
+  if (!busy(routine.id))
+    store().addRoutineRun(
+      newRun(routine, "schedule", now.toISOString(), "queued"),
+    );
+  store().setRoutineNextRun(routine.id, nextSlot(routine, now));
+  changed(routine.project, routine.id);
 }
 
 let interval: ReturnType<typeof setInterval> | null = null;
@@ -616,48 +761,45 @@ let interval: ReturnType<typeof setInterval> | null = null;
 /** Close what an earlier process left going: its engines are gone. */
 function closeLeftovers(): void {
   const at = new Date().toISOString();
-  for (const run of store().activeAutomationRuns())
-    store().updateAutomationRun(run.id, {
+  for (const run of store().activeRoutineRuns())
+    store().updateRoutineRun(run.id, {
       status: "failed",
       endedAt: at,
       error: QUIT_ERROR,
     });
-  for (const automation of store().allAutomations())
-    for (const run of store().listAutomationRuns(
-      automation.id,
-      AUTOMATION_RUNS_KEPT,
-    ))
+  for (const routine of store().allRoutines())
+    for (const run of store().listRoutineRuns(routine.id, ROUTINE_RUNS_KEPT))
       if (run.worktree && run.conversation)
         runFolders.set(run.conversation, run.worktree);
 }
 
 // ── IPC ─────────────────────────────────────────────────────────────────────
 
-function idArg(value: unknown, what = "An automation"): string {
+function idArg(value: unknown, what = "A routine"): string {
   if (typeof value !== "string" || !value || value.length > 200)
     throw new Error(`${what} is required.`);
   return value;
 }
 
-function inputArg(value: unknown): AutomationInput {
-  const input = checkAutomationInput(value);
-  if (!input) throw new Error("That automation is not complete.");
+function inputArg(value: unknown): RoutineInput {
+  const input = checkRoutineInput(value);
+  if (!input) throw new Error("That routine is not complete.");
   const refused = scheduleError(input);
   if (refused) throw new Error(`That schedule does not parse: ${refused}`);
   return input;
 }
 
-function existing(id: string): Automation {
-  const automation = store().getAutomation(id);
-  if (!automation) throw new Error("That automation is gone.");
-  return automation;
+function existing(id: string): Routine {
+  const routine = store().getRoutine(id);
+  if (!routine) throw new Error("That routine is gone.");
+  return routine;
 }
 
-/** `automation` with its next slot from `now`; null when disabled. */
-function scheduled(automation: Automation, now: Date): Automation {
+/** `routine` with its next slot from `now`; null when disabled. */
+function scheduled(routine: Routine, now: Date): Routine {
   return {
-    ...automation,
-    nextRunAt: automation.enabled ? nextSlot(automation, now) : null,
+    ...routine,
+    nextRunAt: routine.enabled ? nextSlot(routine, now) : null,
   };
 }
 
@@ -666,7 +808,7 @@ function scheduled(automation: Automation, now: Date): Automation {
  *
  * @throws When an enabled `once` is at or before `now`.
  */
-function assertFuture(input: AutomationInput, now: Date): void {
+function assertFuture(input: RoutineInput, now: Date): void {
   if (
     input.enabled &&
     input.schedule.kind === "once" &&
@@ -675,22 +817,22 @@ function assertFuture(input: AutomationInput, now: Date): void {
     throw new Error("That time has passed.");
 }
 
-/** Stop `automationId`'s run going on, if any, recording nothing. */
-async function stopRunsOf(automationId: string): Promise<void> {
+/** Stop `routineId`'s run going on, if any, recording nothing. */
+async function stopRunsOf(routineId: string): Promise<void> {
   for (const run of live.values()) {
-    if (run.automation.id !== automationId) continue;
+    if (run.routine.id !== routineId) continue;
     run.removed = true;
     await finish(run, null);
   }
 }
 
 /**
- * Register the automations' channels, close what an earlier process left
+ * Register the routines' channels, close what an earlier process left
  * going, and start the scheduler.
  *
  * NOTE: After the conversation view: a run starts through its engines.
  */
-export function registerAutomations(devUrl?: string): void {
+export function registerRoutines(devUrl?: string): void {
   // NOTE: How a turn ended, for Claude and Codex alike, before the engine
   // goes idle: Codex streams no `turn` event, so this is the only place its
   // final answer (and NOTHING_TO_REPORT) is heard.
@@ -702,23 +844,34 @@ export function registerAutomations(devUrl?: string): void {
     const run = runId ? live.get(runId) : undefined;
     if (!run || run.ending) return;
     if (result.text.trim()) run.lastText = result.text.trim();
+    // FE-177: every turn of the run adds up.
+    if (result.usage) {
+      const before = run.tokens ?? { input: 0, output: 0, cached: 0 };
+      run.tokens = {
+        input: before.input + result.usage.input,
+        output: before.output + result.usage.output,
+        cached: before.cached + result.usage.cached,
+      };
+    }
+    if (typeof result.costUSD === "number")
+      run.costUSD = (run.costUSD ?? 0) + result.costUSD;
     if (result.error)
       run.failure = run.failure ?? (result.text.trim() || "The turn failed.");
   });
-  handle(automationsChannels.list, devUrl, (args): Automation[] => {
+  handle(routinesChannels.list, devUrl, (args): Routine[] => {
     if (args.length !== 1) throw new Error("A project is required.");
-    return store().listAutomations(idArg(args[0], "A project"));
+    return store().listRoutines(idArg(args[0], "A project"));
   });
 
-  handle(automationsChannels.create, devUrl, (args): Automation => {
+  handle(routinesChannels.create, devUrl, (args): Routine => {
     if (args.length !== 2)
-      throw new Error("A project and an automation are required.");
+      throw new Error("A project and a routine are required.");
     const project = idArg(args[0], "A project");
     const input = inputArg(args[1]);
     const now = new Date();
     assertFuture(input, now);
     const at = now.toISOString();
-    const automation = scheduled(
+    const routine = scheduled(
       {
         ...input,
         id: randomUUID(),
@@ -729,19 +882,19 @@ export function registerAutomations(devUrl?: string): void {
       },
       now,
     );
-    store().saveAutomation(automation);
-    changed(project, automation.id);
-    return automation;
+    store().saveRoutine(routine);
+    changed(project, routine.id);
+    return routine;
   });
 
-  handle(automationsChannels.update, devUrl, (args): Automation => {
+  handle(routinesChannels.update, devUrl, (args): Routine => {
     if (args.length !== 2)
-      throw new Error("An automation and its fields are required.");
+      throw new Error("A routine and its fields are required.");
     const before = existing(idArg(args[0]));
     const input = inputArg(args[1]);
     const now = new Date();
     assertFuture(input, now);
-    const automation = scheduled(
+    const routine = scheduled(
       {
         ...input,
         id: before.id,
@@ -752,70 +905,65 @@ export function registerAutomations(devUrl?: string): void {
       },
       now,
     );
-    store().saveAutomation(automation);
-    changed(automation.project, automation.id);
-    return automation;
+    store().saveRoutine(routine);
+    changed(routine.project, routine.id);
+    return routine;
   });
 
-  handle(automationsChannels.remove, devUrl, async (args): Promise<void> => {
-    if (args.length !== 1) throw new Error("An automation is required.");
-    const automation = existing(idArg(args[0]));
-    await stopRunsOf(automation.id);
-    store().removeAutomation(automation.id);
-    changed(automation.project, automation.id);
+  handle(routinesChannels.remove, devUrl, async (args): Promise<void> => {
+    if (args.length !== 1) throw new Error("A routine is required.");
+    const routine = existing(idArg(args[0]));
+    await stopRunsOf(routine.id);
+    store().removeRoutine(routine.id);
+    changed(routine.project, routine.id);
   });
 
-  handle(automationsChannels.setEnabled, devUrl, (args): Automation => {
+  handle(routinesChannels.setEnabled, devUrl, (args): Routine => {
     const [id, enabled] = args;
     if (args.length !== 2 || typeof enabled !== "boolean")
-      throw new Error("An automation and whether it is on are required.");
+      throw new Error("A routine and whether it is on are required.");
     const before = existing(idArg(id));
     const now = new Date();
-    const automation = scheduled(
+    const routine = scheduled(
       { ...before, enabled, updatedAt: now.toISOString() },
       now,
     );
-    store().saveAutomation(automation);
-    changed(automation.project, automation.id);
-    return automation;
+    store().saveRoutine(routine);
+    changed(routine.project, routine.id);
+    return routine;
   });
 
-  handle(automationsChannels.runNow, devUrl, (args): AutomationRun => {
-    if (args.length !== 1) throw new Error("An automation is required.");
-    const automation = existing(idArg(args[0]));
-    if (busy(automation.id))
-      throw new Error("A run of this automation is already going.");
-    const run = newRun(
-      automation,
-      "manual",
-      new Date().toISOString(),
-      "queued",
-    );
-    store().addAutomationRun(run);
-    changed(automation.project, automation.id);
+  handle(routinesChannels.runNow, devUrl, (args): RoutineRun => {
+    if (args.length !== 1) throw new Error("A routine is required.");
+    const routine = existing(idArg(args[0]));
+    if (busy(routine.id))
+      throw new Error("A run of this routine is already going.");
+    const run = newRun(routine, "manual", new Date().toISOString(), "queued");
+    store().addRoutineRun(run);
+    changed(routine.project, routine.id);
     pump();
-    return store().getAutomationRun(run.id) ?? run;
+    return store().getRoutineRun(run.id) ?? run;
   });
 
-  handle(automationsChannels.runs, devUrl, (args): AutomationRun[] => {
+  handle(routinesChannels.runs, devUrl, (args): RoutineRun[] => {
     const [id, limit] = args;
     if (args.length < 1 || args.length > 2)
-      throw new Error("An automation is required.");
+      throw new Error("A routine is required.");
     if (
       limit !== undefined &&
       (typeof limit !== "number" ||
         !Number.isInteger(limit) ||
         limit < 1 ||
-        limit > AUTOMATION_RUNS_KEPT)
+        limit > ROUTINE_RUNS_KEPT)
     )
-      throw new Error(`A limit from 1 to ${AUTOMATION_RUNS_KEPT} is required.`);
-    return store().listAutomationRuns(idArg(id), limit);
+      throw new Error(`A limit from 1 to ${ROUTINE_RUNS_KEPT} is required.`);
+    return store().listRoutineRuns(idArg(id), limit);
   });
 
   try {
     closeLeftovers();
   } catch (error) {
-    console.warn("Unable to close automation runs left going", error);
+    console.warn("Unable to close routine runs left going", error);
   }
   // A slot missed while the app was closed runs (or is skipped) now.
   tick();
@@ -829,7 +977,7 @@ export function registerAutomations(devUrl?: string): void {
  * At quit: stop the scheduler, record the runs going on as cut off (their
  * engines end with the app), and close the store handle.
  */
-export function stopAutomations(): void {
+export function stopRoutines(): void {
   closed = true;
   if (interval) clearInterval(interval);
   interval = null;
@@ -845,7 +993,7 @@ export function stopAutomations(): void {
   for (const run of live.values()) {
     if (run.timer) clearTimeout(run.timer);
     if (run.removed || !sessions) continue;
-    sessions.updateAutomationRun(run.runId, {
+    sessions.updateRoutineRun(run.runId, {
       status: "failed",
       endedAt: at,
       error: QUIT_ERROR,

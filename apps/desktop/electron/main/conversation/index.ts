@@ -85,10 +85,13 @@ import {
   readConductorEnvelope,
   readEnvelope,
 } from "../../../shared/orchestration-proposals";
-import { isAgentSessionId, isAgentSessionIdOf } from "../../../shared/terminal";
+import {
+  isAgentSessionId,
+  isAgentSessionIdOf,
+  isCardRef,
+} from "../../../shared/terminal";
 import { controlCliPath } from "../../control/install";
 import { agentHome as agentHomeAt } from "../agent-home";
-import { automationFolderOf, automations } from "../automations";
 import { connectorInventory } from "../connectors/inventory";
 import { belowMinimumNow } from "../harness/minimums";
 import { broadcast, handle, hearInMain, sendTo, windowContents } from "../ipc";
@@ -113,6 +116,7 @@ import { conductorMemoryFile } from "../paths";
 import { setPermissionConductors } from "../permissions/gate";
 import { knownProject, terminalFolder } from "../projects";
 import { accountDir, isSlug } from "../projects/store";
+import { routineFolderOf, routineLoop, routines } from "../routines";
 import {
   bindConductorConversation,
   conductorConversationsIn,
@@ -139,6 +143,7 @@ import { onCodexReset, usageWindowsOf } from "../terminal/usage";
 import { agentHomeDir } from "../test-seams";
 import { markTurnCut } from "../transcripts/activity";
 import { awaitingNotice, createAwaitingLedger } from "./awaiting";
+import { markCardRun } from "./card-runs";
 import { createAgentCli, createClaudeCli } from "./claude-cli";
 import { createClaudeModels } from "./claude-models";
 import { claudeJsonFor, isClaudeTrusted } from "./claude-trust";
@@ -1523,8 +1528,8 @@ export function registerConversation(
     const shown = threadEvent(event);
     if (shown) stream.publish(shown);
     sessions?.onEvent(event);
-    // FE-99: an automation's run ends when its turn does.
-    automations.onEvent(event);
+    // FE-99: a routine's run ends when its turn does.
+    routines.onEvent(event);
     if (event.type === "state" && typeof event.conversation === "string")
       void learnConductor(event.project, event.conversation);
     // An OpenCode turn that ended is read in now: the rail must not wait on
@@ -1779,6 +1784,8 @@ export function registerConversation(
       send: (project, conversation, input) =>
         messagingSend(project, conversation, input),
     },
+    // FE-172: a self-paced routine run's schedule_next / schedule_stop.
+    loop: routineLoop,
     knowModels: async (agent, model) => {
       await ready.catch(() => {});
       if (agent === "codex") await codexModels();
@@ -2092,7 +2099,7 @@ export function registerConversation(
         engines.pending(native.project, native.conversation)?.agent ?? "claude",
       folder:
         workerFolderOf(native.project, native.conversation) ??
-        automationFolderOf(native.conversation) ??
+        routineFolderOf(native.conversation) ??
         (await folderOf(native.project)),
       request,
     };
@@ -2167,7 +2174,7 @@ export function registerConversation(
     // its own worktree, not the project's folder.
     const folder =
       workerFolderOf(project, conversation) ??
-      automationFolderOf(conversation) ??
+      routineFolderOf(conversation) ??
       (await folderOf(project));
     const agent = await agentOf(folder, conversation);
     // A conversation started here whose first line the CLI has not
@@ -2494,7 +2501,7 @@ export function registerConversation(
     }
     const folder =
       workerFolderOf(project, conversation) ??
-      automationFolderOf(conversation) ??
+      routineFolderOf(conversation) ??
       (await folderOf(project));
     const agent = await agentOf(folder, conversation);
     const pending = engines.pending(project, conversation);
@@ -2557,7 +2564,7 @@ export function registerConversation(
       const call = turnRef(args[2]);
       const folder =
         workerFolderOf(project, conversation) ??
-        automationFolderOf(conversation) ??
+        routineFolderOf(conversation) ??
         (await folderOf(project));
       // NOTE: In a thread the call is one session's: the newest first (the
       // likeliest), then back. Each is asked of its own transcript.
@@ -2605,7 +2612,7 @@ export function registerConversation(
         );
       const folder =
         workerFolderOf(project, conversation) ??
-        automationFolderOf(conversation) ??
+        routineFolderOf(conversation) ??
         (await folderOf(project));
       const agent = await agentOf(folder, conversation);
       const pending = engines.pending(project, conversation);
@@ -2643,8 +2650,13 @@ export function registerConversation(
       // NOTE: The id is main's own, never the page's, so a new one cannot
       // name a conversation that already exists.
       const conversation = randomUUID();
-      const raw = (args[0] ?? {}) as { conductor?: unknown };
+      const raw = (args[0] ?? {}) as { conductor?: unknown; card?: unknown };
       const request = sendRequest({ ...raw, conversation });
+      // FE-175: marked before it starts, so its first board call is known.
+      if (raw.card !== undefined) {
+        if (!isCardRef(raw.card)) throw new Error("Unknown card");
+        markCardRun(request.project, conversation);
+      }
       // The conductor whose own conversation this starts (FE-95).
       const conductor = raw.conductor ?? null;
       if (
@@ -3228,7 +3240,14 @@ export function registerConversation(
       throw new Error(
         "This conversation is a worker of an orchestration run. Message it through its lead.",
       );
-    const folder = await folderOf(request.project);
+    // FE-172: a routine run in a worktree goes on there, where its
+    // transcript and its changes are, while the worktree is kept.
+    const tree = routineFolderOf(request.conversation);
+    if (tree && !(await stat(tree).catch(() => null))?.isDirectory())
+      throw new Error(
+        "The worktree this routine run worked in is gone (it changed nothing, or was removed). Start a new conversation instead.",
+      );
+    const folder = tree ?? (await folderOf(request.project));
     // NOTE: Only a conversation this folder has: its transcript is where
     // the CLI keeps this folder's, under the id it was asked for.
     const agent =

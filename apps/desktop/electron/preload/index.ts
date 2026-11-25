@@ -14,11 +14,6 @@ import {
   laneworkMcpChannels,
 } from "../../shared/auth";
 import {
-  type AutomationsChange,
-  automationsChannels,
-  type DesktopAutomationsApi,
-} from "../../shared/automations";
-import {
   type AutonomyEvent,
   autonomyChannels,
   type DesktopAutonomyApi,
@@ -99,6 +94,11 @@ import {
   type DesktopReadinessApi,
   readinessChannels,
 } from "../../shared/readiness";
+import {
+  type DesktopRoutinesApi,
+  type RoutinesChange,
+  routinesChannels,
+} from "../../shared/routines";
 import { type DesktopStorageApi, storageChannels } from "../../shared/storage";
 import {
   type DesktopTerminalApi,
@@ -269,25 +269,24 @@ const metrics: DesktopMetricsApi = {
 };
 
 /**
- * Automations (FE-99): agent runs on a schedule. Ids and checked inputs
+ * Routines (FE-99): agent runs on a schedule. Ids and checked inputs
  * only; main finds the folder and starts the run.
  */
-const automations: DesktopAutomationsApi = {
-  list: (project) => ipcRenderer.invoke(automationsChannels.list, project),
+const routines: DesktopRoutinesApi = {
+  list: (project) => ipcRenderer.invoke(routinesChannels.list, project),
   create: (project, input) =>
-    ipcRenderer.invoke(automationsChannels.create, project, input),
-  update: (id, input) =>
-    ipcRenderer.invoke(automationsChannels.update, id, input),
-  remove: (id) => ipcRenderer.invoke(automationsChannels.remove, id),
+    ipcRenderer.invoke(routinesChannels.create, project, input),
+  update: (id, input) => ipcRenderer.invoke(routinesChannels.update, id, input),
+  remove: (id) => ipcRenderer.invoke(routinesChannels.remove, id),
   setEnabled: (id, enabled) =>
-    ipcRenderer.invoke(automationsChannels.setEnabled, id, enabled),
-  runNow: (id) => ipcRenderer.invoke(automationsChannels.runNow, id),
-  runs: (automationId, limit) =>
+    ipcRenderer.invoke(routinesChannels.setEnabled, id, enabled),
+  runNow: (id) => ipcRenderer.invoke(routinesChannels.runNow, id),
+  runs: (routineId, limit) =>
     limit === undefined
-      ? ipcRenderer.invoke(automationsChannels.runs, automationId)
-      : ipcRenderer.invoke(automationsChannels.runs, automationId, limit),
+      ? ipcRenderer.invoke(routinesChannels.runs, routineId)
+      : ipcRenderer.invoke(routinesChannels.runs, routineId, limit),
   onChanged: (listener) =>
-    subscribe<AutomationsChange>(automationsChannels.changed, listener),
+    subscribe<RoutinesChange>(routinesChannels.changed, listener),
 };
 
 const storage: DesktopStorageApi = {
@@ -1187,7 +1186,7 @@ const desktop: DesktopApi = {
   attention,
   metrics,
   storage,
-  automations,
+  routines,
   updater,
   handoff,
   readiness,

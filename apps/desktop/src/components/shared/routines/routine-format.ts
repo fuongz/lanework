@@ -1,14 +1,14 @@
-// Words and conversions for automations: a schedule as a sentence, a time
+// Words and conversions for routines: a schedule as a sentence, a time
 // to come, a run's length, and a wall-clock time in another zone.
 
 import type {
-  AutomationPreset,
-  AutomationRunStatus,
-  AutomationSchedule,
-  AutomationTrigger,
-} from "#/../shared/automations";
+  RoutinePreset,
+  RoutineRunStatus,
+  RoutineSchedule,
+  RoutineTrigger,
+} from "#/../shared/routines";
 
-export const PRESET_LABELS: Record<AutomationPreset, string> = {
+export const PRESET_LABELS: Record<RoutinePreset, string> = {
   hourly: "Every hour",
   daily: "Every day",
   weekdays: "Weekdays",
@@ -26,13 +26,13 @@ export const WEEKDAY_LABELS = [
   "Saturday",
 ] as const;
 
-export const TRIGGER_LABELS: Record<AutomationTrigger, string> = {
+export const TRIGGER_LABELS: Record<RoutineTrigger, string> = {
   schedule: "Scheduled",
   catch_up: "Catch-up",
   manual: "Manual",
 };
 
-export const STATUS_LABELS: Record<AutomationRunStatus, string> = {
+export const STATUS_LABELS: Record<RoutineRunStatus, string> = {
   queued: "Queued",
   running: "Running",
   succeeded: "Succeeded",
@@ -64,13 +64,14 @@ export function clock(hour: number, minute: number): string {
 }
 
 /**
- * A schedule as a sentence: "Every day at 9:00 AM", "Every hour at :15".
+ * A schedule as a sentence: "Every day at 9:00 AM", "Every hour at :15",
+ * "Self-paced, about every 45 min".
  *
  * @param timezone Read with the schedule; named only when it is not the
  *   machine's, since then the times are not the clock on this screen.
  */
 export function describeSchedule(
-  schedule: AutomationSchedule,
+  schedule: RoutineSchedule,
   timezone?: string,
 ): string {
   const zone =
@@ -78,6 +79,8 @@ export function describeSchedule(
   switch (schedule.kind) {
     case "cron":
       return `Cron ${schedule.expr}${zone}`;
+    case "loop":
+      return `Self-paced, about every ${loopInterval(schedule.minutes)}`;
     case "once": {
       const at = new Date(schedule.at);
       if (Number.isNaN(at.getTime())) return "Once";
@@ -101,6 +104,18 @@ export function describeSchedule(
       }
     }
   }
+}
+
+/**
+ * A loop's pace in words: "45 min", "2 h", "1 h 30 min".
+ *
+ * NOTE: No zone: a loop counts minutes from its last run, not a clock.
+ */
+export function loopInterval(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} h ${rest} min` : `${hours} h`;
 }
 
 /** "in 3 hours", "in 5 minutes": a time to come, for a row. */

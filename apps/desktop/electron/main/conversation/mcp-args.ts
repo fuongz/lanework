@@ -28,9 +28,10 @@ export const CONTROL_FORWARD = [
 
 /**
  * Set to `conductor` on a conductor's (or a lead's) process, so the control
- * server lists the conductor tools there only. Every conversation the app
- * starts holds a sessions token (it may save a conductor), so the token
- * alone does not say whose conversation it is.
+ * server lists the conductor tools there only; to `routine` on an
+ * routine run's (FE-172), for its schedule_* tools. Every conversation
+ * the app starts holds a sessions token (it may save a conductor), so the
+ * token alone does not say whose conversation it is.
  */
 export const CONTROL_ROLE_ENV = "LANEWORK_CONTROL_AS";
 
@@ -74,21 +75,42 @@ export const ANY_ALLOWED_TOOLS = [
 ] as const;
 
 /**
- * The control tools a process runs without asking: a conductor's or any
- * other's list, `thread_read` left out when `threadRead` is false (a CLI
- * older than Lanework's floor, FE-168/D2).
+ * The control tools a routine run's process (FE-172) calls without a
+ * prompt, on top of the {@link ANY_ALLOWED_TOOLS}.
+ *
+ * NOTE: Nobody watches a run, so a prompt would hang it until its timeout;
+ * and each only sets when this run's own routine runs next, which the
+ * app checks against the live run.
  */
-function allowedTools(conductor: boolean, threadRead: boolean): string[] {
+export const ROUTINE_ALLOWED_TOOLS = [
+  "schedule_next",
+  "schedule_stop",
+] as const;
+
+/**
+ * The control tools a process runs without asking: a conductor's or any
+ * other's list (plus a routine run's own), `thread_read` left out when
+ * `threadRead` is false (a CLI older than Lanework's floor, FE-168/D2).
+ */
+function allowedTools(
+  conductor: boolean,
+  threadRead: boolean,
+  routine: boolean,
+): string[] {
   const tools: readonly string[] = conductor
     ? CONDUCTOR_ALLOWED_TOOLS
     : ANY_ALLOWED_TOOLS;
-  return tools.filter((tool) => threadRead || tool !== "thread_read");
+  return [...tools, ...(routine ? ROUTINE_ALLOWED_TOOLS : [])].filter(
+    (tool) => threadRead || tool !== "thread_read",
+  );
 }
 
 /**
  * Claude Code's `--allowedTools` for a process with the control server: the
  * {@link CONDUCTOR_ALLOWED_TOOLS} on a conductor's, the
- * {@link ANY_ALLOWED_TOOLS} on any other, under the server's prefix.
+ * {@link ANY_ALLOWED_TOOLS} on any other (with the
+ * {@link ROUTINE_ALLOWED_TOOLS} on a routine run's), under the
+ * server's prefix.
  *
  * NOTE: An allow rule only skips the prompt in the asking modes; a deny
  * rule (a guarded lead's `--disallowedTools`, the user's settings) still
@@ -97,8 +119,9 @@ function allowedTools(conductor: boolean, threadRead: boolean): string[] {
 export function claudeControlAllowArgs(
   conductor = false,
   threadRead = true,
+  routine = false,
 ): string[] {
-  const tools = allowedTools(conductor, threadRead);
+  const tools = allowedTools(conductor, threadRead, routine);
   if (!tools.length) return [];
   return [
     "--allowedTools",
@@ -234,7 +257,8 @@ export function claudeMcpArgs(
  * cleared environment; `env_vars` names the variables it copies from its own.
  *
  * A `conductor`'s process approves the {@link CONDUCTOR_ALLOWED_TOOLS}
- * up front, any other the {@link ANY_ALLOWED_TOOLS}, as Claude's
+ * up front, any other the {@link ANY_ALLOWED_TOOLS} (a routine run's
+ * also the {@link ROUTINE_ALLOWED_TOOLS}), as Claude's
  * `--allowedTools` does: Codex takes an `approval_mode` per MCP tool
  * (`approve` skips the prompt). Every other tool keeps Codex's default, so
  * `sessions_answer` asks as the session's policy says.
@@ -243,8 +267,9 @@ export function codexControlArgs(
   control: string,
   conductor = false,
   threadRead = true,
+  routine = false,
 ): string[] {
-  const allowed = allowedTools(conductor, threadRead);
+  const allowed = allowedTools(conductor, threadRead, routine);
   const tools = allowed.length
     ? `,tools={${allowed.map((tool) => `${tool}={approval_mode="approve"}`).join(",")}}`
     : "";

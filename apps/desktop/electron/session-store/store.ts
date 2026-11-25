@@ -1,12 +1,12 @@
 import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { dirname } from "node:path";
-import {
-  AUTOMATION_RUNS_KEPT,
-  type Automation,
-  type AutomationRun,
-  type AutomationRunStatus,
-} from "../../shared/automations";
 import { LEAD_REF_PATTERN } from "../../shared/orchestration";
+import {
+  ROUTINE_RUNS_KEPT,
+  type Routine,
+  type RoutineRun,
+  type RoutineRunStatus,
+} from "../../shared/routines";
 import {
   AGENT_SESSION_LIMIT,
   type AgentCard,
@@ -287,14 +287,14 @@ function numberOrNull(value: number | null): number | null {
   return value === null ? null : Number(value);
 }
 
-interface AutomationRow {
+interface RoutineRow {
   id: string;
   project: string;
   name: string;
   prompt: string;
-  agent: Automation["agent"];
+  agent: Routine["agent"];
   settings: string;
-  workspace: Automation["workspace"];
+  workspace: Routine["workspace"];
   schedule: string;
   timezone: string;
   grace_minutes: number;
@@ -305,31 +305,36 @@ interface AutomationRow {
   updated_at: string;
 }
 
-interface AutomationRunRow {
+interface RoutineRunRow {
   id: string;
-  automation_id: string;
-  trigger: AutomationRun["trigger"];
+  routine_id: string;
+  trigger: RoutineRun["trigger"];
   scheduled_for: string;
   started_at: string | null;
   ended_at: string | null;
-  status: AutomationRunStatus;
-  agent: AutomationRun["agent"];
+  status: RoutineRunStatus;
+  agent: RoutineRun["agent"];
   conversation: string | null;
   worktree: string | null;
   error: string | null;
+  note: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cached_tokens: number | null;
+  cost_usd: number | null;
   created_at: string;
 }
 
-function toAutomation(row: AutomationRow): Automation {
+function toRoutine(row: RoutineRow): Routine {
   return {
     id: row.id,
     project: row.project,
     name: row.name,
     prompt: row.prompt,
     agent: row.agent,
-    settings: JSON.parse(row.settings) as Automation["settings"],
+    settings: JSON.parse(row.settings) as Routine["settings"],
     workspace: row.workspace,
-    schedule: JSON.parse(row.schedule) as Automation["schedule"],
+    schedule: JSON.parse(row.schedule) as Routine["schedule"],
     timezone: row.timezone,
     graceMinutes: Number(row.grace_minutes),
     timeoutMinutes: Number(row.timeout_minutes),
@@ -340,10 +345,10 @@ function toAutomation(row: AutomationRow): Automation {
   };
 }
 
-function toAutomationRun(row: AutomationRunRow): AutomationRun {
+function toRoutineRun(row: RoutineRunRow): RoutineRun {
   return {
     id: row.id,
-    automationId: row.automation_id,
+    routineId: row.routine_id,
     trigger: row.trigger,
     scheduledFor: row.scheduled_for,
     startedAt: row.started_at,
@@ -353,25 +358,63 @@ function toAutomationRun(row: AutomationRunRow): AutomationRun {
     conversation: row.conversation,
     worktree: row.worktree,
     error: row.error,
+    note: row.note ?? null,
+    tokens:
+      row.input_tokens === null && row.output_tokens === null
+        ? null
+        : {
+            input: Number(row.input_tokens ?? 0),
+            output: Number(row.output_tokens ?? 0),
+            cached: Number(row.cached_tokens ?? 0),
+          },
+    costUSD: row.cost_usd === null ? null : Number(row.cost_usd),
   };
 }
 
-/** The fields of a run {@link SessionStore.updateAutomationRun} may change. */
-export type AutomationRunPatch = Partial<
+/** The fields of a run {@link SessionStore.updateRoutineRun} may change. */
+export type RoutineRunPatch = Partial<
   Pick<
-    AutomationRun,
-    "status" | "startedAt" | "endedAt" | "conversation" | "worktree" | "error"
+    RoutineRun,
+    | "status"
+    | "startedAt"
+    | "endedAt"
+    | "conversation"
+    | "worktree"
+    | "error"
+    | "note"
+    | "tokens"
+    | "costUSD"
   >
 >;
 
-const RUN_PATCH_COLUMNS: Record<keyof AutomationRunPatch, string> = {
+const RUN_PATCH_COLUMNS: Record<keyof RoutineRunPatch, string> = {
   status: "status",
   startedAt: "started_at",
   endedAt: "ended_at",
   conversation: "conversation",
   worktree: "worktree",
   error: "error",
+  note: "note",
+  tokens: "",
+  costUSD: "cost_usd",
 };
+
+/** A patch's `column = ?` pairs, `tokens` as its three columns. */
+function runPatchSets(
+  patch: RoutineRunPatch,
+): [column: string, value: string | number | null][] {
+  const sets: [string, string | number | null][] = [];
+  for (const key of Object.keys(patch) as (keyof RoutineRunPatch)[]) {
+    if (!(key in RUN_PATCH_COLUMNS) || patch[key] === undefined) continue;
+    if (key === "tokens") {
+      const tokens = patch.tokens ?? null;
+      sets.push(["input_tokens", tokens?.input ?? null]);
+      sets.push(["output_tokens", tokens?.output ?? null]);
+      sets.push(["cached_tokens", tokens?.cached ?? null]);
+    } else sets.push([RUN_PATCH_COLUMNS[key], patch[key] ?? null]);
+  }
+  return sets;
+}
 
 function invalid(message: string): never {
   throw new SessionStoreError("invalid", message);
@@ -891,36 +934,31 @@ export class SessionStore {
     );
   }
 
-  // ── Automations (FE-99) ───────────────────────────────────────────────────
+  // ── Routines (FE-99) ───────────────────────────────────────────────────
 
-  /** A project's automations, by name. */
-  listAutomations(project: string): Automation[] {
-    return this.#all<AutomationRow>(
-      "SELECT * FROM automation WHERE project = ? ORDER BY name COLLATE NOCASE, id",
+  /** A project's routines, by name. */
+  listRoutines(project: string): Routine[] {
+    return this.#all<RoutineRow>(
+      "SELECT * FROM routine WHERE project = ? ORDER BY name COLLATE NOCASE, id",
       project,
-    ).map(toAutomation);
+    ).map(toRoutine);
   }
 
-  /** Every automation, for the scheduler. */
-  allAutomations(): Automation[] {
-    return this.#all<AutomationRow>("SELECT * FROM automation").map(
-      toAutomation,
-    );
+  /** Every routine, for the scheduler. */
+  allRoutines(): Routine[] {
+    return this.#all<RoutineRow>("SELECT * FROM routine").map(toRoutine);
   }
 
-  getAutomation(id: string): Automation | null {
-    const row = this.#get<AutomationRow>(
-      "SELECT * FROM automation WHERE id = ?",
-      id,
-    );
-    return row ? toAutomation(row) : null;
+  getRoutine(id: string): Routine | null {
+    const row = this.#get<RoutineRow>("SELECT * FROM routine WHERE id = ?", id);
+    return row ? toRoutine(row) : null;
   }
 
-  /** Insert `automation`, or replace the row with its id. */
-  saveAutomation(automation: Automation): void {
+  /** Insert `routine`, or replace the row with its id. */
+  saveRoutine(routine: Routine): void {
     this.#write(() => {
       this.#run(
-        `INSERT INTO automation (id, project, name, prompt, agent, settings,
+        `INSERT INTO routine (id, project, name, prompt, agent, settings,
            workspace, schedule, timezone, grace_minutes, timeout_minutes,
            enabled, next_run_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -933,30 +971,30 @@ export class SessionStore {
            timeout_minutes = excluded.timeout_minutes,
            enabled = excluded.enabled, next_run_at = excluded.next_run_at,
            updated_at = excluded.updated_at`,
-        automation.id,
-        automation.project,
-        automation.name,
-        automation.prompt,
-        automation.agent,
-        JSON.stringify(automation.settings),
-        automation.workspace,
-        JSON.stringify(automation.schedule),
-        automation.timezone,
-        automation.graceMinutes,
-        automation.timeoutMinutes,
-        automation.enabled ? 1 : 0,
-        automation.nextRunAt,
-        automation.createdAt,
-        automation.updatedAt,
+        routine.id,
+        routine.project,
+        routine.name,
+        routine.prompt,
+        routine.agent,
+        JSON.stringify(routine.settings),
+        routine.workspace,
+        JSON.stringify(routine.schedule),
+        routine.timezone,
+        routine.graceMinutes,
+        routine.timeoutMinutes,
+        routine.enabled ? 1 : 0,
+        routine.nextRunAt,
+        routine.createdAt,
+        routine.updatedAt,
       );
     });
   }
 
   /** Set only the next slot, leaving `updated_at` alone. */
-  setAutomationNextRun(id: string, nextRunAt: string | null): boolean {
+  setRoutineNextRun(id: string, nextRunAt: string | null): boolean {
     return (
       this.#run(
-        "UPDATE automation SET next_run_at = ? WHERE id = ?",
+        "UPDATE routine SET next_run_at = ? WHERE id = ?",
         nextRunAt,
         id,
       ) > 0
@@ -964,47 +1002,48 @@ export class SessionStore {
   }
 
   /** Delete it and, by cascade, its runs. */
-  removeAutomation(id: string): boolean {
-    return this.#run("DELETE FROM automation WHERE id = ?", id) > 0;
+  removeRoutine(id: string): boolean {
+    return this.#run("DELETE FROM routine WHERE id = ?", id) > 0;
   }
 
   /** Its runs, newest first. */
-  listAutomationRuns(automationId: string, limit = AUTOMATION_RUNS_KEPT) {
-    return this.#all<AutomationRunRow>(
-      "SELECT * FROM automation_run WHERE automation_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
-      automationId,
-      Math.max(1, Math.min(limit, AUTOMATION_RUNS_KEPT)),
-    ).map(toAutomationRun);
+  listRoutineRuns(routineId: string, limit = ROUTINE_RUNS_KEPT) {
+    return this.#all<RoutineRunRow>(
+      "SELECT * FROM routine_run WHERE routine_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+      routineId,
+      Math.max(1, Math.min(limit, ROUTINE_RUNS_KEPT)),
+    ).map(toRoutineRun);
   }
 
-  getAutomationRun(id: string): AutomationRun | null {
-    const row = this.#get<AutomationRunRow>(
-      "SELECT * FROM automation_run WHERE id = ?",
+  getRoutineRun(id: string): RoutineRun | null {
+    const row = this.#get<RoutineRunRow>(
+      "SELECT * FROM routine_run WHERE id = ?",
       id,
     );
-    return row ? toAutomationRun(row) : null;
+    return row ? toRoutineRun(row) : null;
   }
 
   /** Every `queued` or `running` run, oldest first. */
-  activeAutomationRuns(): AutomationRun[] {
-    return this.#all<AutomationRunRow>(
-      "SELECT * FROM automation_run WHERE status IN ('queued', 'running') ORDER BY created_at, id",
-    ).map(toAutomationRun);
+  activeRoutineRuns(): RoutineRun[] {
+    return this.#all<RoutineRunRow>(
+      "SELECT * FROM routine_run WHERE status IN ('queued', 'running') ORDER BY created_at, id",
+    ).map(toRoutineRun);
   }
 
   /**
-   * Add `run`, then drop the automation's runs past
-   * {@link AUTOMATION_RUNS_KEPT}, oldest first, never an active one.
+   * Add `run`, then drop the routine's runs past
+   * {@link ROUTINE_RUNS_KEPT}, oldest first, never an active one.
    */
-  addAutomationRun(run: AutomationRun, createdAt = this.#now()): void {
+  addRoutineRun(run: RoutineRun, createdAt = this.#now()): void {
     this.#write(() => {
       this.#run(
-        `INSERT INTO automation_run (id, automation_id, trigger, scheduled_for,
+        `INSERT INTO routine_run (id, routine_id, trigger, scheduled_for,
            started_at, ended_at, status, agent, conversation, worktree, error,
+           note, input_tokens, output_tokens, cached_tokens, cost_usd,
            created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         run.id,
-        run.automationId,
+        run.routineId,
         run.trigger,
         run.scheduledFor,
         run.startedAt,
@@ -1014,18 +1053,23 @@ export class SessionStore {
         run.conversation,
         run.worktree,
         run.error,
+        run.note,
+        run.tokens?.input ?? null,
+        run.tokens?.output ?? null,
+        run.tokens?.cached ?? null,
+        run.costUSD,
         createdAt,
       );
       this.#run(
-        `DELETE FROM automation_run WHERE automation_id = ?
+        `DELETE FROM routine_run WHERE routine_id = ?
            AND status NOT IN ('queued', 'running')
            AND id NOT IN (
-             SELECT id FROM automation_run WHERE automation_id = ?
+             SELECT id FROM routine_run WHERE routine_id = ?
              ORDER BY created_at DESC, id DESC LIMIT ?
            )`,
-        run.automationId,
-        run.automationId,
-        AUTOMATION_RUNS_KEPT,
+        run.routineId,
+        run.routineId,
+        ROUTINE_RUNS_KEPT,
       );
     });
   }
@@ -1035,19 +1079,17 @@ export class SessionStore {
    *
    * @returns The run as it is now, or null when there is no such run.
    */
-  updateAutomationRun(id: string, patch: AutomationRunPatch) {
-    const keys = (Object.keys(patch) as (keyof AutomationRunPatch)[]).filter(
-      (key) => key in RUN_PATCH_COLUMNS && patch[key] !== undefined,
-    );
-    if (keys.length > 0)
+  updateRoutineRun(id: string, patch: RoutineRunPatch) {
+    const sets = runPatchSets(patch);
+    if (sets.length > 0)
       this.#run(
-        `UPDATE automation_run SET ${keys
-          .map((key) => `${RUN_PATCH_COLUMNS[key]} = ?`)
+        `UPDATE routine_run SET ${sets
+          .map(([column]) => `${column} = ?`)
           .join(", ")} WHERE id = ?`,
-        ...keys.map((key) => patch[key] ?? null),
+        ...sets.map(([, value]) => value),
         id,
       );
-    return this.getAutomationRun(id);
+    return this.getRoutineRun(id);
   }
 
   /**

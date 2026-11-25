@@ -13,30 +13,30 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
-import { useAutomations } from "#/stores/automations";
+import { useRoutines } from "#/stores/routines";
 
-/** The right pane before an automation is chosen, or before there is one. */
-export function AutomationsEmpty() {
-  const automations = useAutomations((state) => state.automations);
-  const openEditor = useAutomations((state) => state.openEditor);
-  const none = automations?.length === 0;
+/** The right pane before a routine is chosen, or before there is one. */
+export function RoutinesEmpty() {
+  const routines = useRoutines((state) => state.routines);
+  const openEditor = useRoutines((state) => state.openEditor);
+  const none = routines?.length === 0;
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <WindowTitlebar>
-        <h1 className={WINDOW_TITLE}>Automations</h1>
+        <h1 className={WINDOW_TITLE}>Routines</h1>
       </WindowTitlebar>
       <div className="flex min-h-0 flex-1 items-center justify-center">
-        {/* Nothing until the list is read: "No automations yet" would be a
+        {/* Nothing until the list is read: "No routines yet" would be a
             guess while the list beside it shows its skeleton. */}
-        {automations && (
+        {routines && (
           <Empty className="py-16">
             <EmptyHeader>
               <EmptyMedia variant="icon">
                 <HugeiconsIcon icon={TimeScheduleIcon} strokeWidth={1.8} />
               </EmptyMedia>
               <EmptyTitle>
-                {none ? "Run an agent on a schedule" : "No automation open"}
+                {none ? "Run an agent on a schedule" : "No routine open"}
               </EmptyTitle>
               <EmptyDescription>
                 {none
@@ -52,7 +52,7 @@ export function AutomationsEmpty() {
                     strokeWidth={2}
                     data-icon="inline-start"
                   />
-                  New automation
+                  New routine
                 </Button>
               </EmptyContent>
             )}

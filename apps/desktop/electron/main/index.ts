@@ -41,7 +41,6 @@ import { registerAgentSetup } from "./agent-setup";
 import { installLwk } from "./agent-setup/lwk-install";
 import { ensureControlMcpShim } from "./agent-setup/mcp-entry";
 import { registerAuth } from "./auth";
-import { registerAutomations, stopAutomations } from "./automations";
 import { registerAutonomy } from "./autonomy";
 import {
   APP_CHANNEL,
@@ -105,6 +104,7 @@ import { readFolders } from "./projects/store";
 import { registerAppProtocol } from "./protocol";
 import { registerReadiness } from "./readiness";
 import { registerRepoSearch } from "./repo-search";
+import { registerRoutines, stopRoutines } from "./routines";
 import { appOrigin, isTrustedUrl } from "./security";
 import { registerStorage } from "./storage";
 import { registerStructuralSearch } from "./structural-search";
@@ -583,7 +583,7 @@ app
       onRunningChanged,
     });
     // FE-99: after the conversation view, whose engines a run starts on.
-    registerAutomations(devUrl);
+    registerRoutines(devUrl);
     // FE-165: no work until a project's first permission request.
     registerPermissions(devUrl, { pendingPermission });
     // PD-08: no work until a project's first get.
@@ -701,7 +701,7 @@ app
     app.quit();
   });
 app.on("will-quit", () => {
-  stopAutomations();
+  stopRoutines();
   void flushPermissions();
   void controlServer?.close();
   controlServer = null;

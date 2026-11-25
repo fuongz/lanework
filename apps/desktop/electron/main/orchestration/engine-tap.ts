@@ -49,11 +49,25 @@ export interface EngineWrite extends EngineTarget {
   paths: string[];
 }
 
+/** A turn's tokens (FE-177): uncached input, output, and cache reads. */
+export interface EngineUsage {
+  input: number;
+  output: number;
+  cached: number;
+}
+
 /** A turn's last answer. */
 export interface EngineResult extends EngineTarget {
   text: string;
   /** The CLI said the turn failed. */
   error: boolean;
+  /** What the turn used; null when the CLI did not say (FE-177). */
+  usage?: EngineUsage | null;
+  /**
+   * What the turn cost in USD, as the CLI prices it (FE-177): Claude's
+   * API-equivalent price; null when the CLI gives none (Codex).
+   */
+  costUSD?: number | null;
 }
 
 export interface EngineTap {
@@ -79,7 +93,7 @@ export function setSessionsEnv(next: EngineTap["env"]): void {
 }
 
 /**
- * More ears for `result`, beside the tap's own: automations (FE-99) hear how
+ * More ears for `result`, beside the tap's own: routines (FE-99) hear how
  * their runs' turns ended without taking the one slot orchestration fills.
  */
 const resultListeners = new Set<(result: EngineResult) => void>();

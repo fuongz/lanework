@@ -113,6 +113,10 @@ function ToolPermissionCard({
   // user opens or closes it; then it stays as they left it.
   const [chosen, setChosen] = useState<boolean | null>(null);
   const open = chosen ?? inputOpen;
+  // FE-176: an agent may call a tool before loading its schema (a deferred
+  // MCP tool, same turn as its ToolSearch), so the CLI asks with an empty
+  // input. Said in words, not as a bare `{}`.
+  const bare = /^\s*(\{\s*\})?\s*$/.test(request.input);
   const [busy, setBusy] = useState(false);
   const answer = (value: PermissionAnswer) => {
     setBusy(true);
@@ -160,15 +164,15 @@ function ToolPermissionCard({
           </span>
           <Pending>{pending}</Pending>
         </h3>
-        {request.summary && (
+        {(bare || request.summary) && (
           <p className="text-muted-foreground ps-6 text-[13px] [overflow-wrap:anywhere]">
-            {request.summary}
+            {bare ? "Called with no arguments." : request.summary}
           </p>
         )}
       </div>
       {open && (
         <pre className="bg-foreground/[0.04] max-h-64 overflow-auto rounded-lg p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">
-          <code>{request.input || "{}"}</code>
+          <code>{bare ? "No arguments." : request.input}</code>
         </pre>
       )}
       {always && project && (

@@ -388,7 +388,7 @@ export function AppSidebar({
             </Link>
             {/* Agents run on a schedule (FE-99). */}
             <Link
-              to="/w/$slug/automations"
+              to="/w/$slug/routines"
               params={{ slug }}
               className={ROW}
               activeProps={ACTIVE}
@@ -399,7 +399,7 @@ export function AppSidebar({
                 strokeWidth={1.5}
                 aria-hidden="true"
               />
-              <span className="min-w-0 truncate">Automations</span>
+              <span className="min-w-0 truncate">Routines</span>
             </Link>
           </nav>
         )}

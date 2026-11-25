@@ -258,6 +258,23 @@ export interface ConductorSessionsDeps {
       input: SessionInputs["conversations.message"],
     ) => Promise<SessionResults["conversations.message"]>;
   };
+  /**
+   * `loop.next` and `loop.stop` (FE-172) for the caller's own conversation,
+   * which must be a running self-paced routine run: refused with an
+   * error whose message is told to the caller.
+   */
+  loop?: {
+    next: (
+      project: string,
+      conversation: string,
+      input: SessionInputs["loop.next"],
+    ) => SessionResults["loop.next"];
+    stop: (
+      project: string,
+      conversation: string,
+      input: SessionInputs["loop.stop"],
+    ) => SessionResults["loop.stop"];
+  };
 }
 
 /** A session a conductor started. */
@@ -586,6 +603,22 @@ export class ConductorSessions {
           conversation,
           call.input,
         );
+      } catch (error) {
+        refuse(error instanceof Error ? error.message : String(error));
+      }
+    }
+    // FE-172: only a self-paced routine's run sets its own pace; the
+    // routines runner knows which conversation that is.
+    if (call.action === "loop.next" || call.action === "loop.stop") {
+      const conversation = caller.conversation();
+      if (!conversation)
+        refuse("This conversation has no id yet. Try again in a moment.");
+      const loop = this.deps.loop;
+      if (!loop) refuse("Routines are not available here.");
+      try {
+        return call.action === "loop.next"
+          ? loop.next(caller.project, conversation, call.input)
+          : loop.stop(caller.project, conversation, call.input);
       } catch (error) {
         refuse(error instanceof Error ? error.message : String(error));
       }

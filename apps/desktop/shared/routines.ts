@@ -1,58 +1,78 @@
-// Automations (FE-99): an agent run on a schedule. Main keeps the
-// automations and their runs in the session store (`lw.db`), ticks a
+// Routines (FE-99): an agent run on a schedule. Main keeps the
+// routines and their runs in the session store (`lw.db`), ticks a
 // scheduler, and starts each run as a fresh headless conversation; the page
-// at `/w/$slug/automations` lists, edits and runs them by hand.
+// at `/w/$slug/routines` lists, edits and runs them by hand.
 
 import { type ComposerSettings, checkSettings } from "./conversation";
 
-/** The agents an automation can run: the two with a headless engine. */
-export const AUTOMATION_AGENTS = ["claude", "codex"] as const;
-export type AutomationAgent = (typeof AUTOMATION_AGENTS)[number];
+/** The agents a routine can run: the two with a headless engine. */
+export const ROUTINE_AGENTS = ["claude", "codex"] as const;
+export type RoutineAgent = (typeof ROUTINE_AGENTS)[number];
 
 /**
  * Where a run works. `current`: the project's own folder. `worktree`: a
  * fresh git worktree made for the run, removed after it unless the agent
  * changed something there: then it is kept, branch and all, for review.
  */
-export const AUTOMATION_WORKSPACES = ["current", "worktree"] as const;
-export type AutomationWorkspace = (typeof AUTOMATION_WORKSPACES)[number];
+export const ROUTINE_WORKSPACES = ["current", "worktree"] as const;
+export type RoutineWorkspace = (typeof ROUTINE_WORKSPACES)[number];
 
-export const AUTOMATION_PRESETS = [
+export const ROUTINE_PRESETS = [
   "hourly",
   "daily",
   "weekdays",
   "weekly",
 ] as const;
-export type AutomationPreset = (typeof AUTOMATION_PRESETS)[number];
+export type RoutinePreset = (typeof ROUTINE_PRESETS)[number];
 
 /**
- * When an automation runs (FE-99/D7), read in its `timezone`.
+ * When a routine runs (FE-99/D7), read in its `timezone`.
  *
  * - `preset`: `hourly` at `minute` past every hour; `daily` and `weekdays`
  *   (Mon–Fri) at `hour:minute`; `weekly` on `weekday` (0 Sunday … 6
  *   Saturday) at `hour:minute`.
  * - `cron`: a five-field cron expression.
  * - `once`: one run at `at`, an ISO date-time with its offset.
+ * - `loop`: self-paced (FE-172): the run's agent says when the next one is
+ *   with `schedule_next` (lanework-control), or ends the loop with
+ *   `schedule_stop`; without a word the next is `minutes` after this one.
  */
-export type AutomationSchedule =
+export type RoutineSchedule =
   | {
       kind: "preset";
-      preset: AutomationPreset;
+      preset: RoutinePreset;
       minute: number;
       hour?: number;
       weekday?: number;
     }
   | { kind: "cron"; expr: string }
-  | { kind: "once"; at: string };
+  | { kind: "once"; at: string }
+  | { kind: "loop"; minutes: number };
 
-/** What the person sets: everything an automation has but its bookkeeping. */
-export interface AutomationInput {
+/**
+ * A self-paced loop's bounds, in minutes (FE-172, decided 2026-11-25): what
+ * `schedule_next` may ask (`@lanework/contracts` LOOP_MINUTES_MIN/MAX) and
+ * what a loop's default may be.
+ */
+export const LOOP_MINUTES_MIN = 5;
+export const LOOP_MINUTES_MAX = 1440;
+
+/** `minutes` held to the loop's bounds, rounded. */
+export function clampLoopMinutes(minutes: number): number {
+  return Math.min(
+    LOOP_MINUTES_MAX,
+    Math.max(LOOP_MINUTES_MIN, Math.round(minutes)),
+  );
+}
+
+/** What the person sets: everything a routine has but its bookkeeping. */
+export interface RoutineInput {
   name: string;
   prompt: string;
-  agent: AutomationAgent;
+  agent: RoutineAgent;
   settings: ComposerSettings;
-  workspace: AutomationWorkspace;
-  schedule: AutomationSchedule;
+  workspace: RoutineWorkspace;
+  schedule: RoutineSchedule;
   /** IANA zone, e.g. `Asia/Ho_Chi_Minh`. */
   timezone: string;
   /**
@@ -65,7 +85,7 @@ export interface AutomationInput {
   enabled: boolean;
 }
 
-export interface Automation extends AutomationInput {
+export interface Routine extends RoutineInput {
   id: string;
   /** The project's slug. */
   project: string;
@@ -76,8 +96,8 @@ export interface Automation extends AutomationInput {
 }
 
 /** Why a run started. */
-export const AUTOMATION_TRIGGERS = ["schedule", "catch_up", "manual"] as const;
-export type AutomationTrigger = (typeof AUTOMATION_TRIGGERS)[number];
+export const ROUTINE_TRIGGERS = ["schedule", "catch_up", "manual"] as const;
+export type RoutineTrigger = (typeof ROUTINE_TRIGGERS)[number];
 
 /**
  * - `queued`: due, waiting for a free slot (at most two run at once).
@@ -85,7 +105,7 @@ export type AutomationTrigger = (typeof AUTOMATION_TRIGGERS)[number];
  *   {@link NOTHING_TO_REPORT}; its conversation is archived, no notification.
  * - `skipped`: a missed slot older than the one caught up, or past grace.
  */
-export const AUTOMATION_RUN_STATUSES = [
+export const ROUTINE_RUN_STATUSES = [
   "queued",
   "running",
   "succeeded",
@@ -94,23 +114,45 @@ export const AUTOMATION_RUN_STATUSES = [
   "skipped",
   "nothing_to_report",
 ] as const;
-export type AutomationRunStatus = (typeof AUTOMATION_RUN_STATUSES)[number];
+export type RoutineRunStatus = (typeof ROUTINE_RUN_STATUSES)[number];
 
-export interface AutomationRun {
+export interface RoutineRun {
   id: string;
-  automationId: string;
-  trigger: AutomationTrigger;
+  routineId: string;
+  trigger: RoutineTrigger;
   /** The slot it was for, ISO; for a manual run, when it was asked for. */
   scheduledFor: string;
   startedAt: string | null;
   endedAt: string | null;
-  status: AutomationRunStatus;
-  agent: AutomationAgent;
+  status: RoutineRunStatus;
+  agent: RoutineAgent;
   /** The conversation it ran in, once started. */
   conversation: string | null;
   /** The worktree's path, for a `worktree` run. */
   worktree: string | null;
   error: string | null;
+  /**
+   * What a self-paced run said of its pace (FE-172): `schedule_next`'s or
+   * `schedule_stop`'s reason, or null.
+   */
+  note: string | null;
+  /**
+   * The tokens its turns used (FE-177), summed; null when the CLI said none
+   * (a run that never started, or one from before they were kept).
+   */
+  tokens: RoutineTokens | null;
+  /**
+   * What it cost in USD as the CLI prices it (FE-177): Claude's
+   * API-equivalent price, not what a subscription is billed. Null for Codex.
+   */
+  costUSD: number | null;
+}
+
+/** A run's tokens (FE-177): uncached input, output, and cache reads. */
+export interface RoutineTokens {
+  input: number;
+  output: number;
+  cached: number;
 }
 
 /** The answer that means "nothing happened worth telling". */
@@ -127,13 +169,36 @@ export function runPrompt(prompt: string): string {
   return `${prompt.trimEnd()}\n\nIf there is nothing worth reporting, reply with exactly ${NOTHING_TO_REPORT} and nothing else.`;
 }
 
-/** Runs kept per automation; older ones are deleted. */
-export const AUTOMATION_RUNS_KEPT = 100;
+/**
+ * The line a self-paced run's prompt gets (FE-172): how to set the loop's
+ * pace with the lanework-control tools.
+ *
+ * NOTE: Fixed text, never the routine's own minutes, so editing the
+ * default does not change what the agent reads.
+ */
+export const LOOP_RUN_LINE = `This routine paces itself: near the end of this run, call the schedule_next tool (lanework_control) once with the minutes until the next run (${LOOP_MINUTES_MIN} to ${LOOP_MINUTES_MAX}: sooner while work is in flight, later when nothing moves) and a short reason, or call schedule_stop with a reason when the work it watches is done.`;
+
+/**
+ * What a run of `routine` sends: {@link runPrompt}, with
+ * {@link LOOP_RUN_LINE} before its last line for a `loop` schedule.
+ */
+export function routineRunPrompt(
+  routine: Pick<RoutineInput, "prompt" | "schedule">,
+): string {
+  return runPrompt(
+    routine.schedule.kind === "loop"
+      ? `${routine.prompt.trimEnd()}\n\n${LOOP_RUN_LINE}`
+      : routine.prompt,
+  );
+}
+
+/** Runs kept per routine; older ones are deleted. */
+export const ROUTINE_RUNS_KEPT = 100;
 
 /** Runs going at once across the app (FE-99/D13). */
-export const AUTOMATION_MAX_CONCURRENT = 2;
+export const ROUTINE_MAX_CONCURRENT = 2;
 
-export const AUTOMATION_DEFAULTS = {
+export const ROUTINE_DEFAULTS = {
   graceMinutes: 60,
   timeoutMinutes: 60,
 } as const;
@@ -142,13 +207,14 @@ export const AUTOMATION_DEFAULTS = {
  * The cron expression a recurring schedule fires on, or null for `once`.
  *
  * NOTE: Presets become cron here so main computes every recurring slot one
- * way (croner, in the automation's zone).
+ * way (croner, in the routine's zone).
  */
-export function scheduleCron(schedule: AutomationSchedule): string | null {
+export function scheduleCron(schedule: RoutineSchedule): string | null {
   switch (schedule.kind) {
     case "cron":
       return schedule.expr.trim();
     case "once":
+    case "loop":
       return null;
     case "preset": {
       const minute = schedule.minute;
@@ -176,7 +242,7 @@ function isInt(value: unknown, min: number, max: number): value is number {
   );
 }
 
-function checkSchedule(value: unknown): AutomationSchedule | null {
+function checkSchedule(value: unknown): RoutineSchedule | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
   if (v.kind === "cron") {
@@ -189,10 +255,14 @@ function checkSchedule(value: unknown): AutomationSchedule | null {
       ? { kind: "once", at: v.at }
       : null;
   }
+  if (v.kind === "loop")
+    return isInt(v.minutes, LOOP_MINUTES_MIN, LOOP_MINUTES_MAX)
+      ? { kind: "loop", minutes: v.minutes }
+      : null;
   if (v.kind !== "preset") return null;
-  if (!AUTOMATION_PRESETS.includes(v.preset as AutomationPreset)) return null;
+  if (!ROUTINE_PRESETS.includes(v.preset as RoutinePreset)) return null;
   if (!isInt(v.minute, 0, 59)) return null;
-  const preset = v.preset as AutomationPreset;
+  const preset = v.preset as RoutinePreset;
   if (preset === "hourly") return { kind: "preset", preset, minute: v.minute };
   if (!isInt(v.hour, 0, 23)) return null;
   if (preset !== "weekly")
@@ -226,7 +296,7 @@ export function isTimeZone(zone: unknown): zone is string {
  *
  * @returns null when any field is missing or out of range.
  */
-export function checkAutomationInput(value: unknown): AutomationInput | null {
+export function checkRoutineInput(value: unknown): RoutineInput | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
   const settings = checkSettings(v.settings);
@@ -238,9 +308,9 @@ export function checkAutomationInput(value: unknown): AutomationInput | null {
     typeof v.prompt !== "string" ||
     !v.prompt.trim() ||
     v.prompt.length > 20_000 ||
-    !AUTOMATION_AGENTS.includes(v.agent as AutomationAgent) ||
+    !ROUTINE_AGENTS.includes(v.agent as RoutineAgent) ||
     !settings ||
-    !AUTOMATION_WORKSPACES.includes(v.workspace as AutomationWorkspace) ||
+    !ROUTINE_WORKSPACES.includes(v.workspace as RoutineWorkspace) ||
     !schedule ||
     !isTimeZone(v.timezone) ||
     !isInt(v.graceMinutes, 0, 7 * 24 * 60) ||
@@ -251,9 +321,9 @@ export function checkAutomationInput(value: unknown): AutomationInput | null {
   return {
     name: v.name.trim(),
     prompt: v.prompt,
-    agent: v.agent as AutomationAgent,
+    agent: v.agent as RoutineAgent,
     settings,
-    workspace: v.workspace as AutomationWorkspace,
+    workspace: v.workspace as RoutineWorkspace,
     schedule,
     timezone: v.timezone,
     graceMinutes: v.graceMinutes,
@@ -263,41 +333,41 @@ export function checkAutomationInput(value: unknown): AutomationInput | null {
 }
 
 /** What changed, pushed to every window. */
-export interface AutomationsChange {
+export interface RoutinesChange {
   project: string;
-  /** The automation whose row or runs changed. */
-  automationId: string;
+  /** The routine whose row or runs changed. */
+  routineId: string;
 }
 
-export const automationsChannels = {
-  list: "automations:list",
-  create: "automations:create",
-  update: "automations:update",
-  remove: "automations:remove",
-  setEnabled: "automations:set-enabled",
-  runNow: "automations:run-now",
-  runs: "automations:runs",
-  /** Main → renderer: an automation or its runs changed. */
-  changed: "automations:changed",
+export const routinesChannels = {
+  list: "routines:list",
+  create: "routines:create",
+  update: "routines:update",
+  remove: "routines:remove",
+  setEnabled: "routines:set-enabled",
+  runNow: "routines:run-now",
+  runs: "routines:runs",
+  /** Main → renderer: a routine or its runs changed. */
+  changed: "routines:changed",
 } as const;
 
-export interface DesktopAutomationsApi {
-  /** A project's automations, by name. */
-  list: (project: string) => Promise<Automation[]>;
+export interface DesktopRoutinesApi {
+  /** A project's routines, by name. */
+  list: (project: string) => Promise<Routine[]>;
   /** @throws When the input does not check, or the cron does not parse. */
-  create: (project: string, input: AutomationInput) => Promise<Automation>;
-  /** @throws As create, or when there is no such automation. */
-  update: (id: string, input: AutomationInput) => Promise<Automation>;
+  create: (project: string, input: RoutineInput) => Promise<Routine>;
+  /** @throws As create, or when there is no such routine. */
+  update: (id: string, input: RoutineInput) => Promise<Routine>;
   /** Deletes it and its runs; a run going on is stopped. */
   remove: (id: string) => Promise<void>;
-  setEnabled: (id: string, enabled: boolean) => Promise<Automation>;
+  setEnabled: (id: string, enabled: boolean) => Promise<Routine>;
   /**
    * Start a run now (`manual`), or queue it behind the running ones.
    *
-   * @throws When one of this automation's runs is already going.
+   * @throws When one of this routine's runs is already going.
    */
-  runNow: (id: string) => Promise<AutomationRun>;
+  runNow: (id: string) => Promise<RoutineRun>;
   /** Its runs, newest first. */
-  runs: (automationId: string, limit?: number) => Promise<AutomationRun[]>;
-  onChanged: (listener: (change: AutomationsChange) => void) => () => void;
+  runs: (routineId: string, limit?: number) => Promise<RoutineRun[]>;
+  onChanged: (listener: (change: RoutinesChange) => void) => () => void;
 }

@@ -48,6 +48,7 @@ import {
   agentEnv,
   connectorPlan,
   type EngineTarget,
+  type EngineUsage,
   engineTap,
   leadGuarded,
   safely,
@@ -437,6 +438,11 @@ export class CodexEngine implements ConversationEngine {
 
   /** The running turn's last agent message, told when the turn ends. */
   lastText = "";
+  /**
+   * This turn's tokens so far (FE-177): each `thread/tokenUsage/updated`
+   * adds its `last` model call, as the rollout's `token_count`s are summed.
+   */
+  turnUsage: EngineUsage | null = null;
 
   /** A lead whose run is active or paused: it runs read-only (FE-136/D1). */
   guarded(): boolean {
@@ -522,6 +528,7 @@ export class CodexEngine implements ConversationEngine {
     settings: ComposerSettings,
     conductor = false,
     inherited?: readonly string[],
+    routine = false,
   ): Promise<void> {
     const cli = await this.deps.cli();
     const spawn = this.deps.spawn ?? spawnChild;
@@ -543,13 +550,22 @@ export class CodexEngine implements ConversationEngine {
     // FE-155: the conductor tools only on a conductor's process.
     const asConductor = conductor && Boolean(env[SESSIONS_ENV.token]);
     if (asConductor) env[CONTROL_ROLE_ENV] = "conductor";
+    // FE-172: a routine run's process lists its schedule_* tools.
+    const asRoutine =
+      !asConductor && routine && Boolean(env[SESSIONS_ENV.token]);
+    if (asRoutine) env[CONTROL_ROLE_ENV] = "routine";
     // FE-155: the control tools, for a process holding a control token; a
     // conductor's runs its safe ones without asking.
     const control = controlMcpFor(env);
     // FE-168/D2: an older Codex asks before thread_read as before.
     if (control)
       overrides.push(
-        ...codexControlArgs(control, asConductor, !belowMinimumNow("codex")),
+        ...codexControlArgs(
+          control,
+          asConductor,
+          !belowMinimumNow("codex"),
+          asRoutine,
+        ),
       );
     // FE-158: this build's lwk for the kit, unless its backend is ts.
     const kit = kitMcpFor();
@@ -754,6 +770,7 @@ export class CodexEngine implements ConversationEngine {
     switch (method) {
       case "turn/started":
         this.turnId = str(record(params.turn).id) ?? this.turnId;
+        this.turnUsage = null;
         this.starting = false;
         this.emitState();
         this.pump();
@@ -779,6 +796,20 @@ export class CodexEngine implements ConversationEngine {
         const rpcId = params.requestId;
         for (const [key, entry] of this.waiting)
           if (entry.rpcId === rpcId) this.settle(key);
+        return;
+      }
+      case "thread/tokenUsage/updated": {
+        const last = record(record(params.tokenUsage).last);
+        const count = (key: string) =>
+          typeof last[key] === "number" ? Math.max(0, last[key] as number) : 0;
+        const cached = count("cachedInputTokens");
+        const before = this.turnUsage ?? { input: 0, output: 0, cached: 0 };
+        this.turnUsage = {
+          // NOTE: OpenAI's input counts the cached tokens too.
+          input: before.input + Math.max(0, count("inputTokens") - cached),
+          output: before.output + count("outputTokens"),
+          cached: before.cached + cached,
+        };
         return;
       }
       case "account/rateLimits/updated": {
@@ -812,6 +843,8 @@ export class CodexEngine implements ConversationEngine {
         const failed = turn.status === "failed";
         const text = this.lastText;
         this.lastText = "";
+        const usage = this.turnUsage;
+        this.turnUsage = null;
         safely(() =>
           engineTap().result?.({
             project: this.project,
@@ -819,6 +852,8 @@ export class CodexEngine implements ConversationEngine {
             folder: this.folder,
             text,
             error: failed,
+            usage,
+            costUSD: null,
           }),
         );
         this.onTurnEnd();
@@ -1277,6 +1312,7 @@ export class CodexEngine implements ConversationEngine {
         settings,
         isConductorTurn(out.text),
         out.connectors,
+        out.routine === true,
       );
       await this.ready;
       const { input, dir } = await inputOf(out.content);

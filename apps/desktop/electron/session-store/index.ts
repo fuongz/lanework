@@ -8,10 +8,10 @@
 export { userVersion } from "../local-store/schema";
 export { migrate, SCHEMA_VERSION } from "./schema";
 export {
-  type AutomationRunPatch,
   type OpenOptions,
   openSessionStore,
   parseSessionKey,
+  type RoutineRunPatch,
   SessionStore,
   sessionKey,
 } from "./store";

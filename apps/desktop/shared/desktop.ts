@@ -1,7 +1,6 @@
 import type { DesktopAgentConfigApi } from "./agent-config";
 import type { DesktopAgentSetupApi } from "./agent-setup";
 import type { DesktopAuthApi, DesktopLaneworkMcpApi } from "./auth";
-import type { DesktopAutomationsApi } from "./automations";
 import type { DesktopAutonomyApi } from "./autonomy";
 import type { DesktopConductorsApi } from "./conductor-sessions";
 import type { DesktopConnectorsApi } from "./connectors";
@@ -23,6 +22,7 @@ import type {
 import type { DesktopPermissionsApi } from "./permissions";
 import type { DesktopProjectsApi } from "./projects";
 import type { DesktopReadinessApi } from "./readiness";
+import type { DesktopRoutinesApi } from "./routines";
 import type { DesktopStorageApi } from "./storage";
 import type { DesktopTerminalApi } from "./terminal";
 import type { DesktopUpdaterApi } from "./updater";
@@ -148,7 +148,7 @@ export interface DesktopApi {
   /** Settings → Storage: the app folder's size, and clearing its cache. */
   storage: DesktopStorageApi;
   /** Agent runs on a schedule, and their history (FE-99). */
-  automations: DesktopAutomationsApi;
+  routines: DesktopRoutinesApi;
   /** A project's autonomy dial for agents handed a card (PD-08). */
   autonomy: DesktopAutonomyApi;
   /** Updates from GitHub Releases, and What's New after one (INF-11). */

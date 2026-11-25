@@ -35,6 +35,12 @@ export interface Outgoing {
    * starts; never queued, never shown.
    */
   connectors?: readonly string[];
+  /**
+   * Sent by the routines runner (FE-172): the process it starts is an
+   * routine run's (`LANEWORK_CONTROL_AS=routine`), so it gets the
+   * schedule_* tools. Read only when a process starts; never queued.
+   */
+  routine?: boolean;
 }
 
 /** The extensions of an attached path the queue shows as an image. */

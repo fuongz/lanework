@@ -59,7 +59,7 @@ import { handoffAgent } from "./composer.limit";
 import { arrangeModels, useModels } from "./composer.models";
 
 /** A pill in the composer's bottom row. */
-const PILL =
+export const PILL =
   "text-foreground hover:bg-foreground/[0.08] aria-expanded:bg-foreground/[0.08] flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[13px] transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50";
 
 /** Every CLI a chat runs on, in {@link AGENT_LABELS}' order: one tab each. */

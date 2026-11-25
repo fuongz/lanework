@@ -6,7 +6,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import type { Automation } from "#/../shared/automations";
+import type { Routine } from "#/../shared/routines";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
 import {
@@ -24,8 +24,8 @@ import {
 import { ScrollArea } from "#/components/ui/scroll-area";
 import { Switch } from "#/components/ui/switch";
 import { cn } from "#/lib/utils";
-import { useAutomations } from "#/stores/automations";
-import { describeSchedule, fullTime, untilTime } from "./automation-format";
+import { useRoutines } from "#/stores/routines";
+import { describeSchedule, fullTime, untilTime } from "./routine-format";
 
 /** Re-draws every half minute, so "in 3 minutes" counts down. */
 export function useNow(every = 30_000): number {
@@ -38,24 +38,24 @@ export function useNow(every = 30_000): number {
 }
 
 /** When it runs next, in words; or why it does not. */
-export function nextRunText(automation: Automation, now: number): string {
-  if (!automation.enabled) return "Paused";
-  if (!automation.nextRunAt)
-    return automation.schedule.kind === "once" ? "Done" : "Not scheduled";
-  return `Next ${untilTime(automation.nextRunAt, now)}`;
+export function nextRunText(routine: Routine, now: number): string {
+  if (!routine.enabled) return "Paused";
+  if (!routine.nextRunAt)
+    return routine.schedule.kind === "once" ? "Done" : "Not scheduled";
+  return `Next ${untilTime(routine.nextRunAt, now)}`;
 }
 
 /** The enabled switch, on a row and on the detail's header. */
-export function EnabledSwitch({ automation }: { automation: Automation }) {
-  const setEnabled = useAutomations((state) => state.setEnabled);
+export function EnabledSwitch({ routine }: { routine: Routine }) {
+  const setEnabled = useRoutines((state) => state.setEnabled);
   const [error, setError] = useState<string | null>(null);
   return (
     <Switch
-      aria-label={`${automation.enabled ? "Pause" : "Resume"} ${automation.name}`}
-      title={error ?? (automation.enabled ? "On" : "Paused")}
-      checked={automation.enabled}
+      aria-label={`${routine.enabled ? "Pause" : "Resume"} ${routine.name}`}
+      title={error ?? (routine.enabled ? "On" : "Paused")}
+      checked={routine.enabled}
       onCheckedChange={(enabled) =>
-        void setEnabled(automation.id, enabled).then((result) =>
+        void setEnabled(routine.id, enabled).then((result) =>
           setError(result.error ?? null),
         )
       }
@@ -63,72 +63,72 @@ export function EnabledSwitch({ automation }: { automation: Automation }) {
   );
 }
 
-/** One automation: its name, when it runs, when next, and its switch. */
+/** One routine: its name, when it runs, when next, and its switch. */
 function Row({
-  automation,
+  routine,
   slug,
   now,
 }: {
-  automation: Automation;
+  routine: Routine;
   slug: string;
   now: number;
 }) {
   return (
     <li className="relative">
       <Link
-        to="/w/$slug/automations/$id"
-        params={{ slug, id: automation.id }}
+        to="/w/$slug/routines/$id"
+        params={{ slug, id: routine.id }}
         className={`${RAIL_ROW} focus-visible:ring-accent-brand flex flex-col gap-0.5 rounded-lg py-2 ps-3 pe-14 outline-none focus-visible:ring-2`}
         activeProps={{ className: "bg-foreground/[0.06]" }}
       >
         <span
           className={cn(
             "min-w-0 truncate text-[13px] font-medium",
-            !automation.enabled && "text-muted-foreground",
+            !routine.enabled && "text-muted-foreground",
           )}
         >
-          {automation.name}
+          {routine.name}
         </span>
         {/* Under the name, set apart by space rather than "·". */}
         <span className="text-muted-foreground flex min-w-0 items-center gap-3 text-xs">
           <span className="min-w-0 truncate">
-            {describeSchedule(automation.schedule, automation.timezone)}
+            {describeSchedule(routine.schedule, routine.timezone)}
           </span>
           <span
             className="ml-auto shrink-0 tabular-nums"
-            title={fullTime(automation.nextRunAt)}
+            title={fullTime(routine.nextRunAt)}
           >
-            {nextRunText(automation, now)}
+            {nextRunText(routine, now)}
           </span>
         </span>
       </Link>
       {/* Beside the link, not in it: flipping it must not open the row. */}
       <span className="absolute inset-y-0 end-3 flex items-center">
-        <EnabledSwitch automation={automation} />
+        <EnabledSwitch routine={routine} />
       </span>
     </li>
   );
 }
 
-/** The left pane: a project's automations, by name. */
-export function AutomationsList() {
-  const { slug } = useParams({ from: "/_app/w/$slug/automations" });
-  const automations = useAutomations((state) => state.automations);
-  const error = useAutomations((state) => state.error);
-  const loading = useAutomations((state) => state.loading);
-  const refresh = useAutomations((state) => state.refresh);
-  const openEditor = useAutomations((state) => state.openEditor);
+/** The left pane: a project's routines, by name. */
+export function RoutinesList() {
+  const { slug } = useParams({ from: "/_app/w/$slug/routines" });
+  const routines = useRoutines((state) => state.routines);
+  const error = useRoutines((state) => state.error);
+  const loading = useRoutines((state) => state.loading);
+  const refresh = useRoutines((state) => state.refresh);
+  const openEditor = useRoutines((state) => state.openEditor);
   const now = useNow();
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <WindowTitlebar className="justify-between pe-3">
-        <h1 className={WINDOW_TITLE}>Automations</h1>
+        <h1 className={WINDOW_TITLE}>Routines</h1>
         <span className="flex items-center gap-1">
           <button
             type="button"
             onClick={() => void refresh()}
-            aria-label="Refresh automations"
+            aria-label="Refresh routines"
             title="Refresh"
             className="hover:bg-foreground/[0.06] flex size-7 shrink-0 items-center justify-center rounded-md transition-colors"
           >
@@ -160,32 +160,27 @@ export function AutomationsList() {
         {error && (
           <p className="text-destructive px-4 py-3 text-xs/relaxed">{error}</p>
         )}
-        {!automations && !error && (
-          <ListSkeleton label="Reading the automations" lines={2} rows={4} />
+        {!routines && !error && (
+          <ListSkeleton label="Reading the routines" lines={2} rows={4} />
         )}
-        {automations && automations.length === 0 && (
+        {routines && routines.length === 0 && (
           <Empty>
             <EmptyHeader>
               <EmptyMedia variant="icon">
                 <HugeiconsIcon icon={TimeScheduleIcon} strokeWidth={1.8} />
               </EmptyMedia>
-              <EmptyTitle>No automations yet</EmptyTitle>
+              <EmptyTitle>No routines yet</EmptyTitle>
               <EmptyDescription>
                 New adds one: a prompt, an agent and when it runs.
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
         )}
-        {automations && automations.length > 0 && (
+        {routines && routines.length > 0 && (
           <RailHover backgroundClassName="rounded-lg bg-foreground/[0.03]">
             <ul className="flex flex-col gap-0.5 px-2 pb-2">
-              {automations.map((automation) => (
-                <Row
-                  key={automation.id}
-                  automation={automation}
-                  slug={slug}
-                  now={now}
-                />
+              {routines.map((routine) => (
+                <Row key={routine.id} routine={routine} slug={slug} now={now} />
               ))}
             </ul>
           </RailHover>

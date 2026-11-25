@@ -180,16 +180,16 @@ export function NotificationsSection() {
             },
             // A scheduled run finished with something to report (FE-99).
             {
-              label: "Automations",
+              label: "Routines",
               description:
                 "Get notified when a scheduled run finishes with something to report.",
               keywords:
-                "automation automations schedule scheduled cron run runs loop recurring",
+                "routine routines automation automations schedule scheduled cron run runs loop recurring",
               control: (
                 <DeliverySelect
-                  label="Automation notifications"
-                  value={settings?.automations ?? null}
-                  onChange={(value) => change("automations", value)}
+                  label="Routine notifications"
+                  value={settings?.routines ?? null}
+                  onChange={(value) => change("routines", value)}
                 />
               ),
             },

@@ -7,34 +7,35 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
-import type {
-  Automation,
-  AutomationRun,
-  AutomationRunStatus,
-} from "#/../shared/automations";
 import {
   AGENT_LABELS,
   modelName,
   PERMISSION_COPY,
 } from "#/../shared/conversation";
+import type {
+  Routine,
+  RoutineRun,
+  RoutineRunStatus,
+} from "#/../shared/routines";
+import { costText, tokenText } from "#/components/shared/agents/facts";
+import { ListSkeleton } from "#/components/shared/loading/skeletons";
+import {
+  WINDOW_TITLE,
+  WindowTitlebar,
+} from "#/components/shared/navigation/window-titlebar";
 import {
   describeSchedule,
   duration,
   fullTime,
   STATUS_LABELS,
   TRIGGER_LABELS,
-} from "#/components/shared/automations/automation-format";
-import { AutomationTrust } from "#/components/shared/automations/automation-trust";
+} from "#/components/shared/routines/routine-format";
+import { RoutineTrust } from "#/components/shared/routines/routine-trust";
 import {
   EnabledSwitch,
   nextRunText,
   useNow,
-} from "#/components/shared/automations/automations-list";
-import { ListSkeleton } from "#/components/shared/loading/skeletons";
-import {
-  WINDOW_TITLE,
-  WindowTitlebar,
-} from "#/components/shared/navigation/window-titlebar";
+} from "#/components/shared/routines/routines-list";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -55,9 +56,9 @@ import {
 } from "#/components/ui/empty";
 import { ScrollArea } from "#/components/ui/scroll-area";
 import { cn } from "#/lib/utils";
-import { useAutomations } from "#/stores/automations";
+import { useRoutines } from "#/stores/routines";
 
-const STATUS_TONE: Record<AutomationRunStatus, string> = {
+const STATUS_TONE: Record<RoutineRunStatus, string> = {
   queued: "text-muted-foreground",
   running: "text-sky-600 dark:text-sky-400",
   succeeded: "text-emerald-600 dark:text-emerald-400",
@@ -67,7 +68,7 @@ const STATUS_TONE: Record<AutomationRunStatus, string> = {
   nothing_to_report: "text-muted-foreground",
 };
 
-const STATUS_DOT: Record<AutomationRunStatus, string> = {
+const STATUS_DOT: Record<RoutineRunStatus, string> = {
   queued: "bg-muted-foreground/50",
   running: "bg-sky-500 animate-pulse",
   succeeded: "bg-emerald-500",
@@ -76,6 +77,62 @@ const STATUS_DOT: Record<AutomationRunStatus, string> = {
   skipped: "bg-muted-foreground/30",
   nothing_to_report: "bg-muted-foreground/50",
 };
+
+/** What a cost is (FE-177/D3): the CLI's price, not a bill. */
+const COST_HINT =
+  "Estimated by Claude Code at API prices. On a Claude subscription this is not what you are billed.";
+
+/** How far back the summary's spend reaches (FE-177/D5). */
+const SPEND_DAYS = 7;
+
+/** A run's tokens, read in and written out, short; null when untold. */
+function tokensText(run: RoutineRun): string | null {
+  if (!run.tokens) return null;
+  const read = run.tokens.input + run.tokens.cached;
+  return `${tokenText(read)} in, ${tokenText(run.tokens.output)} out`;
+}
+
+/** A run's tokens in full, for its tooltip. */
+function tokensTitle(run: RoutineRun): string | undefined {
+  if (!run.tokens) return undefined;
+  const { input, cached, output } = run.tokens;
+  return `${input.toLocaleString()} input, ${cached.toLocaleString()} from cache, ${output.toLocaleString()} output`;
+}
+
+/**
+ * The runs of the last {@link SPEND_DAYS} days, summed (FE-177/D5): what
+ * they cost when any said, else the tokens they used. Null with neither.
+ */
+function spendOf(
+  runs: readonly RoutineRun[],
+  now: number,
+): { text: string; priced: boolean } | null {
+  const since = now - SPEND_DAYS * 24 * 3600_000;
+  const recent = runs.filter((run) => {
+    const at = Date.parse(run.startedAt ?? run.scheduledFor);
+    return Number.isFinite(at) && at >= since;
+  });
+  const costs = recent.flatMap((run) =>
+    run.costUSD === null ? [] : [run.costUSD],
+  );
+  const count = `${recent.length} ${recent.length === 1 ? "run" : "runs"}`;
+  if (costs.length)
+    return {
+      text: `${costText(costs.reduce((sum, cost) => sum + cost, 0))} over ${count}`,
+      priced: true,
+    };
+  const tokens = recent.reduce(
+    (sum, run) =>
+      sum +
+      (run.tokens
+        ? run.tokens.input + run.tokens.cached + run.tokens.output
+        : 0),
+    0,
+  );
+  return tokens
+    ? { text: `${tokenText(tokens)} tokens over ${count}`, priced: false }
+    : null;
+}
 
 /** One fact in the summary: a quiet label over its value. */
 function Fact({ label, children }: { label: string; children: ReactNode }) {
@@ -87,34 +144,44 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function Summary({ automation, now }: { automation: Automation; now: number }) {
-  const model = modelName(automation.settings.model) ?? "";
+function Summary({ routine, now }: { routine: Routine; now: number }) {
+  const model = modelName(routine.settings.model) ?? "";
+  const runs = useRoutines((state) => state.runs[routine.id]);
+  const spend = runs ? spendOf(runs, now) : null;
   return (
     <dl className="grid grid-cols-2 gap-x-6 gap-y-3 rounded-xl border px-4 py-3.5 lg:grid-cols-3">
       <Fact label="Schedule">
-        <span title={automation.timezone}>
-          {describeSchedule(automation.schedule, automation.timezone)}
+        <span title={routine.timezone}>
+          {describeSchedule(routine.schedule, routine.timezone)}
         </span>
       </Fact>
       <Fact label="Next run">
-        <span title={fullTime(automation.nextRunAt)}>
-          {nextRunText(automation, now)}
+        <span title={fullTime(routine.nextRunAt)}>
+          {nextRunText(routine, now)}
         </span>
       </Fact>
-      <Fact label="Time zone">{automation.timezone}</Fact>
+      <Fact label="Time zone">{routine.timezone}</Fact>
       <Fact label="Agent">
-        {AGENT_LABELS[automation.agent]} {model}
+        {AGENT_LABELS[routine.agent]} {model}
       </Fact>
       <Fact label="Permissions">
-        {PERMISSION_COPY[automation.settings.permission].label}
+        {PERMISSION_COPY[routine.settings.permission].label}
       </Fact>
       <Fact label="Workspace">
-        {automation.workspace === "worktree"
+        {routine.workspace === "worktree"
           ? "New worktree per run"
           : "Project folder"}
       </Fact>
-      <Fact label="Grace">{automation.graceMinutes} min</Fact>
-      <Fact label="Timeout">{automation.timeoutMinutes} min</Fact>
+      <Fact label="Grace">{routine.graceMinutes} min</Fact>
+      <Fact label="Timeout">{routine.timeoutMinutes} min</Fact>
+      <Fact label={`Last ${SPEND_DAYS} days`}>
+        <span
+          className={cn("tabular-nums", !spend && "text-muted-foreground")}
+          title={spend?.priced ? COST_HINT : undefined}
+        >
+          {spend?.text ?? "Nothing used yet"}
+        </span>
+      </Fact>
     </dl>
   );
 }
@@ -125,13 +192,13 @@ function RunRow({
   slug,
   now,
 }: {
-  run: AutomationRun;
+  run: RoutineRun;
   slug: string;
   now: number;
 }) {
   return (
     <tr className="border-t">
-      <td className="py-2 pe-4">
+      <td className="max-w-72 py-2 pe-4 align-top">
         <span
           className={cn("flex items-center gap-2", STATUS_TONE[run.status])}
           title={run.error ?? undefined}
@@ -145,17 +212,38 @@ function RunRow({
           />
           {STATUS_LABELS[run.status]}
         </span>
+        {run.note && (
+          // What a self-paced run said of its pace (FE-172), under the dot.
+          <p
+            className="text-muted-foreground mt-0.5 truncate ps-3.5"
+            title={run.note}
+          >
+            {run.note}
+          </p>
+        )}
       </td>
-      <td className="text-muted-foreground py-2 pe-4">
+      <td className="text-muted-foreground py-2 pe-4 align-top">
         {TRIGGER_LABELS[run.trigger]}
       </td>
-      <td className="py-2 pe-4 tabular-nums">
+      <td className="py-2 pe-4 tabular-nums align-top">
         {fullTime(run.startedAt ?? run.scheduledFor)}
       </td>
-      <td className="text-muted-foreground py-2 pe-4 tabular-nums">
+      <td className="text-muted-foreground py-2 pe-4 tabular-nums align-top">
         {duration(run.startedAt, run.endedAt, now)}
       </td>
-      <td className="py-2 text-end">
+      <td
+        className="text-muted-foreground py-2 pe-4 tabular-nums align-top whitespace-nowrap"
+        title={tokensTitle(run)}
+      >
+        {tokensText(run)}
+      </td>
+      <td
+        className="text-muted-foreground py-2 pe-4 tabular-nums align-top"
+        title={run.costUSD === null ? undefined : COST_HINT}
+      >
+        {run.costUSD === null ? null : costText(run.costUSD)}
+      </td>
+      <td className="py-2 text-end align-top">
         {run.conversation ? (
           <Link
             to="/w/$slug/agents/chat/$conversation"
@@ -171,22 +259,19 @@ function RunRow({
 }
 
 function History({
-  automation,
+  routine,
   slug,
   now,
 }: {
-  automation: Automation;
+  routine: Routine;
   slug: string;
   now: number;
 }) {
-  const runs = useAutomations((state) => state.runs[automation.id]);
-  const error = useAutomations((state) => state.runsError[automation.id]);
+  const runs = useRoutines((state) => state.runs[routine.id]);
+  const error = useRoutines((state) => state.runsError[routine.id]);
   return (
-    <section
-      aria-labelledby="automation-history"
-      className="flex flex-col gap-2"
-    >
-      <h2 id="automation-history" className="text-[13px] font-medium">
+    <section aria-labelledby="routine-history" className="flex flex-col gap-2">
+      <h2 id="routine-history" className="text-[13px] font-medium">
         History
       </h2>
       {error && <p className="text-destructive text-xs/relaxed">{error}</p>}
@@ -214,6 +299,12 @@ function History({
               <th scope="col" className="py-1.5 pe-4 text-start font-normal">
                 Duration
               </th>
+              <th scope="col" className="py-1.5 pe-4 text-start font-normal">
+                Tokens
+              </th>
+              <th scope="col" className="py-1.5 pe-4 text-start font-normal">
+                Cost
+              </th>
               <th scope="col" className="py-1.5 text-end font-normal">
                 <span className="sr-only">Conversation</span>
               </th>
@@ -231,17 +322,17 @@ function History({
 }
 
 function DeleteDialog({
-  automation,
+  routine,
   open,
   onOpenChange,
   onDeleted,
 }: {
-  automation: Automation;
+  routine: Routine;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onDeleted: () => void;
 }) {
-  const remove = useAutomations((state) => state.remove);
+  const remove = useRoutines((state) => state.remove);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (
@@ -253,7 +344,7 @@ function DeleteDialog({
     >
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete {automation.name}?</AlertDialogTitle>
+          <AlertDialogTitle>Delete {routine.name}?</AlertDialogTitle>
           <AlertDialogDescription>
             {error ??
               "Its schedule and run history go. A run still going is stopped. Its conversations stay in Sessions."}
@@ -267,13 +358,13 @@ function DeleteDialog({
             disabled={busy}
             onClick={() => {
               setBusy(true);
-              void remove(automation.id)
+              void remove(routine.id)
                 .then(onDeleted)
                 .catch((failure: unknown) =>
                   setError(
                     failure instanceof Error
                       ? failure.message
-                      : "Could not delete the automation.",
+                      : "Could not delete the routine.",
                   ),
                 )
                 .finally(() => setBusy(false));
@@ -287,16 +378,16 @@ function DeleteDialog({
   );
 }
 
-/** One automation: what it does, when, Run now, and its runs. */
-export function AutomationDetail() {
-  const { slug, id } = useParams({ from: "/_app/w/$slug/automations/$id" });
+/** One routine: what it does, when, Run now, and its runs. */
+export function RoutineDetail() {
+  const { slug, id } = useParams({ from: "/_app/w/$slug/routines/$id" });
   const navigate = useNavigate();
-  const automations = useAutomations((state) => state.automations);
-  const automation = automations?.find((entry) => entry.id === id);
-  const loadRuns = useAutomations((state) => state.loadRuns);
-  const runNow = useAutomations((state) => state.runNow);
-  const openEditor = useAutomations((state) => state.openEditor);
-  const running = useAutomations((state) =>
+  const routines = useRoutines((state) => state.routines);
+  const routine = routines?.find((entry) => entry.id === id);
+  const loadRuns = useRoutines((state) => state.loadRuns);
+  const runNow = useRoutines((state) => state.runNow);
+  const openEditor = useRoutines((state) => state.openEditor);
+  const running = useRoutines((state) =>
     (state.runs[id] ?? []).some(
       (run) => run.status === "running" || run.status === "queued",
     ),
@@ -312,19 +403,19 @@ export function AutomationDetail() {
     void loadRuns(id);
   }, [id, loadRuns]);
 
-  if (!automation) {
+  if (!routine) {
     return (
       <div className="flex min-w-0 flex-1 flex-col">
         <WindowTitlebar>
-          <h1 className={WINDOW_TITLE}>Automations</h1>
+          <h1 className={WINDOW_TITLE}>Routines</h1>
         </WindowTitlebar>
-        {automations && (
+        {routines && (
           <Empty className="py-16">
             <EmptyHeader>
               <EmptyMedia variant="icon">
                 <HugeiconsIcon icon={TimeScheduleIcon} strokeWidth={1.8} />
               </EmptyMedia>
-              <EmptyTitle>Automation not found</EmptyTitle>
+              <EmptyTitle>Routine not found</EmptyTitle>
               <EmptyDescription>
                 It may have been deleted. Pick another from the list.
               </EmptyDescription>
@@ -339,23 +430,23 @@ export function AutomationDetail() {
     <div className="flex h-full min-w-0 flex-1 flex-col">
       <WindowTitlebar className="justify-between">
         <span className="flex min-w-0 items-center gap-3">
-          <h1 className={WINDOW_TITLE}>{automation.name}</h1>
-          <EnabledSwitch automation={automation} />
+          <h1 className={WINDOW_TITLE}>{routine.name}</h1>
+          <EnabledSwitch routine={routine} />
         </span>
         <span className="flex shrink-0 items-center gap-1">
           <Button
             size="icon"
             variant="ghost"
-            aria-label="Edit automation"
+            aria-label="Edit routine"
             title="Edit"
-            onClick={() => openEditor({ kind: "edit", id: automation.id })}
+            onClick={() => openEditor({ kind: "edit", id: routine.id })}
           >
             <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={1.8} />
           </Button>
           <Button
             size="icon"
             variant="ghost"
-            aria-label="Delete automation"
+            aria-label="Delete routine"
             title="Delete"
             onClick={() => setDeleting(true)}
           >
@@ -367,7 +458,7 @@ export function AutomationDetail() {
             title={running ? "A run is already going" : undefined}
             onClick={() => {
               setStarting(true);
-              void runNow(automation.id)
+              void runNow(routine.id)
                 .then((result) => setRunError(result.error ?? null))
                 .finally(() => setStarting(false));
             }}
@@ -388,29 +479,29 @@ export function AutomationDetail() {
               {runError}
             </p>
           )}
-          <Summary automation={automation} now={now} />
-          <AutomationTrust slug={slug} agent={automation.agent} />
+          <Summary routine={routine} now={now} />
+          <RoutineTrust slug={slug} agent={routine.agent} />
           <section
-            aria-labelledby="automation-prompt"
+            aria-labelledby="routine-prompt"
             className="flex flex-col gap-2"
           >
-            <h2 id="automation-prompt" className="text-[13px] font-medium">
+            <h2 id="routine-prompt" className="text-[13px] font-medium">
               Prompt
             </h2>
             <p className="bg-foreground/[0.03] rounded-lg px-3.5 py-3 text-xs/relaxed whitespace-pre-wrap">
-              {automation.prompt}
+              {routine.prompt}
             </p>
           </section>
-          <History automation={automation} slug={slug} now={now} />
+          <History routine={routine} slug={slug} now={now} />
         </div>
       </ScrollArea>
       <DeleteDialog
-        automation={automation}
+        routine={routine}
         open={deleting}
         onOpenChange={setDeleting}
         onDeleted={() => {
           setDeleting(false);
-          void navigate({ to: "/w/$slug/automations", params: { slug } });
+          void navigate({ to: "/w/$slug/routines", params: { slug } });
         }}
       />
     </div>

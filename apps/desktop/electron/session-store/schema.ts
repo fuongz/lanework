@@ -137,6 +137,30 @@ const MIGRATIONS: readonly string[] = [
   CREATE INDEX automation_run_active
     ON automation_run(status) WHERE status IN ('queued', 'running');
   `,
+  // 6: what a self-paced run said of its pace (FE-172).
+  `
+  ALTER TABLE automation_run ADD COLUMN note TEXT;
+  `,
+  // 7: what a run used and cost (FE-177).
+  `
+  ALTER TABLE automation_run ADD COLUMN input_tokens INTEGER;
+  ALTER TABLE automation_run ADD COLUMN output_tokens INTEGER;
+  ALTER TABLE automation_run ADD COLUMN cached_tokens INTEGER;
+  ALTER TABLE automation_run ADD COLUMN cost_usd REAL;
+  `,
+  // 8: automations are called routines.
+  `
+  ALTER TABLE automation RENAME TO routine;
+  ALTER TABLE automation_run RENAME TO routine_run;
+  ALTER TABLE routine_run RENAME COLUMN automation_id TO routine_id;
+  DROP INDEX automation_project;
+  CREATE INDEX routine_project ON routine(project, name);
+  DROP INDEX automation_run_history;
+  CREATE INDEX routine_run_history ON routine_run(routine_id, created_at DESC);
+  DROP INDEX automation_run_active;
+  CREATE INDEX routine_run_active
+    ON routine_run(status) WHERE status IN ('queued', 'running');
+  `,
 ];
 
 /** The version a fully migrated database reports. */

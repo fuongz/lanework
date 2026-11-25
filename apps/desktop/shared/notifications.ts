@@ -8,7 +8,7 @@ const NOTIFICATION_KINDS = [
   "input",
   "pulls",
   "runs",
-  "automations",
+  "routines",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
@@ -35,10 +35,10 @@ const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   /** An orchestration run finished or stopped (FE-136/D6). */
   runs: "push",
   /**
-   * An automation run finished with something to report (FE-99). One whose
+   * A routine run finished with something to report (FE-99). One whose
    * answer is NOTHING_TO_REPORT never notifies.
    */
-  automations: "push",
+  routines: "push",
 };
 
 export function isNotificationKind(value: unknown): value is NotificationKind {

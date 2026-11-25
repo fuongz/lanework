@@ -1,23 +1,37 @@
-import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import {
-  AUTOMATION_DEFAULTS,
-  AUTOMATION_PRESETS,
-  type Automation,
-  type AutomationAgent,
-  type AutomationInput,
-  type AutomationPreset,
-  type AutomationSchedule,
-  type AutomationWorkspace,
-  checkAutomationInput,
-  isTimeZone,
-} from "#/../shared/automations";
+  ArrowDown01Icon,
+  Folder01Icon,
+  GitBranchIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import { effectiveKnobs } from "#/../shared/autonomy";
 import {
-  AGENT_LABELS,
+  agentOfModel,
   type ComposerSettings,
   DEFAULT_SETTINGS,
   settingsFor,
 } from "#/../shared/conversation";
+import {
+  checkRoutineInput,
+  isTimeZone,
+  LOOP_MINUTES_MAX,
+  LOOP_MINUTES_MIN,
+  ROUTINE_DEFAULTS,
+  ROUTINE_PRESETS,
+  type Routine,
+  type RoutineAgent,
+  type RoutineInput,
+  type RoutinePreset,
+  type RoutineSchedule,
+  type RoutineWorkspace,
+} from "#/../shared/routines";
+import { SegmentedControl } from "#/components/shared/common/segmented-control";
+import {
+  ModelMenu,
+  PermissionMenu,
+  PILL,
+} from "#/components/shared/conversation/composer.menus";
 import {
   isoToZoned,
   machineTimeZone,
@@ -25,16 +39,17 @@ import {
   timeZones,
   WEEKDAY_LABELS,
   zonedToIso,
-} from "#/components/shared/automations/automation-format";
-import { AutomationTrust } from "#/components/shared/automations/automation-trust";
-import { SegmentedControl } from "#/components/shared/common/segmented-control";
-import {
-  ModelMenu,
-  PermissionMenu,
-} from "#/components/shared/conversation/composer.menus";
+} from "#/components/shared/routines/routine-format";
+import { RoutineTrust } from "#/components/shared/routines/routine-trust";
 import { SettingsPage } from "#/components/shared/settings/settings-page";
 import { Button } from "#/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "#/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "#/components/ui/dropdown-menu";
 import { Input } from "#/components/ui/input";
 import {
   Select,
@@ -45,39 +60,57 @@ import {
 } from "#/components/ui/select";
 import { Textarea } from "#/components/ui/textarea";
 import { cn } from "#/lib/utils";
-import { useAutomations } from "#/stores/automations";
 import { useProjectAutonomy } from "#/stores/autonomy";
+import { useRoutines } from "#/stores/routines";
 
-type ScheduleKind = AutomationSchedule["kind"];
+type ScheduleKind = RoutineSchedule["kind"];
 
 const SCHEDULE_KINDS = [
   { value: "preset" as const, label: "Repeat" },
   { value: "cron" as const, label: "Cron" },
   { value: "once" as const, label: "Once" },
+  { value: "loop" as const, label: "Loop" },
 ];
 
-const AGENT_OPTIONS = [
-  { value: "claude" as const, label: AGENT_LABELS.claude },
-  { value: "codex" as const, label: AGENT_LABELS.codex },
-];
+/** A new loop's pace when its agent says nothing (FE-172). */
+const LOOP_DEFAULT_MINUTES = 60;
 
-const WORKSPACE_LABELS: Record<AutomationWorkspace, string> = {
-  current: "Project folder",
-  worktree: "New worktree",
+/** Where a run works, as the composer's pills read. */
+const WORKSPACES: Record<
+  RoutineWorkspace,
+  { label: string; description: string; icon: typeof Folder01Icon }
+> = {
+  current: {
+    label: "Project folder",
+    description: "Works in this project's folder, as you do.",
+    icon: Folder01Icon,
+  },
+  worktree: {
+    label: "New worktree",
+    description:
+      "A fresh worktree per run. One the agent changed is kept for you to review.",
+    icon: GitBranchIcon,
+  },
 };
 
-/** A conversation's other CLI never runs an automation. */
+/** A conversation's other CLI never runs a routine. */
 const NOT_HEADLESS = ["opencode"] as const;
 
 /** The form as typed: numbers stay text until Save reads them. */
 interface Draft {
+  /**
+   * A routine's name as saved, kept while its prompt is: there is no
+   * field for it, a name is the start of the prompt.
+   */
   name: string;
+  /** The prompt `name` was saved with. */
+  namedPrompt: string;
   prompt: string;
-  agent: AutomationAgent;
+  agent: RoutineAgent;
   settings: ComposerSettings;
-  workspace: AutomationWorkspace;
+  workspace: RoutineWorkspace;
   kind: ScheduleKind;
-  preset: AutomationPreset;
+  preset: RoutinePreset;
   /** `HH:MM`, for every preset but hourly. */
   time: string;
   /** Minutes past the hour, for hourly. */
@@ -86,6 +119,8 @@ interface Draft {
   cron: string;
   /** A `datetime-local` value, read in `timezone`. */
   once: string;
+  /** A loop's pace when its agent says nothing, in minutes. */
+  loop: string;
   timezone: string;
   grace: string;
   timeout: string;
@@ -100,6 +135,7 @@ function blankDraft(): Draft {
   const tomorrow = new Date(Date.now() + 24 * 3600_000);
   return {
     name: "",
+    namedPrompt: "",
     prompt: "",
     agent: "claude",
     settings: settingsFor("claude", DEFAULT_SETTINGS),
@@ -111,31 +147,34 @@ function blankDraft(): Draft {
     weekday: 1,
     cron: "0 9 * * 1-5",
     once: `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}T09:00`,
+    loop: String(LOOP_DEFAULT_MINUTES),
     timezone: machineTimeZone(),
-    grace: String(AUTOMATION_DEFAULTS.graceMinutes),
-    timeout: String(AUTOMATION_DEFAULTS.timeoutMinutes),
+    grace: String(ROUTINE_DEFAULTS.graceMinutes),
+    timeout: String(ROUTINE_DEFAULTS.timeoutMinutes),
     enabled: true,
   };
 }
 
-function draftFrom(automation: Automation): Draft {
+function draftFrom(routine: Routine): Draft {
   const draft: Draft = {
     ...blankDraft(),
-    name: automation.name,
-    prompt: automation.prompt,
-    agent: automation.agent,
-    settings: automation.settings,
-    workspace: automation.workspace,
-    kind: automation.schedule.kind,
-    timezone: automation.timezone,
-    grace: String(automation.graceMinutes),
-    timeout: String(automation.timeoutMinutes),
-    enabled: automation.enabled,
+    name: routine.name,
+    namedPrompt: routine.prompt,
+    prompt: routine.prompt,
+    agent: routine.agent,
+    settings: routine.settings,
+    workspace: routine.workspace,
+    kind: routine.schedule.kind,
+    timezone: routine.timezone,
+    grace: String(routine.graceMinutes),
+    timeout: String(routine.timeoutMinutes),
+    enabled: routine.enabled,
   };
-  const schedule = automation.schedule;
+  const schedule = routine.schedule;
   if (schedule.kind === "cron") draft.cron = schedule.expr;
+  if (schedule.kind === "loop") draft.loop = String(schedule.minutes);
   if (schedule.kind === "once")
-    draft.once = isoToZoned(schedule.at, automation.timezone) || draft.once;
+    draft.once = isoToZoned(schedule.at, routine.timezone) || draft.once;
   if (schedule.kind === "preset") {
     draft.preset = schedule.preset;
     draft.minute = String(schedule.minute);
@@ -145,6 +184,25 @@ function draftFrom(automation: Automation): Draft {
   return draft;
 }
 
+/** How long a name taken from the prompt may be. */
+const NAME_FROM_PROMPT_MAX = 60;
+
+/**
+ * A routine's name, from the start of its `prompt`: the first line
+ * with words in it, cut at a word near {@link NAME_FROM_PROMPT_MAX}.
+ */
+function nameFromPrompt(prompt: string): string {
+  const line =
+    prompt
+      .split("\n")
+      .map((text) => text.replace(/^(\s*([#>*-]+|\d+[.)])\s+)+/, "").trim())
+      .find((text) => /[\p{L}\p{N}]/u.test(text)) ?? "";
+  if (line.length <= NAME_FROM_PROMPT_MAX) return line;
+  const cut = line.slice(0, NAME_FROM_PROMPT_MAX);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > 20 ? cut.slice(0, space) : cut).replace(/[\s,.;:(-]+$/, "")}…`;
+}
+
 /** A whole number typed in `text`, or null. */
 function wholeNumber(text: string): number | null {
   const trimmed = text.trim();
@@ -152,12 +210,20 @@ function wholeNumber(text: string): number | null {
 }
 
 /** The schedule the draft describes, or why it does not. */
-function readSchedule(draft: Draft): AutomationSchedule | string {
+function readSchedule(draft: Draft): RoutineSchedule | string {
   if (draft.kind === "cron") {
     const expr = draft.cron.trim();
     return expr.split(/\s+/).length === 5
       ? { kind: "cron", expr }
       : "A cron expression has five fields: minute, hour, day, month and weekday.";
+  }
+  if (draft.kind === "loop") {
+    const minutes = wholeNumber(draft.loop);
+    return minutes !== null &&
+      minutes >= LOOP_MINUTES_MIN &&
+      minutes <= LOOP_MINUTES_MAX
+      ? { kind: "loop", minutes }
+      : `A loop runs every ${LOOP_MINUTES_MIN} to ${LOOP_MINUTES_MAX} minutes.`;
   }
   if (draft.kind === "once") {
     if (!isTimeZone(draft.timezone)) return "Pick a known time zone.";
@@ -181,14 +247,19 @@ function readSchedule(draft: Draft): AutomationSchedule | string {
 }
 
 /**
- * What Save sends, through the check main applies (`checkAutomationInput`),
+ * What Save sends, through the check main applies (`checkRoutineInput`),
  * or the first reason it cannot be sent.
  */
 function readDraft(
   draft: Draft,
-): { input: AutomationInput } | { problem: string } {
-  if (!draft.name.trim()) return { problem: "Name it to save." };
+): { input: RoutineInput } | { problem: string } {
   if (!draft.prompt.trim()) return { problem: "Write the prompt it runs." };
+  // NOTE: An edit that leaves the prompt alone keeps the name it had.
+  const name =
+    draft.name.trim() && draft.prompt === draft.namedPrompt
+      ? draft.name
+      : nameFromPrompt(draft.prompt);
+  if (!name) return { problem: "Write the prompt it runs." };
   const schedule = readSchedule(draft);
   if (typeof schedule === "string") return { problem: schedule };
   if (!isTimeZone(draft.timezone))
@@ -199,8 +270,8 @@ function readDraft(
   const timeout = wholeNumber(draft.timeout);
   if (timeout === null || timeout < 1 || timeout > 24 * 60)
     return { problem: "Timeout is 1 to 1440 minutes." };
-  const input = checkAutomationInput({
-    name: draft.name,
+  const input = checkRoutineInput({
+    name,
     prompt: draft.prompt,
     agent: draft.agent,
     settings: draft.settings,
@@ -210,7 +281,7 @@ function readDraft(
     graceMinutes: grace,
     timeoutMinutes: timeout,
     enabled: draft.enabled,
-  } satisfies AutomationInput);
+  } satisfies RoutineInput);
   return input
     ? { input }
     : { problem: "Pick a model this agent offers, then save." };
@@ -263,7 +334,10 @@ function MinutesInput({
   );
 }
 
-/** When it runs: a preset, a cron expression or one date-time. */
+/**
+ * When it runs: a preset, a cron expression, one date-time, or a loop its
+ * agent paces.
+ */
 function ScheduleEditor({
   draft,
   update,
@@ -287,16 +361,16 @@ function ScheduleEditor({
             <Select
               value={draft.preset}
               onValueChange={(value) =>
-                update({ preset: value as AutomationPreset })
+                update({ preset: value as RoutinePreset })
               }
             >
               <SelectTrigger id={`${id}-preset`} className="min-w-32">
                 <SelectValue>
-                  {(value: AutomationPreset) => PRESET_LABELS[value]}
+                  {(value: RoutinePreset) => PRESET_LABELS[value]}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                {AUTOMATION_PRESETS.map((preset) => (
+                {ROUTINE_PRESETS.map((preset) => (
                   <SelectItem key={preset} value={preset}>
                     {PRESET_LABELS[preset]}
                   </SelectItem>
@@ -375,59 +449,78 @@ function ScheduleEditor({
           />
         </Field>
       )}
+      {draft.kind === "loop" && (
+        <Field
+          label="Run again after"
+          hint={`The agent sets its own pace: it names the next run with schedule_next, or ends the loop with schedule_stop. This is the wait when it says nothing (${LOOP_MINUTES_MIN} to ${LOOP_MINUTES_MAX} minutes).`}
+          htmlFor={`${id}-loop`}
+        >
+          <span className="flex items-center gap-2">
+            <Input
+              id={`${id}-loop`}
+              inputMode="numeric"
+              value={draft.loop}
+              onChange={(event) => update({ loop: event.target.value })}
+              className="w-20 text-right tabular-nums"
+            />
+            <span className="text-muted-foreground text-xs">min</span>
+          </span>
+        </Field>
+      )}
     </div>
   );
 }
 
 /**
- * New and Edit: one dialog, the conductor dialog's density. Save goes
+ * New and Edit: one dialog. The prompt is written as in the chat's
+ * composer, its model, permissions and workspace as pills under it. Save goes
  * through the check main applies, so what it sends is what main accepts.
  *
  * Mount it with a `key` per opening, so each one starts from its own draft.
  */
-export function AutomationForm({
-  automation,
+export function RoutineForm({
+  routine,
   onClose,
   onSaved,
 }: {
   /** The one to edit; absent for a new one. */
-  automation?: Automation;
+  routine?: Routine;
   onClose: () => void;
-  onSaved: (automation: Automation) => void;
+  onSaved: (routine: Routine) => void;
 }) {
   const id = useId();
-  const create = useAutomations((state) => state.create);
-  const save = useAutomations((state) => state.update);
+  const create = useRoutines((state) => state.create);
+  const save = useRoutines((state) => state.update);
   const [draft, setDraft] = useState<Draft>(() =>
-    automation ? draftFrom(automation) : blankDraft(),
+    routine ? draftFrom(routine) : blankDraft(),
   );
-  // A new automation starts in the project's dial permission when it has
+  // A new routine starts in the project's dial permission when it has
   // one (PD-08), until the menu is used. The dial may land after the open.
-  const slug = useAutomations((state) => state.slug);
-  const dial = useProjectAutonomy(automation ? null : slug);
+  const slug = useRoutines((state) => state.slug);
+  const dial = useProjectAutonomy(routine ? null : slug);
   const [permissionPicked, setPermissionPicked] = useState(false);
   const dialPermission = dial ? effectiveKnobs(dial).permission : null;
   useEffect(() => {
-    if (automation || permissionPicked || !dialPermission) return;
+    if (routine || permissionPicked || !dialPermission) return;
     setDraft((current) => ({
       ...current,
       settings: { ...current.settings, permission: dialPermission },
     }));
-  }, [automation, permissionPicked, dialPermission]);
+  }, [routine, permissionPicked, dialPermission]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const zones = useMemo(() => timeZones(), []);
   const update = (change: Partial<Draft>) =>
     setDraft((current) => ({ ...current, ...change }));
   const read = readDraft(draft);
-  const title = automation ? `Edit ${automation.name}` : "New automation";
+  const title = routine ? `Edit ${routine.name}` : "New routine";
 
   const submit = async () => {
     if (!("input" in read) || busy) return;
     setBusy(true);
     try {
-      const saved = automation
-        ? await save(automation.id, read.input)
+      const saved = routine
+        ? await save(routine.id, read.input)
         : await create(read.input);
       setError(null);
       onSaved(saved);
@@ -435,40 +528,12 @@ export function AutomationForm({
       setError(
         failure instanceof Error
           ? failure.message
-          : "Could not save the automation.",
+          : "Could not save the routine.",
       );
     } finally {
       setBusy(false);
     }
   };
-
-  const task = (
-    <div className="flex flex-col gap-4">
-      <Field label="Name" htmlFor={`${id}-name`}>
-        <Input
-          id={`${id}-name`}
-          value={draft.name}
-          maxLength={200}
-          placeholder="Morning triage"
-          onChange={(event) => update({ name: event.target.value })}
-        />
-      </Field>
-      <Field
-        label="Prompt"
-        hint="Sent as the first message of a new conversation on every run. Lanework adds one line: with nothing to report, the agent answers NOTHING_TO_REPORT and the run ends quietly."
-        htmlFor={`${id}-prompt`}
-      >
-        <Textarea
-          id={`${id}-prompt`}
-          value={draft.prompt}
-          maxLength={20_000}
-          placeholder="Read the open issues and summarise what changed since yesterday."
-          onChange={(event) => update({ prompt: event.target.value })}
-          className="max-h-64 min-h-24"
-        />
-      </Field>
-    </div>
-  );
 
   return (
     <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
@@ -488,99 +553,30 @@ export function AutomationForm({
               searchable={false}
               compact
               sections={[
-                { title: "Task", hideTitle: true, content: task },
                 {
-                  title: "Agent",
-                  rows: [
-                    {
-                      label: "Agent",
-                      description: "The CLI that runs it.",
-                      control: (
-                        <SegmentedControl
-                          label="Agent"
-                          value={draft.agent}
-                          options={AGENT_OPTIONS}
-                          onChange={(agent) =>
-                            update({
-                              agent,
-                              settings: settingsFor(agent, draft.settings),
-                            })
-                          }
+                  title: "Task",
+                  hideTitle: true,
+                  content: (
+                    <div className="flex flex-col gap-4">
+                      <Field
+                        label="Prompt"
+                        hint="Sent as the first message of a new conversation on every run. Lanework adds one line: with nothing to report, the agent answers NOTHING_TO_REPORT and the run ends quietly."
+                        htmlFor={`${id}-prompt`}
+                      >
+                        <PromptBox
+                          id={`${id}-prompt`}
+                          draft={draft}
+                          update={update}
+                          onPermission={() => setPermissionPicked(true)}
                         />
-                      ),
-                    },
-                    {
-                      label: "Model",
-                      description:
-                        "What it thinks and replies with, and how hard.",
-                      control: (
-                        <ModelMenu
-                          side="bottom"
-                          agent={draft.agent}
-                          exclude={NOT_HEADLESS}
-                          settings={draft.settings}
-                          onChange={(next) =>
-                            update({
-                              settings: { ...draft.settings, ...next },
-                            })
-                          }
-                        />
-                      ),
-                    },
-                    {
-                      label: "Permissions",
-                      description:
-                        "What it may do without asking. Nobody is there to answer a run.",
-                      control: (
-                        <PermissionMenu
-                          side="bottom"
-                          permission={draft.settings.permission}
-                          onChange={(permission) => {
-                            setPermissionPicked(true);
-                            update({
-                              settings: { ...draft.settings, permission },
-                            });
-                          }}
-                        />
-                      ),
-                    },
-                    {
-                      label: "Workspace",
-                      description:
-                        "Where it works: this project's folder, or a fresh worktree. A worktree the agent changed is kept for you to review.",
-                      control: (
-                        <Select
-                          value={draft.workspace}
-                          onValueChange={(value) =>
-                            update({ workspace: value as AutomationWorkspace })
-                          }
-                        >
-                          <SelectTrigger
-                            aria-label="Workspace"
-                            className="min-w-36"
-                          >
-                            <SelectValue>
-                              {(value: AutomationWorkspace) =>
-                                WORKSPACE_LABELS[value]
-                              }
-                            </SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            {(["current", "worktree"] as const).map((value) => (
-                              <SelectItem key={value} value={value}>
-                                {WORKSPACE_LABELS[value]}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      ),
-                    },
-                  ],
+                      </Field>
+                    </div>
+                  ),
                 },
                 {
                   title: "Trust",
                   hideTitle: true,
-                  content: <AutomationTrust slug={slug} agent={draft.agent} />,
+                  content: <RoutineTrust slug={slug} agent={draft.agent} />,
                 },
                 {
                   title: "Schedule",
@@ -665,11 +661,133 @@ export function AutomationForm({
               size="sm"
               disabled={busy || !("input" in read)}
             >
-              {busy ? "Saving…" : automation ? "Save" : "Create"}
+              {busy ? "Saving…" : routine ? "Save" : "Create"}
             </Button>
           </footer>
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * The prompt as the chat's composer writes one: the text, then its model
+ * (any CLI's, which picks the agent), permissions and workspace as pills.
+ */
+function PromptBox({
+  id,
+  draft,
+  update,
+  onPermission,
+}: {
+  id: string;
+  draft: Draft;
+  update: (change: Partial<Draft>) => void;
+  /** The person picked a permission: the project's dial no longer leads. */
+  onPermission: () => void;
+}) {
+  return (
+    <div className="border-input focus-within:border-ring/60 bg-background flex flex-col rounded-xl border transition-colors">
+      <Textarea
+        id={id}
+        value={draft.prompt}
+        maxLength={20_000}
+        placeholder="Read the open issues and summarise what changed since yesterday."
+        onChange={(event) => update({ prompt: event.target.value })}
+        className="max-h-80 min-h-32 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 dark:bg-transparent"
+      />
+      <div className="flex flex-wrap items-center gap-0.5 px-1.5 pb-1.5">
+        <ModelMenu
+          side="top"
+          exclude={NOT_HEADLESS}
+          settings={draft.settings}
+          onChange={(next) => {
+            const settings = { ...draft.settings, ...next };
+            const agent = agentOfModel(settings.model);
+            update({
+              agent: agent === "codex" ? "codex" : "claude",
+              settings,
+            });
+          }}
+        />
+        <PermissionMenu
+          side="top"
+          permission={draft.settings.permission}
+          onChange={(permission) => {
+            onPermission();
+            update({ settings: { ...draft.settings, permission } });
+          }}
+        />
+        <WorkspaceMenu
+          workspace={draft.workspace}
+          onChange={(workspace) => update({ workspace })}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Where a run works, as a pill beside the permission one. */
+function WorkspaceMenu({
+  workspace,
+  onChange,
+}: {
+  workspace: RoutineWorkspace;
+  onChange: (workspace: RoutineWorkspace) => void;
+}) {
+  const current = WORKSPACES[workspace];
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={`Workspace: ${current.label}`}
+        className={PILL}
+      >
+        <HugeiconsIcon
+          icon={current.icon}
+          className="size-3.5"
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
+        <span>{current.label}</span>
+        <HugeiconsIcon
+          icon={ArrowDown01Icon}
+          className="text-muted-foreground size-3.5"
+          strokeWidth={2}
+          aria-hidden="true"
+        />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        side="top"
+        align="start"
+        sideOffset={6}
+        className="flex w-[22rem] flex-col gap-1 p-1.5"
+      >
+        {(["current", "worktree"] as const).map((entry) => (
+          <DropdownMenuItem
+            key={entry}
+            onClick={() => onChange(entry)}
+            className={cn(
+              "items-start gap-3 rounded-lg px-3 py-2.5",
+              entry === workspace && "bg-foreground/[0.08]",
+            )}
+          >
+            <HugeiconsIcon
+              icon={WORKSPACES[entry].icon}
+              className="mt-0.5 size-4 shrink-0"
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-[13px] font-medium">
+                {WORKSPACES[entry].label}
+              </span>
+              <span className="text-muted-foreground text-xs leading-snug">
+                {WORKSPACES[entry].description}
+              </span>
+            </span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

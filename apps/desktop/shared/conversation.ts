@@ -1064,6 +1064,11 @@ export interface SendRequest {
  */
 export type StartRequest = Omit<SendRequest, "conversation"> & {
   conductor?: string;
+  /**
+   * The card this conversation is started to work (FE-175): Assign to agent
+   * names it, and its agent may then use the board tools unasked.
+   */
+  card?: string;
 };
 
 /**

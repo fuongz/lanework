@@ -1,20 +1,20 @@
-// When an automation runs (FE-99): its slots, read with croner in the
-// automation's own zone, and what to do with the ones that came due.
+// When a routine runs (FE-99): its slots, read with croner in the
+// routine's own zone, and what to do with the ones that came due.
 //
 // Pure: no Electron, no store, no clock of its own. The scheduler passes the
 // time; a script can call `planSlots` with any dates (V3).
 
 import { Cron } from "croner";
 import {
-  AUTOMATION_RUNS_KEPT,
-  type Automation,
-  type AutomationTrigger,
+  ROUTINE_RUNS_KEPT,
+  type Routine,
+  type RoutineTrigger,
   scheduleCron,
-} from "../../../shared/automations";
+} from "../../../shared/routines";
 
 /** What the slots depend on. */
-export type SlotAutomation = Pick<
-  Automation,
+export type SlotRoutine = Pick<
+  Routine,
   "schedule" | "timezone" | "graceMinutes"
 >;
 
@@ -27,10 +27,10 @@ export const ON_TIME_MS = 2 * 60_000;
 /** What {@link planSlots} decided. */
 export interface SlotPlan {
   /** The one slot to run now, or null. */
-  run: { slot: string; trigger: Exclude<AutomationTrigger, "manual"> } | null;
+  run: { slot: string; trigger: Exclude<RoutineTrigger, "manual"> } | null;
   /**
    * Slots that came due and will not run, oldest first, ISO. Capped at
-   * {@link AUTOMATION_RUNS_KEPT}: the history keeps no more.
+   * {@link ROUTINE_RUNS_KEPT}: the history keeps no more.
    */
   skipped: string[];
   /** The next slot after `now`, ISO; null when there is none. */
@@ -44,33 +44,42 @@ export interface SlotPlan {
  *
  * @throws When croner refuses the expression or the zone.
  */
-export function cronOf(automation: SlotAutomation): Cron | null {
-  const expr = scheduleCron(automation.schedule);
+export function cronOf(routine: SlotRoutine): Cron | null {
+  const expr = scheduleCron(routine.schedule);
   if (expr === null) return null;
-  return new Cron(expr, { timezone: automation.timezone, paused: true });
+  return new Cron(expr, { timezone: routine.timezone, paused: true });
 }
 
 /**
- * Whether croner accepts `automation`'s schedule.
+ * Whether croner accepts `routine`'s schedule.
  *
  * @returns null when it does, else croner's reason.
  */
-export function scheduleError(automation: SlotAutomation): string | null {
+export function scheduleError(routine: SlotRoutine): string | null {
   try {
-    cronOf(automation);
+    cronOf(routine);
     return null;
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
   }
 }
 
-/** The first slot strictly after `now`, ISO, or null. */
-export function nextSlot(automation: SlotAutomation, now: Date): string | null {
-  if (automation.schedule.kind === "once") {
-    const at = Date.parse(automation.schedule.at);
+/**
+ * The first slot strictly after `now`, ISO, or null. A `loop` has no slots:
+ * its default minutes after `now`.
+ */
+export function nextSlot(routine: SlotRoutine, now: Date): string | null {
+  // FE-172: a self-paced loop's first run, or its next without a word from
+  // the agent, is its own default after `now`.
+  if (routine.schedule.kind === "loop")
+    return new Date(
+      now.getTime() + routine.schedule.minutes * 60_000,
+    ).toISOString();
+  if (routine.schedule.kind === "once") {
+    const at = Date.parse(routine.schedule.at);
     return at > now.getTime() ? new Date(at).toISOString() : null;
   }
-  return cronOf(automation)?.nextRun(now)?.toISOString() ?? null;
+  return cronOf(routine)?.nextRun(now)?.toISOString() ?? null;
 }
 
 /**
@@ -81,16 +90,16 @@ export function nextSlot(automation: SlotAutomation, now: Date): string | null {
  * and only the newest ones are ever recorded.
  */
 function dueSlots(
-  automation: SlotAutomation,
+  routine: SlotRoutine,
   since: Date,
   now: Date,
   max: number,
 ): Date[] {
-  if (automation.schedule.kind === "once") {
-    const at = Date.parse(automation.schedule.at);
+  if (routine.schedule.kind === "once") {
+    const at = Date.parse(routine.schedule.at);
     return at > since.getTime() && at <= now.getTime() ? [new Date(at)] : [];
   }
-  const cron = cronOf(automation);
+  const cron = cronOf(routine);
   if (!cron) return [];
   // `previousRuns` is exclusive of its reference: one ms on takes in `now`.
   return cron
@@ -113,18 +122,18 @@ function dueSlots(
  * @throws When croner refuses the schedule.
  */
 export function planSlots(
-  automation: SlotAutomation,
+  routine: SlotRoutine,
   since: Date,
   now: Date,
 ): SlotPlan {
-  const due = dueSlots(automation, since, now, AUTOMATION_RUNS_KEPT + 1);
-  const next = nextSlot(automation, now);
+  const due = dueSlots(routine, since, now, ROUTINE_RUNS_KEPT + 1);
+  const next = nextSlot(routine, now);
   const [latest, ...older] = due;
   if (!latest) return { run: null, skipped: [], next };
   const late = now.getTime() - latest.getTime();
-  const inGrace = late <= automation.graceMinutes * 60_000;
+  const inGrace = late <= routine.graceMinutes * 60_000;
   const skipped = (inGrace ? older : due)
-    .slice(0, AUTOMATION_RUNS_KEPT)
+    .slice(0, ROUTINE_RUNS_KEPT)
     .reverse()
     .map((slot) => slot.toISOString());
   return {

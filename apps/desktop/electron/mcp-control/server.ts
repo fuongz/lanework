@@ -7,6 +7,8 @@
 //   conversation it started: `LANEWORK_SESSIONS_TOKEN` (`SESSIONS_ENV.token`)
 //   serves the conductor tools and the `any` ones; `LANEWORK_CONTROL_TOKEN`
 //   (`CONTROL_ENV.token`) the lead's run tools. Neither: no tools at all.
+//   `LANEWORK_CONTROL_AS` narrows the sessions token: `conductor` adds the
+//   conductor tools, `routine` (FE-172) the loop's schedule_* ones.
 // - A call is checked against the contract's shape (`checkShape`, as
 //   lanework-kit does), then sent through `../control/client.ts` exactly as
 //   the CLI sends it: sessions actions with the sessions token, run actions
@@ -49,6 +51,8 @@ const INSTRUCTIONS_BOTH =
   "lanework-control reaches the Lanework app that started this conversation: sessions_* start and follow separate sessions of your own, memory_* keep what you know of this project across conversations, conductors_create saves a conductor. As this run's lead: run_list, then run_delegate workers, then end your turn. Lanework sends you a turn when a task or session needs you; do not poll, and never loop on run_wait.";
 const INSTRUCTIONS_ANY =
   "lanework-control reaches the Lanework app that started this conversation: conductors_create saves a conductor, models_list lists the models a task may name, thread_read reads back the turns a handoff left out.";
+const INSTRUCTIONS_ROUTINE =
+  "lanework-control reaches the Lanework app that runs this routine: near the end of the run, call schedule_next once with when it should run next (minutes, and a short reason), or schedule_stop when the work it watches is done. thread_read reads back the turns a handoff left out.";
 const INSTRUCTIONS_NONE =
   "lanework-control is unavailable here: only a conversation the Lanework app started has its credentials, so this server offers no tools.";
 
@@ -63,6 +67,11 @@ export interface ControlEnv {
    * not.
    */
   conductor: boolean;
+  /**
+   * The app says this is a self-paced routine run's process
+   * (`LANEWORK_CONTROL_AS=routine`, FE-172): it may set its loop's pace.
+   */
+  routine: boolean;
 }
 
 /** {@link ControlEnv} from `env`; an empty value counts as unset. */
@@ -72,6 +81,7 @@ export function controlEnvOf(env: NodeJS.ProcessEnv): ControlEnv {
     sessionsToken: env[SESSIONS_ENV.token] || null,
     controlToken: env[CONTROL_ENV.token] || null,
     conductor: env.LANEWORK_CONTROL_AS === "conductor",
+    routine: env.LANEWORK_CONTROL_AS === "routine",
   };
 }
 
@@ -79,16 +89,21 @@ export function controlEnvOf(env: NodeJS.ProcessEnv): ControlEnv {
  * Which tools this process gets: none without a sessions or control token;
  * the conductor's only on a conductor's process or a lead's (a lead is a
  * conductor leading a run); the `any` ones (conductors_create, models_list)
- * on every conversation the app started.
+ * on every conversation the app started; the routine's (schedule_next,
+ * schedule_stop) on a routine run's process only (FE-172).
+ *
+ * NOTE: The role only lists the tools; the app still checks each call
+ * against the live run, so a forged env gains nothing.
  */
 export function controlRolesOf(
   env: ControlEnv,
-): { conductor: boolean; lead: boolean } | null {
+): { conductor: boolean; lead: boolean; routine: boolean } | null {
   if (env.sessionsToken === null && env.controlToken === null) return null;
   const lead = env.controlToken !== null;
   return {
     conductor: env.sessionsToken !== null && (env.conductor || lead),
     lead,
+    routine: env.sessionsToken !== null && env.routine,
   };
 }
 
@@ -158,6 +173,7 @@ export class ControlMcpSession {
     if (roles.conductor && roles.lead) return INSTRUCTIONS_BOTH;
     if (roles.lead) return INSTRUCTIONS_LEAD;
     if (roles.conductor) return INSTRUCTIONS_CONDUCTOR;
+    if (roles.routine) return INSTRUCTIONS_ROUTINE;
     return INSTRUCTIONS_ANY;
   }
 

@@ -55,6 +55,7 @@ import {
   type ConnectorPlan,
   connectorPlan,
   type EngineTarget,
+  type EngineUsage,
   engineTap,
   leadGuarded,
   safely,
@@ -63,6 +64,7 @@ import {
 } from "../orchestration/engine-tap";
 import { autoAllow, engineMayAnswer, noteSubject } from "../permissions/gate";
 import { claudeSubject } from "../permissions/matcher";
+import { cardRunMayUse } from "./card-runs";
 import type { ClaudeCli } from "./claude-cli";
 import { claudeJsonFor, isClaudeTrusted } from "./claude-trust";
 import { CodexEngine } from "./codex-engine";
@@ -200,7 +202,8 @@ interface EngineDeps {
  * edit tools: it delegates instead.
  *
  * A process with the control tools runs their safe ones without asking: a
- * conductor's all of its own, any other `thread_read` (`claudeControlAllowArgs`).
+ * conductor's all of its own, any other `thread_read` (`claudeControlAllowArgs`),
+ * an `routine` run's (FE-172) also its schedule_* tools.
  *
  * `connectors` (FE-166) are the MCP servers this process starts without, as
  * `connectorPlan` says: fixed for the process's life, never changed mid-session.
@@ -219,6 +222,7 @@ export function engineArgs(
   kitMcp: KitMcp | null = null,
   conductor = false,
   connectors: ConnectorPlan | null = null,
+  routine = false,
 ): string[] {
   const settings = checkSettings(value);
   if (!settings || !isAgentSessionId(id)) throw new Error("Unknown settings");
@@ -256,7 +260,9 @@ export function engineArgs(
   if (guarded) args.push("--disallowedTools", [...WRITE_TOOLS].join(","));
   // FE-168/D2: an older Claude Code asks before thread_read as before.
   if (controlMcp)
-    args.push(...claudeControlAllowArgs(conductor, !belowMinimumNow("claude")));
+    args.push(
+      ...claudeControlAllowArgs(conductor, !belowMinimumNow("claude"), routine),
+    );
   if (!connectors) return args;
   // FE-166: a run worker holds only the servers `--mcp-config` names.
   if (connectors.strict) args.push("--strict-mcp-config");
@@ -307,6 +313,24 @@ function permissionOf(mode: unknown): Permission | null {
  * `error_max_turns`, a usage limit) may carry none: what it says instead
  * (FE-90/D3).
  */
+/**
+ * A `result` line's tokens (FE-177), as the Usage tooltip counts them: the
+ * cache writes with the input. Null when it carries none.
+ */
+export function resultUsage(value: unknown): EngineUsage | null {
+  if (!value || typeof value !== "object") return null;
+  const usage = value as Record<string, unknown>;
+  const count = (key: string) =>
+    typeof usage[key] === "number" && Number.isFinite(usage[key])
+      ? Math.max(0, usage[key] as number)
+      : 0;
+  return {
+    input: count("input_tokens") + count("cache_creation_input_tokens"),
+    output: count("output_tokens"),
+    cached: count("cache_read_input_tokens"),
+  };
+}
+
 function resultText(line: Record<string, unknown>): string {
   const text = typeof line.result === "string" ? line.result : "";
   if (line.is_error !== true || text.trim()) return text;
@@ -515,6 +539,12 @@ class Engine implements ConversationEngine {
 
   /** The last state sent, so an unchanged one is not sent again. */
   told = "";
+  /**
+   * The process's `total_cost_usd` so far (FE-177): Claude adds every turn
+   * of a process into it, so a turn costs the difference. A new process
+   * starts again from 0.
+   */
+  costSeen = 0;
 
   emitState() {
     const engine = this.state();
@@ -564,6 +594,7 @@ class Engine implements ConversationEngine {
     settings: ComposerSettings,
     conductor = false,
     inherited?: readonly string[],
+    routine = false,
   ): Promise<void> {
     const cli = await this.deps.cli();
     const spawn = this.deps.spawn ?? spawnChild;
@@ -590,6 +621,11 @@ class Engine implements ConversationEngine {
     // FE-155: the conductor tools only on a conductor's process.
     const asConductor = conductor && Boolean(env[SESSIONS_ENV.token]);
     if (asConductor) env[CONTROL_ROLE_ENV] = "conductor";
+    // FE-172: a routine run's process lists its schedule_* tools. Never
+    // both: a conductor's turn is not a routine's.
+    const asRoutine =
+      !asConductor && routine && Boolean(env[SESSIONS_ENV.token]);
+    if (asRoutine) env[CONTROL_ROLE_ENV] = "routine";
     const guarded = leadGuarded(target);
     // FE-158: this build's lwk for the kit, unless its backend is ts.
     const kit = kitMcpFor();
@@ -619,10 +655,12 @@ class Engine implements ConversationEngine {
         kit,
         asConductor,
         connectors,
+        asRoutine,
       ),
       { cwd: this.folder, env, stdio: ["pipe", "pipe", "pipe"] },
     );
     this.child = child;
+    this.costSeen = 0;
     this.applied = settings;
     this.guarded = guarded;
     this.starting = true;
@@ -857,6 +895,7 @@ class Engine implements ConversationEngine {
       }
       case "result": {
         const text = resultText(line);
+        const costUSD = this.turnCost(line.total_cost_usd);
         safely(() =>
           engineTap().result?.({
             project: this.project,
@@ -864,6 +903,8 @@ class Engine implements ConversationEngine {
             folder: this.folder,
             text,
             error: line.is_error === true,
+            usage: resultUsage(line.usage),
+            costUSD,
           }),
         );
         this.tellAuth(line.is_error === true ? text : null);
@@ -1077,6 +1118,11 @@ class Engine implements ConversationEngine {
         tool === "AskUserQuestion" ? askQuestions(request.input) : null,
     };
     this.inputs.set(id, request.input ?? {});
+    // FE-175: a card's agent works the card with the board tools unasked.
+    if (cardRunMayUse(this.project, this.conversation, tool)) {
+      this.respond(id, { behavior: "allow" });
+      return;
+    }
     const subject = claudeSubject(tool, request.input);
     noteSubject(permission, subject);
     const show = () => {
@@ -1119,6 +1165,16 @@ class Engine implements ConversationEngine {
   }
 
   /** Write the answer to request `id`, card shown or not. */
+  /** This turn's share of the process's running `total`, or null. */
+  private turnCost(total: unknown): number | null {
+    if (typeof total !== "number" || !Number.isFinite(total) || total < 0)
+      return null;
+    // Below what was seen: a process this one does not know restarted.
+    const cost = total >= this.costSeen ? total - this.costSeen : total;
+    this.costSeen = total;
+    return cost;
+  }
+
   private respond(id: string, answer: PermissionAnswer): void {
     const input = this.inputs.get(id);
     const response =
@@ -1346,6 +1402,7 @@ class Engine implements ConversationEngine {
           out.settings,
           isConductorTurn(out.text),
           out.connectors,
+          out.routine === true,
         );
       // A restart's exit cleared these.
       this.busy = true;

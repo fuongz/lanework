@@ -56,6 +56,7 @@ import {
   TIERS,
   type Tier,
 } from "./orchestration";
+import { LOOP_MINUTES_MAX, LOOP_MINUTES_MIN } from "./routines";
 import {
   AGENT_NAME_MAX,
   isAgentSessionId,
@@ -69,7 +70,8 @@ import {
  * Every action a conversation's sessions token carries, in the order
  * `--help` lists them. `sessions.*` and `memory.*` (FE-128) are a
  * conductor's own; `conductors.create` (BE-01, PD-04) and `thread.read`
- * (BE-03) any conversation the app started may call.
+ * (BE-03) any conversation the app started may call; `loop.*` (FE-172) only
+ * a self-paced routine's run.
  */
 export const SESSION_ACTIONS = [
   "sessions.start",
@@ -86,6 +88,8 @@ export const SESSION_ACTIONS = [
   "thread.read",
   "conversations.list",
   "conversations.message",
+  "loop.next",
+  "loop.stop",
 ] as const;
 export type SessionAction = (typeof SESSION_ACTIONS)[number];
 
@@ -222,6 +226,14 @@ export interface SessionInputs {
    * `"conductor"` for a session's own conductor.
    */
   "conversations.message": { to: string; text: string; summary?: string };
+  /**
+   * When a self-paced routine runs next (FE-172): `minutes` after this
+   * run ends ({@link LOOP_MINUTES_MIN}-{@link LOOP_MINUTES_MAX}). The last
+   * call of a run wins.
+   */
+  "loop.next": { minutes: number; reason?: string };
+  /** End a self-paced routine's loop after this run (FE-172). */
+  "loop.stop": { reason?: string };
   /**
    * A personal conductor of the caller's project. Every field left out takes
    * the default the rail's dialog gives, or the caller's own agent and model.
@@ -481,6 +493,14 @@ export interface SessionResults {
         /** What to do now, in words: an agent read "send-it" as sent. */
         next: string;
       };
+  /** What the run will do once it ends; nothing is scheduled before. */
+  "loop.next": {
+    minutes: number;
+    reason: string | null;
+    /** The same, in words for the agent. */
+    next: string;
+  };
+  "loop.stop": { stopped: true; reason: string | null; next: string };
   "conductors.create": {
     /** Its id, picked by the app: never one already taken. */
     id: string;
@@ -572,6 +592,22 @@ function summaryOf(value: unknown): { summary?: string } {
       `summary is longer than ${SUMMARY_MAX} characters: keep it to a few words`,
     );
   return line ? { summary: line } : {};
+}
+
+/**
+ * An optional `reason` for a loop's pace (FE-172): one line of at most
+ * {@link SUMMARY_MAX} characters, shown in the run's history; blank, none.
+ */
+function reasonOf(value: unknown): { reason?: string } {
+  if (value === undefined) return {};
+  if (typeof value !== "string")
+    fail("reason must be a string: a few words on why");
+  const line = value.replace(/\s+/g, " ").trim();
+  if (line.length > SUMMARY_MAX)
+    fail(
+      `reason is longer than ${SUMMARY_MAX} characters: keep it to a few words`,
+    );
+  return line ? { reason: line } : {};
 }
 
 function flag(value: unknown, label: string, fallback = true): boolean {
@@ -804,6 +840,29 @@ const SCHEMAS: {
         ...summaryOf(input.summary),
       };
     },
+  },
+  "loop.next": {
+    fields: ["minutes", "reason"],
+    parse: (input) => {
+      if (input.minutes === undefined)
+        fail(
+          `Provide minutes: a whole number from ${LOOP_MINUTES_MIN} to ${LOOP_MINUTES_MAX}`,
+        );
+      return {
+        minutes: count(
+          input.minutes,
+          "minutes",
+          LOOP_MINUTES_MIN,
+          LOOP_MINUTES_MAX,
+          LOOP_MINUTES_MIN,
+        ),
+        ...reasonOf(input.reason),
+      };
+    },
+  },
+  "loop.stop": {
+    fields: ["reason"],
+    parse: (input) => reasonOf(input.reason),
   },
   "memory.append": {
     fields: ["text"],
@@ -1170,6 +1229,17 @@ export const SESSION_HELP: Record<SessionAction, string> = {
             both of you run on Claude it answers "send-it" with an address:
             send the text yourself with SendMessage to it (Lanework checks
             it arrived, and delivers it otherwise).`,
+  "loop.next": `  loop.next {"minutes":30,"reason":"A few words"}
+            Self-paced routine runs only (FE-172). When the routine
+            runs next: "minutes" (${LOOP_MINUTES_MIN}-${LOOP_MINUTES_MAX}) after
+            this run ends, sooner while work is in flight, later when nothing
+            moves. Call it once, near the end; the last call wins. Without
+            it the routine's own default applies. "reason" (at most
+            ${SUMMARY_MAX} characters, optional) shows in the run's history.`,
+  "loop.stop": `  loop.stop {"reason":"A few words"}
+            Self-paced routine runs only (FE-172). End the loop: no run
+            is scheduled after this one until the user turns it on again.
+            Call it when the work it watches is done or can no longer move.`,
   "memory.write": `  memory.write {"notes":"Decisions, open threads, what to check next"}
             Conductors only. Replace your notes for this project, at most
             ${MEMORY_NOTES_MAX} characters: send everything worth keeping, the
