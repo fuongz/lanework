@@ -1105,6 +1105,8 @@ export interface Awaiting {
   }[];
   /** ISO time its first request still open was asked. */
   since: string;
+  /** Its conductor answers it, not the user (see the permission event). */
+  managed?: boolean;
 }
 
 /** One of `AskUserQuestion`'s questions, as the CLI's input has it. */
@@ -1208,6 +1210,11 @@ export type ConversationEvent = (
       project: string;
       conversation: string;
       request: PermissionRequest;
+      /**
+       * A session a conductor started and keeps the user out of asks: its
+       * conductor answers, never the user (the island leaves it out).
+       */
+      managed?: boolean;
     }
   /** A pending permission was answered (here or because the turn ended). */
   | {
@@ -2450,4 +2457,37 @@ export function mentionsAsNames(text: string): string {
     if (!path || !/[./]/.test(path)) return whole;
     return path.replace(/\/+$/, "").split("/").pop() || path;
   });
+}
+
+// ─── A follow-up's title (BE-06) ────────────────────────────────────────────
+//
+// A conductor's `sessions_start`/`sessions_send` and a run lead's
+// `run_message`/`run_steer` may carry a short summary. It rides ahead of the
+// text as one tagged line: the agent reads it as the gist, and the chat draws
+// the turn as that title with the text folded under it.
+
+const SUMMARY_OPEN = "<lanework_summary>";
+const SUMMARY_CLOSE = "</lanework_summary>";
+/** The most a summary holds, in characters. */
+export const SUMMARY_MAX = 120;
+
+/** `text` with `summary` ahead of it; `text` alone without one. */
+export function withSummary(summary: string | undefined, text: string): string {
+  const line = summary?.replace(/\s+/g, " ").trim();
+  return line ? `${SUMMARY_OPEN}${line}${SUMMARY_CLOSE}\n\n${text}` : text;
+}
+
+/** A prompt's summary and the text under it, or null when it has none. */
+export function splitSummary(
+  text: string,
+): { summary: string; text: string } | null {
+  if (!text.startsWith(SUMMARY_OPEN)) return null;
+  const end = text.indexOf(SUMMARY_CLOSE);
+  if (end < 0) return null;
+  const summary = text.slice(SUMMARY_OPEN.length, end).trim();
+  if (!summary) return null;
+  return {
+    summary,
+    text: text.slice(end + SUMMARY_CLOSE.length).replace(/^\s+/, ""),
+  };
 }

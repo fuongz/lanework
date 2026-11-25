@@ -816,6 +816,48 @@ function railRowOf(agent: TerminalAgent, id: string): AgentSession | null {
   };
 }
 
+/**
+ * Conductor `id`'s own conversation in `project` (PD-06), as the rail lists
+ * it: its head's id and agent, and its title; null when it has none yet.
+ */
+export function conductorConversationOf(
+  project: string,
+  id: string,
+): { agent: TerminalAgent; id: string; title: string } | null {
+  const row = storedRail(project).find((entry) => entry.conductor === id);
+  return row ? { agent: row.agent, id: row.id, title: row.title } : null;
+}
+
+/**
+ * What the rail calls conversation `id` (PD-06): its name, else the CLI's
+ * title; null when the store has no such conversation.
+ */
+export function sessionTitleOf(id: string): string | null {
+  for (const agent of TERMINAL_AGENTS) {
+    const row = sessionStore().getSession(sessionKey(agent, id));
+    if (row) return row.name || row.cliTitle || null;
+  }
+  return null;
+}
+
+/** Every conductor's own conversation in `project` (PD-06), by conductor. */
+export function conductorConversationsIn(
+  project: string,
+): { conductor: string; agent: TerminalAgent; id: string; title: string }[] {
+  return storedRail(project).flatMap((entry) =>
+    entry.conductor
+      ? [
+          {
+            conductor: entry.conductor,
+            agent: entry.agent,
+            id: entry.id,
+            title: entry.title,
+          },
+        ]
+      : [],
+  );
+}
+
 /** `project`'s rows as the store has them, before {@link railOf}. */
 function storedRail(project: string): AgentSession[] {
   // Twice the limit: rows nothing was typed in yet take no place on it.

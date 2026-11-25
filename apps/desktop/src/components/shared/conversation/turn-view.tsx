@@ -1,4 +1,6 @@
 import {
+  ArrowDown01Icon,
+  ArrowRight01Icon,
   CommandLineIcon,
   CubeIcon,
   Folder01Icon,
@@ -23,7 +25,12 @@ import type {
   Turn,
   UserTurn,
 } from "#/../shared/conversation";
-import { splitHandoffText } from "#/../shared/conversation";
+import {
+  type PeerTurn,
+  readCrossSession,
+  splitHandoffText,
+  splitSummary,
+} from "#/../shared/conversation";
 import type { LeadIcon } from "#/../shared/orchestration";
 import {
   FileOpenerContext,
@@ -536,13 +543,21 @@ export function UserBubble({
   attachments,
   time,
   pending,
+  summary,
 }: {
   text: string;
   attachments: Attachment[];
   time: string | null;
   /** Sent from here, not in the transcript yet: queued or starting. */
   pending?: string;
+  /**
+   * The few words a conductor or run lead gave it (BE-06): shown as the
+   * bubble's title, its text folded under it until opened.
+   */
+  summary?: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const folded = !!summary && !open;
   const { quotes, rest } = splitQuotes(text);
   const body = rest.trim();
   const placement = useMemo(
@@ -590,7 +605,25 @@ export function UserBubble({
           </div>
         )}
         <div className="bg-muted flex min-w-0 flex-col gap-2 rounded-2xl px-3.5 py-2.5 dark:bg-foreground/[0.07]">
-          {above.length > 0 && (
+          {summary && (
+            <button
+              type="button"
+              onClick={() => setOpen(!open)}
+              aria-expanded={open}
+              className="flex min-w-0 items-start gap-1.5 text-left text-[14px] font-medium"
+            >
+              <HugeiconsIcon
+                icon={open ? ArrowDown01Icon : ArrowRight01Icon}
+                className="text-muted-foreground mt-[3px] size-3.5 shrink-0"
+                strokeWidth={2}
+                aria-hidden="true"
+              />
+              <span className="min-w-0 [overflow-wrap:anywhere]">
+                {summary}
+              </span>
+            </button>
+          )}
+          {!folded && above.length > 0 && (
             <div className="flex flex-wrap justify-end gap-1.5">
               {above.map((attachment, index) => (
                 <AttachmentChip
@@ -601,7 +634,8 @@ export function UserBubble({
               ))}
             </div>
           )}
-          {body &&
+          {!folded &&
+            body &&
             (placement.at.size === 0 && looksLikeMarkdown(body) ? (
               // Code blocks, lists, headings, emphasis: drawn as a reply is.
               <div className="min-w-0 [overflow-wrap:anywhere]">
@@ -825,10 +859,19 @@ export const TurnView = memo(
         </div>
       );
     // FE-169: a message another Claude session sent here.
+    // PD-06: a Codex or OpenCode transcript keeps a message from another
+    // conversation as a plain user turn; it reads as one all the same.
     if (turn.role === "peer")
       return (
         <div data-turn={turn.id} className={cn(OFFSCREEN, dim)}>
           <PeerTurnView turn={turn} slug={slug} />
+        </div>
+      );
+    const peer = peerOfUserTurn(turn);
+    if (peer)
+      return (
+        <div data-turn={turn.id} className={cn(OFFSCREEN, dim)}>
+          <PeerTurnView turn={peer} slug={slug} />
         </div>
       );
     if (turn.role === "user")
@@ -903,15 +946,43 @@ export const TurnView = memo(
 );
 
 function UserTurnView({ turn }: { turn: UserTurn }) {
+  // A handoff's first message: the person's words, not the context block
+  // carried ahead of them (the Context handoff divider stands above it).
+  const text = splitHandoffText(turn.text)?.message ?? turn.text;
+  // BE-06: a conductor's or run lead's few words, its text folded under.
+  const titled = splitSummary(text);
   return (
     <UserBubble
-      // A handoff's first message: the person's words, not the context block
-      // carried ahead of them (the Context handoff divider stands above it).
-      text={splitHandoffText(turn.text)?.message ?? turn.text}
+      text={titled?.text ?? text}
       attachments={turn.attachments}
       time={clock(turn.at)}
+      summary={titled?.summary}
     />
   );
+}
+
+/**
+ * A user turn that is a message from another conversation (PD-06), read as
+ * the peer turn Claude's transcript gives one; null for anything else.
+ */
+function peerOfUserTurn(turn: Turn): PeerTurn | null {
+  if (turn.role !== "user" || !turn.text.includes("<cross-session-message"))
+    return null;
+  const read = readCrossSession(turn.text);
+  if (!read) return null;
+  return {
+    role: "peer",
+    id: turn.id,
+    from: read.from,
+    name: read.name,
+    mode: read.mode,
+    pid: null,
+    sender: read.from.startsWith("lanework:")
+      ? { conversation: read.from.slice(9), title: null }
+      : null,
+    text: read.text,
+    at: turn.at,
+  };
 }
 
 /** A TOC entry: a prompt, its answer's first line, and the next. */
@@ -937,9 +1008,12 @@ export function promptLines(turns: Turn[]): PromptLine[] {
     }
     out.push({
       id: turn.id,
-      prompt:
-        firstLine(splitHandoffText(turn.text)?.message ?? turn.text) ||
-        "(attachment)",
+      prompt: (() => {
+        const text = splitHandoffText(turn.text)?.message ?? turn.text;
+        // BE-06: a titled follow-up reads as its title.
+        const titled = splitSummary(text);
+        return firstLine(titled?.summary ?? text) || "(attachment)";
+      })(),
       reply: said[0] ?? "",
       more: said[1] ?? "",
     });

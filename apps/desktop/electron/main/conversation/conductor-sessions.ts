@@ -74,6 +74,7 @@ import {
   type PermissionRequest,
   settingsFor,
   type Turn,
+  withSummary,
 } from "../../../shared/conversation";
 import {
   CONDUCTOR_DEFAULTS,
@@ -241,6 +242,22 @@ export interface ConductorSessionsDeps {
     conversation: string,
     input: SessionInputs["thread.read"],
   ) => Promise<SessionResults["thread.read"]>;
+  /**
+   * `conversations.list` and `conversations.message` (PD-06) for the
+   * caller's own conversation: refused with an error whose message is told
+   * to the caller.
+   */
+  messaging?: {
+    list: (
+      project: string,
+      conversation: string,
+    ) => Promise<SessionResults["conversations.list"]>;
+    send: (
+      project: string,
+      conversation: string,
+      input: SessionInputs["conversations.message"],
+    ) => Promise<SessionResults["conversations.message"]>;
+  };
 }
 
 /** A session a conductor started. */
@@ -539,6 +556,24 @@ export class ConductorSessions {
     // Any conversation may ask which models a proposal may name (FE-156);
     // a conductor's own also gets its workers and how its runs went.
     if (call.action === "models.list") return this.models(caller, call.input);
+    // PD-06: who may message whom is the messaging deps' to decide.
+    if (
+      call.action === "conversations.list" ||
+      call.action === "conversations.message"
+    ) {
+      const conversation = caller.conversation();
+      if (!conversation)
+        refuse("This conversation has no id yet. Try again in a moment.");
+      const messaging = this.deps.messaging;
+      if (!messaging) refuse("Messaging is not available here.");
+      try {
+        return call.action === "conversations.list"
+          ? await messaging.list(caller.project, conversation)
+          : await messaging.send(caller.project, conversation, call.input);
+      } catch (error) {
+        refuse(error instanceof Error ? error.message : String(error));
+      }
+    }
     // Any conversation may read back its own thread (BE-03).
     if (call.action === "thread.read") {
       const conversation = caller.conversation();
@@ -894,9 +929,12 @@ export class ConductorSessions {
     });
     if (!settings) refuse(`model "${model}" cannot run with these settings.`);
     const folder = await this.deps.folderOf(project);
-    const text = input.taskId
-      ? `Work on ${input.taskId}.\n\n${input.prompt}`
-      : input.prompt;
+    const text = withSummary(
+      input.summary,
+      input.taskId
+        ? `Work on ${input.taskId}.\n\n${input.prompt}`
+        : input.prompt,
+    );
     const out = outgoing(text, settings);
     // FE-166: a session inherits what its conductor turned off, fixed when
     // its process starts. A Claude session is found by the engine through
@@ -1053,7 +1091,7 @@ export class ConductorSessions {
         launch.project,
         launch.session,
         folder,
-        outgoing(input.prompt, settings),
+        outgoing(withSummary(input.summary, input.prompt), settings),
         launch.agent,
       );
       if (next.state === "terminal")

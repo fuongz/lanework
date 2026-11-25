@@ -12,10 +12,11 @@ import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { app, shell, type WebContents } from "electron";
+import { app, BrowserWindow, dialog, shell, type WebContents } from "electron";
 import type {
   SessionAction,
   SessionCall,
+  SessionInputs,
   SessionResults,
 } from "../../../shared/conductor-sessions";
 import {
@@ -64,12 +65,14 @@ import {
   setCodexModels,
   setCustomModels,
   setOpenCodeModels,
+  splitSummary,
   type ToolOutput,
   type Turn,
   type TurnSession,
   turnBytes,
   type UsageLimitsState,
   windowStart,
+  withSummary,
 } from "../../../shared/conversation";
 import {
   LEAD_REF_PATTERN,
@@ -111,6 +114,7 @@ import { knownProject, terminalFolder } from "../projects";
 import { accountDir, isSlug } from "../projects/store";
 import {
   bindConductorConversation,
+  conductorConversationsIn,
   conductorOfConversation,
   doneLaunching,
   launcherOfConversation,
@@ -119,6 +123,7 @@ import {
   nameConversation,
   noteLaunching,
   registerAgentSession,
+  sessionTitleOf,
   setRailThreads,
   setSessionUserAccess,
   settleOpencodeSession,
@@ -164,6 +169,14 @@ import {
   codexHasLaneworkTable,
   localMcpFor,
 } from "./mcp-binding";
+import {
+  claudePeerAdapter,
+  type Endpoint,
+  laneworkAdapter,
+  MessageGateway,
+  MessagingError,
+} from "./messaging/gateway";
+import { type Consent, createMessagingPolicy } from "./messaging/policy";
 import { openCodeClient } from "./opencode-client";
 import { createOpenCodeModels, openCodeModelsOfIds } from "./opencode-models";
 import {
@@ -1487,7 +1500,23 @@ export function registerConversation(
     };
   };
 
-  const tell = (event: ConversationEvent) => {
+  /**
+   * Whether `conversation`'s permissions are its conductor's to answer: a
+   * session one started without letting the user in. Synchronous, from the
+   * store, so an event is marked before it goes out.
+   */
+  const managedNow = (conversation: string): boolean => {
+    const launcher =
+      launcherOfConversation(handoffs.now.headOf(conversation)) ??
+      launcherOfConversation(conversation);
+    return !!launcher && !launcher.userAccess;
+  };
+  const tell = (raw: ConversationEvent) => {
+    // A managed session's request is its conductor's: the island skips it.
+    const event =
+      raw.type === "permission" && managedNow(raw.conversation)
+        ? { ...raw, managed: true }
+        : raw;
     // NOTE: Numbered on the thread's own counter (its head's key), so `seq`
     // stays monotonic across every session of the thread.
     const shown = threadEvent(event);
@@ -1669,7 +1698,12 @@ export function registerConversation(
       void (async () => {
         const { project: found } = await knownProject(project);
         if (!found) return;
-        const line = message.text.split("\n").find((text) => text.trim()) ?? "";
+        // BE-06: a titled message is told by its title.
+        const titled = splitSummary(message.text);
+        const line =
+          titled?.summary ??
+          message.text.split("\n").find((text) => text.trim()) ??
+          "";
         await notify({
           kind: "sessions",
           title: `Message from ${message.name ?? "another Claude session"}`,
@@ -1737,6 +1771,11 @@ export function registerConversation(
         input,
       );
     },
+    messaging: {
+      list: (project, conversation) => messagingList(project, conversation),
+      send: (project, conversation, input) =>
+        messagingSend(project, conversation, input),
+    },
     knowModels: async (agent, model) => {
       await ready.catch(() => {});
       if (agent === "codex") await codexModels();
@@ -1750,6 +1789,221 @@ export function registerConversation(
    * thread's, and those of every conversation handed off into it (a
    * handoff to a NEW conversation is no thread's), followed back.
    */
+  // ─── Messaging between conversations (PD-06) ──────────────────────────────
+
+  /** `native`'s end as the gateway sees it, named as the other end calls it. */
+  const endpointOf = async (
+    project: string,
+    native: string,
+    name: string,
+  ): Promise<Endpoint> => {
+    const folder = await folderOf(project);
+    const agent =
+      engines.pending(project, native)?.agent ??
+      (await agentOf(folder, native).catch(() => null)) ??
+      "claude";
+    return {
+      project,
+      conversation: native,
+      head: handoffs.now.headOf(native),
+      agent,
+      name,
+      pid: engines.pidOf(project, native),
+    };
+  };
+  /** A conductor's display name: its lead's, else its conversation's title. */
+  const conductorName = async (project: string, id: string, fallback = id) =>
+    (await teamLeadOf(project, id).catch(() => null))?.name ?? fallback;
+  /**
+   * Who `native` is to the others: a conductor (its id), or a session one
+   * started (its conductor), or neither.
+   */
+  const roleOf = async (project: string, native: string) => {
+    const head = handoffs.now.headOf(native);
+    const agent =
+      engines.pending(project, native)?.agent ??
+      (await agentOf(await folderOf(project), native).catch(() => null)) ??
+      "claude";
+    const conductor = await conductorOfThread(project, agent, native).catch(
+      () => null,
+    );
+    const launcher =
+      launcherOfConversation(head) ?? launcherOfConversation(native);
+    return {
+      conductor,
+      manager:
+        launcher && launcher.project === project ? launcher.conductor : null,
+    };
+  };
+  /** The conductors `native` may message, with their conversations. */
+  const reachableFrom = async (project: string, native: string) => {
+    const { conductor, manager } = await roleOf(project, native);
+    if (!conductor && !manager)
+      throw new MessagingError(
+        "Only a conductor, or a session a conductor started, may message another conversation.",
+      );
+    const all = conductorConversationsIn(project);
+    const out: {
+      to: string;
+      conductor: string;
+      name: string;
+      agent: ConversationAgent;
+      head: string;
+    }[] = [];
+    for (const entry of all) {
+      if (conductor && entry.conductor !== conductor)
+        out.push({
+          to: entry.conductor,
+          conductor: entry.conductor,
+          name: await conductorName(project, entry.conductor, entry.title),
+          agent: entry.agent,
+          head: entry.id,
+        });
+      else if (!conductor && entry.conductor === manager)
+        out.push({
+          to: "conductor",
+          conductor: entry.conductor,
+          name: await conductorName(project, entry.conductor, entry.title),
+          agent: entry.agent,
+          head: entry.id,
+        });
+    }
+    return { conductor, manager, out };
+  };
+  const messagingPolicy = createMessagingPolicy({
+    file: join(app.getPath("userData"), "messaging.json"),
+    ask: async (from, to, preview): Promise<Consent> => {
+      const window =
+        BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+      const options = {
+        type: "question" as const,
+        message: `${from.name} wants to message ${to.name}`,
+        detail: `${preview.slice(0, 400)}${preview.length > 400 ? "..." : ""}\n\nThe message reaches ${to.name} as one from another conversation, and shows in both chats.`,
+        buttons: ["Allow once", "Always allow", "Don't allow"],
+        defaultId: 0,
+        cancelId: 2,
+      };
+      const { response } = window
+        ? await dialog.showMessageBox(window, options)
+        : await dialog.showMessageBox(options);
+      return response === 0 ? "once" : response === 1 ? "always" : "deny";
+    },
+  });
+  const lanework = laneworkAdapter({
+    body: (message) => withSummary(message.summary, message.text),
+    deliver: async (to, text) => {
+      const queued =
+        engines.pending(to.project, to.conversation)?.working ?? false;
+      const settings =
+        (await store.of(to.conversation)) ?? (await store.last());
+      await sendTo(
+        sendRequest({
+          project: to.project,
+          conversation: to.conversation,
+          text,
+          attachments: [],
+          settings,
+        }),
+      );
+      return { queued };
+    },
+  });
+  const messagingGateway = new MessageGateway([
+    claudePeerAdapter({
+      socketOf: async (pid) => {
+        const path = `/tmp/cc-socks/${pid}.sock`;
+        const info = await stat(path).catch(() => null);
+        return info?.isSocket() ? path : null;
+      },
+      arrived: async (to, fromPid, since) => {
+        const read = await readSession(to.project, to.conversation);
+        return read.turns.some(
+          (turn) =>
+            turn.role === "peer" &&
+            turn.pid === fromPid &&
+            Date.parse(turn.at) >= since - 5_000,
+        );
+      },
+      fallback: (message) => lanework.deliver(message),
+    }),
+    lanework,
+  ]);
+  const messagingList = async (
+    project: string,
+    native: string,
+  ): Promise<SessionResults["conversations.list"]> => {
+    const { conductor, out } = await reachableFrom(project, native);
+    return {
+      you: {
+        name: conductor
+          ? await conductorName(project, conductor)
+          : (sessionTitleOf(native) ?? "A session"),
+        conductor,
+      },
+      reachable: out.map((entry) => ({
+        to: entry.to,
+        name: entry.name,
+        agent: entry.agent,
+        busy:
+          engines.pending(project, handoffs.now.newestOf(entry.head))
+            ?.working ?? false,
+      })),
+    };
+  };
+  const messagingSend = async (
+    project: string,
+    native: string,
+    input: SessionInputs["conversations.message"],
+  ): Promise<SessionResults["conversations.message"]> => {
+    const { conductor, out } = await reachableFrom(project, native);
+    const target = out.find((entry) => entry.to === input.to);
+    if (!target)
+      throw new MessagingError(
+        conductor
+          ? `"${input.to}" is no other conductor of this project with a conversation. Call conversations.list for whom you may message.`
+          : 'A session may message only its own conductor: "to":"conductor".',
+      );
+    const from = await endpointOf(
+      project,
+      native,
+      conductor
+        ? await conductorName(project, conductor)
+        : (sessionTitleOf(native) ?? "A session"),
+    );
+    const to = await endpointOf(
+      project,
+      handoffs.now.newestOf(target.head),
+      target.name,
+    );
+    await messagingPolicy.admit(
+      from,
+      to,
+      input.summary ? `${input.summary}\n\n${input.text}` : input.text,
+    );
+    const delivery = await messagingGateway.send({
+      from,
+      to,
+      text: input.text,
+      ...(input.summary ? { summary: input.summary } : {}),
+    });
+    return delivery.status === "send-it"
+      ? {
+          to: input.to,
+          name: target.name,
+          channel: "claude-peer",
+          status: "send-it",
+          address: delivery.address,
+          next: `NOT SENT YET. Call SendMessage now with to "${delivery.address}" and your text as the message${input.summary ? ` (summary "${input.summary}")` : ""}, before you end your turn. If it does not arrive, Lanework delivers it in about 2 minutes.`,
+        }
+      : {
+          to: input.to,
+          name: target.name,
+          channel: delivery.channel,
+          status: "delivered",
+          queued: delivery.queued,
+        };
+  };
+
   const threadSessions = async (
     project: string,
     conversation: string,
@@ -1934,7 +2188,14 @@ export function registerConversation(
     // FE-169/D2: a message from another Claude session names the Lanework
     // conversation that sent it, while its engine runs. Set on the turn
     // itself, so a fold's turn objects stay the same ones (`tagged`).
-    for (const turn of read.turns)
+    for (const turn of read.turns) {
+      // PD-06: Lanework's own channel names the sending thread outright.
+      if (
+        turn.role === "peer" &&
+        !turn.sender &&
+        turn.from.startsWith("lanework:")
+      )
+        turn.sender = { conversation: turn.from.slice(9), title: null };
       if (turn.role === "peer" && turn.pid !== null && !turn.sender) {
         const from = engines.byPid(turn.pid);
         if (from && from.project === project)
@@ -1943,6 +2204,7 @@ export function registerConversation(
             title: null,
           };
       }
+    }
     // OpenCode's running turn, newer than its database (FE-104).
     if (agent === "opencode" && pending?.working)
       return {
@@ -3233,7 +3495,11 @@ export function registerConversation(
     devUrl,
     async (args): Promise<Awaiting[]> => {
       if (args.length !== 0) throw new Error("No arguments are taken");
-      return awaiting.list();
+      return awaiting
+        .list()
+        .map((entry) =>
+          managedNow(entry.conversation) ? { ...entry, managed: true } : entry,
+        );
     },
   );
 

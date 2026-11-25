@@ -1,8 +1,13 @@
 import { Link } from "@tanstack/react-router";
+import type { TeamLead } from "#/../shared/orchestration";
 import { MarkdownBody } from "#/components/shared/common/markdown-body";
+import { ConductorMark } from "#/components/shared/conductors/conductor-mark";
+import { useTeamLeads } from "#/components/shared/conversation/composer";
+import { useProjectKey } from "#/hooks/use-project-key";
 import { clock } from "#/lib/conversation-format";
 import { cn } from "#/lib/utils";
-import type { PeerTurn } from "../../../../shared/conversation";
+import { useAgentSessions } from "#/stores/agent-sessions";
+import { type PeerTurn, splitSummary } from "../../../../shared/conversation";
 import { chatLink } from "./turn-view.link-chip";
 
 /**
@@ -64,6 +69,90 @@ export function initials(name: string): string {
 }
 
 /**
+ * The title the rail gives conversation `conversation` in `slug`'s project:
+ * a session a conductor started is called what it was started as.
+ */
+export function useSessionTitle(
+  slug: string,
+  conversation: string | null,
+): string | null {
+  const project = useProjectKey(slug);
+  return useAgentSessions((state) =>
+    project && conversation
+      ? (state.byProject[project]?.find((row) => row.id === conversation)
+          ?.title ?? null)
+      : null,
+  );
+}
+
+/**
+ * The conductor whose own conversation `conversation` is, in `slug`'s
+ * project, or null: a message's sender drawn with its name and mark.
+ */
+export function useConductorOf(
+  slug: string,
+  conversation: string | null,
+): TeamLead | null {
+  const project = useProjectKey(slug);
+  const conductorId = useAgentSessions((state) =>
+    project && conversation
+      ? (state.byProject[project]?.find((row) => row.id === conversation)
+          ?.conductor ?? null)
+      : null,
+  );
+  const leads = useTeamLeads(project, conductorId !== null);
+  return conductorId === null
+    ? null
+    : (leads?.leads.find((entry) => entry.id === conductorId) ?? null);
+}
+
+/** A sender's avatar: its conductor's mark, else two letters in its colour. */
+export function PeerAvatar({
+  lead,
+  name,
+  toneKey,
+  size = "md",
+}: {
+  lead: TeamLead | null;
+  name: string;
+  toneKey: string;
+  size?: "sm" | "md";
+}) {
+  const tone = toneOf(lead?.id ?? toneKey);
+  const box = size === "sm" ? "size-5" : "size-7";
+  if (lead)
+    return (
+      <span
+        aria-hidden="true"
+        className={cn(
+          "grid shrink-0 place-items-center overflow-hidden rounded-[28%]",
+          box,
+          !lead.avatar && tone.avatar,
+        )}
+      >
+        <ConductorMark
+          lead={lead}
+          className={lead.avatar ? box : size === "sm" ? "size-3" : "size-4"}
+          strokeWidth={1.8}
+        />
+      </span>
+    );
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "grid shrink-0 place-items-center rounded-full font-semibold",
+        box,
+        size === "sm" ? "text-[9px]" : "text-[11px]",
+        tone.avatar,
+      )}
+    >
+      {initials(name)}
+    </span>
+  );
+}
+
+/**
  * A message another Claude session on this machine sent into this
  * conversation (FE-169), drawn as a group chat's: the sender's avatar and
  * name, and a bubble in its colour on the left, across from the user's own
@@ -72,26 +161,28 @@ export function initials(name: string): string {
  * permission prompts, since what it asks runs here on this session's own.
  */
 export function PeerTurnView({ turn, slug }: { turn: PeerTurn; slug: string }) {
+  // The sender, when it is a conductor's own conversation: its name and
+  // mark, as the rail draws them, rather than the name it gave itself.
+  const lead = useConductorOf(slug, turn.sender?.conversation ?? null);
+  const title = useSessionTitle(slug, turn.sender?.conversation ?? null);
   const name =
+    lead?.name ??
     turn.sender?.title ??
+    title ??
     turn.name ??
     (turn.pid ? `process ${turn.pid}` : "Claude session");
-  const tone = toneOf(turn.name ?? turn.from);
+  const tone = toneOf(lead?.id ?? turn.name ?? turn.from);
   const bypass = turn.mode === "bypass" || turn.mode === "bypassPermissions";
   const time = clock(turn.at);
+  // BE-06: a titled message reads as its title, the text under it.
+  const titled = splitSummary(turn.text);
   return (
     <section
       aria-label={`Message from another Claude session, ${name}`}
       className="flex items-start gap-2.5"
     >
-      <span
-        aria-hidden="true"
-        className={cn(
-          "mt-0.5 grid size-7 shrink-0 place-items-center rounded-full text-[11px] font-semibold",
-          tone.avatar,
-        )}
-      >
-        {initials(name)}
+      <span className="mt-0.5 shrink-0">
+        <PeerAvatar lead={lead} name={name} toneKey={turn.name ?? turn.from} />
       </span>
       <div className="flex max-w-[85%] min-w-0 flex-col gap-1">
         <div className="flex min-w-0 items-center gap-2 text-[12px]">
@@ -130,8 +221,13 @@ export function PeerTurnView({ turn, slug }: { turn: PeerTurn; slug: string }) {
             tone.bubble,
           )}
         >
+          {titled && (
+            <p className="mb-1 text-[14px] font-semibold [overflow-wrap:anywhere]">
+              {titled.summary}
+            </p>
+          )}
           <MarkdownBody
-            source={turn.text}
+            source={titled?.text ?? turn.text}
             link={chatLink}
             variant="chat"
             empty=""

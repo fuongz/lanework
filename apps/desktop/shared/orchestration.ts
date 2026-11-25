@@ -34,6 +34,7 @@ import {
   OPENCODE_MODEL_ID,
   PERMISSIONS,
   type Permission,
+  SUMMARY_MAX,
 } from "./conversation";
 import { type ProjectAvatar, parseProjectAvatar } from "./project-avatar";
 
@@ -469,9 +470,9 @@ export interface ControlInputs {
     skip?: true;
   };
   /** Redirect a running worker without discarding its work. */
-  steer: { taskId: string; text: string };
+  steer: { taskId: string; text: string; summary?: string };
   /** Another turn for a stopped worker, in its own scope and worktree. */
-  message: { taskId: string; text: string };
+  message: { taskId: string; text: string; summary?: string };
   /** Retry a stopped worker with corrected write scopes. */
   retry: { taskId: string; text: string; files: string[] };
   /** Cancel a running or queued task. */
@@ -565,6 +566,22 @@ function strictObject(
         .join(", ")}. Allowed: ${allowed.length ? allowed.join(", ") : "none"}`,
     );
   return value as Record<string, unknown>;
+}
+
+/**
+ * An optional `summary` on a lead's steer or message (BE-06): one line of at
+ * most {@link SUMMARY_MAX} characters; absent or blank, none.
+ */
+function runSummary(value: unknown): { summary?: string } {
+  if (value === undefined) return {};
+  if (typeof value !== "string")
+    fail("summary must be a string: a few words on what is asked");
+  const line = value.replace(/\s+/g, " ").trim();
+  if (line.length > SUMMARY_MAX)
+    fail(
+      `summary is longer than ${SUMMARY_MAX} characters: keep it to a few words`,
+    );
+  return line ? { summary: line } : {};
 }
 
 function text(value: unknown, label: string, max: number): string {
@@ -768,17 +785,19 @@ const SCHEMAS: {
     },
   },
   steer: {
-    fields: ["taskId", "text"],
+    fields: ["taskId", "text", "summary"],
     parse: (input) => ({
       taskId: id(input.taskId, "taskId"),
       text: text(input.text, "text", PROMPT_MAX),
+      ...runSummary(input.summary),
     }),
   },
   message: {
-    fields: ["taskId", "text"],
+    fields: ["taskId", "text", "summary"],
     parse: (input) => ({
       taskId: id(input.taskId, "taskId"),
       text: text(input.text, "text", PROMPT_MAX),
+      ...runSummary(input.summary),
     }),
   },
   retry: {

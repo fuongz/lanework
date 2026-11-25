@@ -34,6 +34,7 @@ import {
   OPENCODE_MODEL_ID,
   PERMISSIONS,
   type Permission,
+  SUMMARY_MAX,
 } from "./conversation";
 import {
   ControlInputError,
@@ -47,6 +48,7 @@ import {
   LEAD_ICONS,
   LEAD_INSTRUCTIONS_MAX,
   LEAD_NAME_MAX,
+  LEAD_REF_PATTERN,
   type LeadAgent,
   type LeadIcon,
   MODEL_ID_PATTERN,
@@ -82,6 +84,8 @@ export const SESSION_ACTIONS = [
   "models.list",
   "conductors.create",
   "thread.read",
+  "conversations.list",
+  "conversations.message",
 ] as const;
 export type SessionAction = (typeof SESSION_ACTIONS)[number];
 
@@ -152,6 +156,8 @@ export interface SessionInputs {
   "sessions.start": {
     title: string;
     prompt: string;
+    /** A few words on what it is asked (BE-06): the chat's title for it. */
+    summary?: string;
     /** The CLI it runs on. Absent: the conductor's own (Claude or Codex). */
     agent?: TerminalAgent;
     /**
@@ -178,6 +184,8 @@ export interface SessionInputs {
   "sessions.send": {
     sessionId: string;
     prompt: string;
+    /** A few words on what it is asked (BE-06): the chat's title for it. */
+    summary?: string;
     notifyOnComplete: boolean;
   };
   /** Let the user work in one of the conductor's sessions, or take it back. */
@@ -207,6 +215,13 @@ export interface SessionInputs {
   "models.list": { agent?: TerminalAgent; query?: string };
   /** Turns of the caller's own thread (BE-03); see {@link ThreadReadInput}. */
   "thread.read": ThreadReadInput;
+  /** Whom the caller may message (PD-06). */
+  "conversations.list": Record<string, never>;
+  /**
+   * A message to another conversation (PD-06): `to` a conductor's id, or
+   * `"conductor"` for a session's own conductor.
+   */
+  "conversations.message": { to: string; text: string; summary?: string };
   /**
    * A personal conductor of the caller's project. Every field left out takes
    * the default the rail's dialog gives, or the caller's own agent and model.
@@ -432,6 +447,40 @@ export interface SessionResults {
   "memory.append": { notesLength: number; updatedAt: number };
   "models.list": ModelsListing;
   "thread.read": ThreadReadResult;
+  "conversations.list": {
+    /** Who the caller is to the others. */
+    you: { name: string; conductor: string | null };
+    /** Whom it may message, by `to`. */
+    reachable: {
+      to: string;
+      name: string;
+      agent: TerminalAgent;
+      /** Its conversation runs a turn now: a message waits for its end. */
+      busy: boolean;
+    }[];
+  };
+  "conversations.message":
+    | {
+        to: string;
+        name: string;
+        channel: string;
+        status: "delivered";
+        /** It reads the message once its running turn ends. */
+        queued: boolean;
+      }
+    | {
+        to: string;
+        name: string;
+        channel: "claude-peer";
+        status: "send-it";
+        /**
+         * Both of you run on Claude: send it yourself with SendMessage to
+         * this address. Lanework checks it arrived, else delivers it.
+         */
+        address: string;
+        /** What to do now, in words: an agent read "send-it" as sent. */
+        next: string;
+      };
   "conductors.create": {
     /** Its id, picked by the app: never one already taken. */
     id: string;
@@ -509,6 +558,22 @@ function sessionId(value: unknown): string {
   return value;
 }
 
+/**
+ * An optional `summary` (BE-06): one line of at most {@link SUMMARY_MAX}
+ * characters; absent or blank, none.
+ */
+function summaryOf(value: unknown): { summary?: string } {
+  if (value === undefined) return {};
+  if (typeof value !== "string")
+    fail("summary must be a string: a few words on what is asked");
+  const line = value.replace(/\s+/g, " ").trim();
+  if (line.length > SUMMARY_MAX)
+    fail(
+      `summary is longer than ${SUMMARY_MAX} characters: keep it to a few words`,
+    );
+  return line ? { summary: line } : {};
+}
+
 function flag(value: unknown, label: string, fallback = true): boolean {
   if (value === undefined) return fallback;
   if (typeof value !== "boolean") fail(`${label} must be true or false`);
@@ -581,9 +646,11 @@ const SCHEMAS: {
       "taskId",
       "notifyOnComplete",
       "userAccess",
+      "summary",
     ],
     parse: (input) => {
       const out: SessionInputs["sessions.start"] = {
+        ...summaryOf(input.summary),
         title: controlText(input.title, "title", AGENT_NAME_MAX).replace(
           /\s+/g,
           " ",
@@ -622,11 +689,12 @@ const SCHEMAS: {
     }),
   },
   "sessions.send": {
-    fields: ["sessionId", "prompt", "notifyOnComplete"],
+    fields: ["sessionId", "prompt", "notifyOnComplete", "summary"],
     parse: (input) => ({
       sessionId: sessionId(input.sessionId),
       prompt: controlText(input.prompt, "prompt", PROMPT_MAX),
       notifyOnComplete: flag(input.notifyOnComplete, "notifyOnComplete"),
+      ...summaryOf(input.summary),
     }),
   },
   "sessions.access": {
@@ -717,6 +785,24 @@ const SCHEMAS: {
       if (input.includeTools !== undefined)
         out.includeTools = flag(input.includeTools, "includeTools", false);
       return out;
+    },
+  },
+  "conversations.list": { fields: [], parse: () => ({}) },
+  "conversations.message": {
+    fields: ["to", "text", "summary"],
+    parse: (input) => {
+      if (
+        typeof input.to !== "string" ||
+        (input.to !== "conductor" && !LEAD_REF_PATTERN.test(input.to))
+      )
+        fail(
+          'to must be a conductor\'s id from conversations.list, or "conductor" for your own',
+        );
+      return {
+        to: input.to,
+        text: controlText(input.text, "text", PROMPT_MAX),
+        ...summaryOf(input.summary),
+      };
     },
   },
   "memory.append": {
@@ -994,7 +1080,8 @@ export const SESSION_HELP: Record<SessionAction, string> = {
   "sessions.start": `  sessions.start {"title":"Short title","prompt":"Self-contained instructions",
                   "agent":"${TERMINAL_AGENTS.join("|")}",
                   "model":"<model id>","effort":"${EFFORTS.join("|")}",
-                  "taskId":"FE-98","notifyOnComplete":true,"userAccess":false}
+                  "taskId":"FE-98","notifyOnComplete":true,"userAccess":false,
+                  "summary":"A few words"}
             Conductors only. Start a separate session in this project's
             checkout and submit the prompt as its first turn. It runs on
             your permission mode, under the title, and is yours: the user
@@ -1007,7 +1094,9 @@ export const SESSION_HELP: Record<SessionAction, string> = {
             notifyOnComplete is false, Lanework tells you once its turn
             ends: review it then and report to the user. Returns as soon as
             the session started, with its sessionId. At most
-            ${SESSIONS_RUNNING_MAX} of your sessions may work at once.`,
+            ${SESSIONS_RUNNING_MAX} of your sessions may work at once. "summary"
+            (at most ${SUMMARY_MAX} characters, optional) is what the user
+            reads first: the chat shows the prompt folded under it.`,
   "sessions.list": `  sessions.list {}
             The sessions you started, newest first, with their status:
             working, waiting (on the user), idle, failed or terminal.`,
@@ -1017,9 +1106,11 @@ export const SESSION_HELP: Record<SessionAction, string> = {
             (${READ_CHARS_MIN}-${READ_CHARS_MAX}), and under "waiting" the
             permission requests it waits on (requestId, tool, ask): answer
             those with sessions.answer.`,
-  "sessions.send": `  sessions.send {"sessionId":"...","prompt":"...","notifyOnComplete":true}
+  "sessions.send": `  sessions.send {"sessionId":"...","prompt":"...","notifyOnComplete":true,
+                 "summary":"A few words"}
             A follow-up to one of your sessions. Refused while it works or
-            waits on the user. notifyOnComplete works as in start.`,
+            waits on the user. notifyOnComplete and summary work as in
+            start.`,
   "sessions.access": `  sessions.access {"sessionId":"...","userAccess":true}
             Let the user work in one of your sessions (true), or make it
             read-only to them again (false). Both fields are required. Only
@@ -1066,6 +1157,19 @@ export const SESSION_HELP: Record<SessionAction, string> = {
             32 KB a call; follow "next"). Tool calls come as name and
             summary; "includeTools":true adds their outputs. Read a turn
             only when the request needs it.`,
+  "conversations.list": `  conversations.list {}
+            Whom you may message (PD-06): a conductor, the other
+            conductors of this project; a session a conductor started,
+            that conductor ("to":"conductor"). Each with its agent and
+            whether it is busy.`,
+  "conversations.message": `  conversations.message {"to":"<conductor id>|conductor","text":"...",
+                         "summary":"A few words"}
+            Message another conversation of this project (PD-06). The
+            first message between two conversations asks the user; at most
+            20 an hour to one. A busy one reads it once its turn ends. When
+            both of you run on Claude it answers "send-it" with an address:
+            send the text yourself with SendMessage to it (Lanework checks
+            it arrived, and delivers it otherwise).`,
   "memory.write": `  memory.write {"notes":"Decisions, open threads, what to check next"}
             Conductors only. Replace your notes for this project, at most
             ${MEMORY_NOTES_MAX} characters: send everything worth keeping, the

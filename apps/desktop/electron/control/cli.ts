@@ -84,13 +84,14 @@ const ACTION_HELP: Record<ControlAction, string> = {
   answer: `  answer    {"taskId":"...","requestId":"...","answers":{"<question text>":"<answer>"}}
             Answer the question a worker asked (its text and options come
             from needsInput), or pass "skip":true instead of "answers".`,
-  steer: `  steer     {"taskId":"...","text":"..."}
+  steer: `  steer     {"taskId":"...","text":"...","summary":"A few words"}
             Redirect a worker that is still running, without discarding what
             it has done. Use it the moment one drifts; message only lands
-            once it has stopped.`,
-  message: `  message   {"taskId":"...","text":"..."}
+            once it has stopped. "summary" (optional) is what the user reads
+            first: the worker's chat shows the text folded under it.`,
+  message: `  message   {"taskId":"...","text":"...","summary":"A few words"}
             Give a stopped worker another turn in its own scope; it keeps its
-            session, worktree and history.`,
+            session, worktree and history. "summary" works as in steer.`,
   retry: `  retry     {"taskId":"...","text":"...","files":["src/feature"]}
             Retry a stopped worker with corrected write scopes. Use it only
             when the extra files are really needed. Scopes beyond what the

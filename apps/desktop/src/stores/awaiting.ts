@@ -99,6 +99,7 @@ export const useAwaiting = create<AwaitingState>((set) => {
               ...entry,
               agent: entry.agent ?? agentOf(event.project, event.conversation),
               requests: [...entry.requests, request],
+              ...(event.managed ? { managed: true } : {}),
             }
           : {
               project: event.project,
@@ -106,6 +107,7 @@ export const useAwaiting = create<AwaitingState>((set) => {
               agent: agentOf(event.project, event.conversation),
               requests: [request],
               since: new Date().toISOString(),
+              ...(event.managed ? { managed: true } : {}),
             },
       };
     }

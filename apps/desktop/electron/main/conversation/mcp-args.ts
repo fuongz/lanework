@@ -56,6 +56,8 @@ export const CONDUCTOR_ALLOWED_TOOLS = [
   "memory_write",
   "models_list",
   "thread_read",
+  "conversations_list",
+  "conversation_message",
 ] as const;
 
 /**
@@ -63,7 +65,13 @@ export const CONDUCTOR_ALLOWED_TOOLS = [
  * permission prompt: `thread_read` (BE-03) only reads back the caller's own
  * thread, which its transcript already holds.
  */
-export const ANY_ALLOWED_TOOLS = ["thread_read"] as const;
+export const ANY_ALLOWED_TOOLS = [
+  "thread_read",
+  // PD-06: the app decides who may message whom, and asks the user on a
+  // pair's first message, so the tool itself needs no prompt.
+  "conversations_list",
+  "conversation_message",
+] as const;
 
 /**
  * The control tools a process runs without asking: a conductor's or any

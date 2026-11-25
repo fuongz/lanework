@@ -91,6 +91,9 @@ export function useAwaitingElsewhere(): Waiting[] {
       // answers it: main refuses the user's answer. One whose conductor is
       // gone, or let the user in, is theirs (`managed`, as main has it).
       if (!userMayActOn(listed)) continue;
+      // NOTE: Main's own word, for a session not listed yet: one a
+      // conductor started a moment ago asks before the rail has it.
+      if (entry.managed && !listed) continue;
       out.push({
         ...entry,
         projectId: entry.project,

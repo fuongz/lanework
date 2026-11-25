@@ -1704,6 +1704,12 @@ export function createEngines(input: EngineDeps) {
      * The conversation whose engine runs as process `pid` (FE-169): who sent
      * a message from another Claude session, when it is one of the app's.
      */
+    /** The process id of `conversation`'s engine while it runs, else null. */
+    pidOf(project: string, conversation: string): number | null {
+      const engine = engines.get(keyOf(project, conversation));
+      return engine?.alive() ? engine.pid() : null;
+    },
+
     byPid(pid: number): { project: string; conversation: string } | null {
       for (const engine of engines.values())
         if (engine.pid() === pid && engine.conversation)

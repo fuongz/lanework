@@ -52,6 +52,7 @@ import {
   type PermissionAnswer,
   type PermissionRequest,
   settingsFor,
+  withSummary,
 } from "../../../shared/conversation";
 import {
   CONTROL_ENV,
@@ -3143,7 +3144,7 @@ export class Orchestrator {
           run.project,
           task.conversation,
           own.worktree,
-          outgoing(call.input.text, settings),
+          outgoing(withSummary(call.input.summary, call.input.text), settings),
           task.agent,
         );
         return { task: this.taskView(record, task, false) };
@@ -3174,7 +3175,10 @@ export class Orchestrator {
             `${started.id} depends on ${task.id} and already started; delegate a separate fix instead.`,
           );
         const own = this.own(record, task);
-        own.turn = call.input.text;
+        own.turn = withSummary(
+          "summary" in call.input ? call.input.summary : undefined,
+          call.input.text,
+        );
         // New scopes beyond what the user approved wait for them (D11).
         const wider =
           call.action === "retry" ? this.widened(record, call.input.files) : [];

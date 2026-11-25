@@ -24,6 +24,8 @@ const SAFE = [
   "memory_write",
   "models_list",
   "thread_read",
+  "conversations_list",
+  "conversation_message",
 ];
 
 /** The value after `flag`, or null when the flag is absent. */
@@ -75,7 +77,9 @@ describe("the control tools a conductor runs without asking", () => {
     );
     assert.equal(
       flagValue(plain, "--allowedTools"),
-      `mcp__${CONTROL_SERVER}__thread_read`,
+      ["thread_read", "conversations_list", "conversation_message"]
+        .map((tool) => `mcp__${CONTROL_SERVER}__${tool}`)
+        .join(","),
     );
     const noServer = engineArgs(
       session,
@@ -120,7 +124,10 @@ describe("the control tools a conductor runs without asking", () => {
     assert.equal(conductor?.includes("sessions_answer"), false);
     assert.equal(conductor?.includes("conductors_create"), false);
     const [, plain] = codexControlArgs("/shim");
-    assert.ok(plain?.includes('tools={thread_read={approval_mode="approve"}}'));
+    assert.ok(plain?.includes('thread_read={approval_mode="approve"}'));
+    assert.ok(
+      plain?.includes('conversation_message={approval_mode="approve"}'),
+    );
     assert.equal(plain?.includes("sessions_start"), false);
   });
 });

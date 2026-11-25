@@ -50,8 +50,10 @@ import {
   usePanelPage,
 } from "#/components/shared/common/panel-pages";
 import {
-  initials,
+  PeerAvatar,
   toneOf,
+  useConductorOf,
+  useSessionTitle,
 } from "#/components/shared/conversation/turn-view.peer";
 import { splitPath } from "#/components/shared/diff/diff-file-header";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
@@ -551,48 +553,53 @@ function PeersGroup({
       label="Talking with"
       count={peers.length}
     >
-      {peers.map((peer) => {
-        const name =
-          peer.name ?? (peer.pid ? `process ${peer.pid}` : "Claude session");
-        const tone = toneOf(peer.name ?? peer.key);
-        const counts = [
-          peer.received ? `${peer.received} in` : null,
-          peer.sent ? `${peer.sent} out` : null,
-        ]
-          .filter(Boolean)
-          .join(", ");
-        return (
-          <li key={peer.key} className={SUB_ROW} title={peer.key}>
-            <span
-              aria-hidden="true"
-              className={cn(
-                "grid size-5 shrink-0 place-items-center rounded-full text-[9px] font-semibold",
-                tone.avatar,
-              )}
-            >
-              {initials(name)}
-            </span>
-            <span
-              className={cn("min-w-0 flex-1 truncate font-medium", tone.name)}
-            >
-              {name}
-            </span>
-            <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
-              {counts}
-            </span>
-            {peer.sender && (
-              <Link
-                to="/w/$slug/agents/chat/$conversation"
-                params={{ slug, conversation: peer.sender.conversation }}
-                className="text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] shrink-0 rounded-md px-1.5 py-0.5 text-xs transition-colors"
-              >
-                Open
-              </Link>
-            )}
-          </li>
-        );
-      })}
+      {peers.map((peer) => (
+        <PeerRow key={peer.key} slug={slug} peer={peer} />
+      ))}
     </Group>
+  );
+}
+
+/** One other session in Talking with: its conductor's mark and name if any. */
+function PeerRow({ slug, peer }: { slug: string; peer: ConversationPeer }) {
+  const lead = useConductorOf(slug, peer.sender?.conversation ?? null);
+  const title = useSessionTitle(slug, peer.sender?.conversation ?? null);
+  const name =
+    lead?.name ??
+    title ??
+    peer.name ??
+    (peer.pid ? `process ${peer.pid}` : "Claude session");
+  const tone = toneOf(lead?.id ?? peer.name ?? peer.key);
+  const counts = [
+    peer.received ? `${peer.received} in` : null,
+    peer.sent ? `${peer.sent} out` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return (
+    <li className={SUB_ROW} title={peer.key}>
+      <PeerAvatar
+        lead={lead}
+        name={name}
+        toneKey={peer.name ?? peer.key}
+        size="sm"
+      />
+      <span className={cn("min-w-0 flex-1 truncate font-medium", tone.name)}>
+        {name}
+      </span>
+      <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
+        {counts}
+      </span>
+      {peer.sender && (
+        <Link
+          to="/w/$slug/agents/chat/$conversation"
+          params={{ slug, conversation: peer.sender.conversation }}
+          className="text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] shrink-0 rounded-md px-1.5 py-0.5 text-xs transition-colors"
+        >
+          Open
+        </Link>
+      )}
+    </li>
   );
 }
 
