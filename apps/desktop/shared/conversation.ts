@@ -1786,6 +1786,25 @@ export interface ConversationFacts {
   web: { searches: WebSearch[]; partial: boolean };
   /** Who it talked with: other sessions and its sub-agents. */
   contacts?: ConversationContacts;
+  /**
+   * The sessions of its thread, oldest first (FE-170): only for one that
+   * switched agents, two sessions or more.
+   */
+  thread?: ThreadPart[];
+}
+
+/** One session of a thread, as the session details list it (FE-170). */
+export interface ThreadPart {
+  conversation: string;
+  agent: ConversationAgent;
+  /** The model it ran on, as handed to; null when not known. */
+  model: string | null;
+  /** Its own turns (a fork's copied history left out). */
+  turns: number;
+  /** The earlier session it was forked from (BE-05); null when started new. */
+  forkOf: string | null;
+  /** Its first turn's id, where the chat scrolls to show it; null if none. */
+  firstTurn: string | null;
 }
 
 /** One other Claude session a conversation messaged or heard from. */

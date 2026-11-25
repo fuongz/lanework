@@ -6,6 +6,7 @@ import {
   FolderGitTwoIcon,
   GitBranchIcon,
   GitCommitIcon,
+  GitForkIcon,
   Globe02Icon,
   MessageMultiple01Icon,
   Robot02Icon,
@@ -26,6 +27,7 @@ import type {
   ConversationContacts,
   ConversationPeer,
   ConversationSubagent,
+  ThreadPart,
 } from "#/../shared/conversation";
 import {
   type AgentCommit,
@@ -67,6 +69,7 @@ import { cn } from "#/lib/utils";
 import { mergeWebSearches, type WebSearch } from "#/lib/web-sources";
 import { useWorktree } from "#/stores/worktree";
 import { SourceRows } from "./conductor-sessions.sources";
+import { ThreadRow } from "./conductor-sessions.thread";
 
 /**
  * Each set of conversations' last read, by project and conversations, for
@@ -85,6 +88,8 @@ interface Reads {
   web: { searches: WebSearch[]; partial: boolean } | null;
   /** Who it talked with, and the conversation it is (for its sub-agents). */
   contacts: (ConversationContacts & { conversation: string }) | null;
+  /** Its thread's sessions, when it switched agents (FE-170). */
+  thread: ThreadPart[] | null;
   /** Both reads failed: why. */
   error: string | null;
 }
@@ -147,6 +152,8 @@ function useReads(project: string, slug: string, sources: ReadSource[]) {
             chat.status === "fulfilled" && chat.value.contacts
               ? { ...chat.value.contacts, conversation: id }
               : null,
+          thread:
+            chat.status === "fulfilled" ? (chat.value.thread ?? null) : null,
           error:
             workspace.status === "rejected" && files.status === "rejected"
               ? ipcMessage(workspace.reason, "This session could not be read.")
@@ -264,6 +271,12 @@ function merge(reads: Reads[]) {
     },
     peers: [...peers.values()].sort((a, b) => b.lastAt.localeCompare(a.lastAt)),
     subagents,
+    // FE-170/D1: one conversation's own thread, two sessions or more; an
+    // overview of several conversations has none.
+    thread:
+      reads.length === 1 && (reads[0]?.thread?.length ?? 0) > 1
+        ? (reads[0]?.thread ?? [])
+        : [],
   };
 }
 
@@ -428,7 +441,7 @@ function Facts({
   merged: ReturnType<typeof merge>;
   tasks: ReactNode;
 }) {
-  const { workspaces, files, commits, web, peers, subagents } = merged;
+  const { workspaces, files, commits, web, peers, subagents, thread } = merged;
   const pages = new Set(
     web.searches.flatMap((search) => search.sources.map((s) => s.url)),
   ).size;
@@ -483,6 +496,7 @@ function Facts({
     web.searches.length > 0 ||
     peers.length > 0 ||
     subagents.length > 0 ||
+    thread.length > 0 ||
     tasks ? (
       <Section>
         {commits.length > 0 && <CommitsGroup commits={commits} now={now} />}
@@ -500,6 +514,7 @@ function Facts({
             <SourceRows searches={web.searches} partial={web.partial} />
           </Group>
         )}
+        {thread.length > 0 && <ThreadGroup slug={slug} thread={thread} />}
         {peers.length > 0 && <PeersGroup slug={slug} peers={peers} />}
         {subagents.length > 0 && (
           <SubagentsGroup slug={slug} subagents={subagents} />
@@ -555,6 +570,31 @@ function PeersGroup({
     >
       {peers.map((peer) => (
         <PeerRow key={peer.key} slug={slug} peer={peer} />
+      ))}
+    </Group>
+  );
+}
+
+/**
+ * The agents a conversation switched through (FE-170), oldest first: each
+ * session's CLI, model and own turns, and whether it was a fork of an
+ * earlier one (BE-05).
+ */
+function ThreadGroup({ slug, thread }: { slug: string; thread: ThreadPart[] }) {
+  const position = new Map(
+    thread.map((part, index) => [part.conversation, index + 1]),
+  );
+  return (
+    <Group icon={GitForkIcon} label="Thread" count={thread.length}>
+      {thread.map((part, index) => (
+        <ThreadRow
+          key={part.conversation}
+          slug={slug}
+          part={part}
+          index={index + 1}
+          forkOf={part.forkOf ? (position.get(part.forkOf) ?? null) : null}
+          rowClass={SUB_ROW}
+        />
       ))}
     </Group>
   );

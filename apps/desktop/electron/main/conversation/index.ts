@@ -2463,8 +2463,29 @@ export function registerConversation(
   ): Promise<ConversationFacts> {
     // NOTE: A thread's facts are every session's: read stitched, without
     // the per-transcript fold a lone conversation keeps its answer in.
-    if ((await threadOf(project, conversation)).chain.length)
-      return factsOf((await readWhole(project, conversation)).turns);
+    const { chain } = await threadOf(project, conversation);
+    if (chain.length) {
+      const turns = (await readWhole(project, conversation)).turns;
+      // FE-170: each session's own turns, as `thread.read` numbers them.
+      const counts = new Map<string, number>();
+      const firsts = new Map<string, string>();
+      for (const entry of indexTurns(turns, chain.at(-1)?.conversation ?? ""))
+        if (entry) {
+          counts.set(entry.session, entry.index + 1);
+          if (entry.index === 0) firsts.set(entry.session, entry.turn.id);
+        }
+      return {
+        ...factsOf(turns),
+        thread: chain.map((entry) => ({
+          conversation: entry.conversation,
+          agent: entry.agent,
+          model: entry.model,
+          turns: counts.get(entry.conversation) ?? 0,
+          forkOf: entry.link?.forked?.from ?? null,
+          firstTurn: firsts.get(entry.conversation) ?? null,
+        })),
+      };
+    }
     const folder =
       workerFolderOf(project, conversation) ?? (await folderOf(project));
     const agent = await agentOf(folder, conversation);
