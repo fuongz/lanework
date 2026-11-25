@@ -5,6 +5,7 @@ import {
   Search01Icon,
   Settings01Icon,
   SquareArrowUp02Icon,
+  TimeScheduleIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
@@ -384,6 +385,21 @@ export function AppSidebar({
                 aria-hidden="true"
               />
               <span className="min-w-0 truncate">Files</span>
+            </Link>
+            {/* Agents run on a schedule (FE-99). */}
+            <Link
+              to="/w/$slug/automations"
+              params={{ slug }}
+              className={ROW}
+              activeProps={ACTIVE}
+            >
+              <HugeiconsIcon
+                icon={TimeScheduleIcon}
+                className="text-muted-foreground group-[[aria-current]]:text-foreground size-4 shrink-0"
+                strokeWidth={1.5}
+                aria-hidden="true"
+              />
+              <span className="min-w-0 truncate">Automations</span>
             </Link>
           </nav>
         )}

@@ -65,6 +65,7 @@
     "class-variance-authority": "^0.7.1",
     "cmdk": "^1.1.1",
     "cn": "^0.2.6",
+    "croner": "^11.0.1",
     "electron": "^44.9.3",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",

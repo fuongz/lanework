@@ -78,9 +78,39 @@ export function setSessionsEnv(next: EngineTap["env"]): void {
   sessionsEnv = next;
 }
 
+/**
+ * More ears for `result`, beside the tap's own: automations (FE-99) hear how
+ * their runs' turns ended without taking the one slot orchestration fills.
+ */
+const resultListeners = new Set<(result: EngineResult) => void>();
+
+/** Hear every turn's result too. @returns What stops it. */
+export function onEngineResult(
+  listener: (result: EngineResult) => void,
+): () => void {
+  resultListeners.add(listener);
+  return () => resultListeners.delete(listener);
+}
+
 /** The listeners now installed. */
 export function engineTap(): EngineTap {
-  return tap;
+  if (resultListeners.size === 0) return tap;
+  return {
+    ...tap,
+    result: (result) => {
+      try {
+        tap.result?.(result);
+      } finally {
+        for (const listener of resultListeners) {
+          try {
+            listener(result);
+          } catch {
+            // One listener's fault is not the engine's.
+          }
+        }
+      }
+    },
+  };
 }
 
 /**

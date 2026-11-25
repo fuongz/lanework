@@ -1,6 +1,7 @@
 import type { DesktopAgentConfigApi } from "./agent-config";
 import type { DesktopAgentSetupApi } from "./agent-setup";
 import type { DesktopAuthApi, DesktopLaneworkMcpApi } from "./auth";
+import type { DesktopAutomationsApi } from "./automations";
 import type { DesktopConductorsApi } from "./conductor-sessions";
 import type { DesktopConnectorsApi } from "./connectors";
 import type { DesktopConversationApi } from "./conversation";
@@ -145,6 +146,8 @@ export interface DesktopApi {
   metrics: DesktopMetricsApi;
   /** Settings → Storage: the app folder's size, and clearing its cache. */
   storage: DesktopStorageApi;
+  /** Agent runs on a schedule, and their history (FE-99). */
+  automations: DesktopAutomationsApi;
   /** Updates from GitHub Releases, and What's New after one (INF-11). */
   updater: DesktopUpdaterApi;
   /** Settings → Agents: the checkpoint hook for Claude Code. */

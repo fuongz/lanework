@@ -41,6 +41,7 @@ import { registerAgentSetup } from "./agent-setup";
 import { installLwk } from "./agent-setup/lwk-install";
 import { ensureControlMcpShim } from "./agent-setup/mcp-entry";
 import { registerAuth } from "./auth";
+import { registerAutomations, stopAutomations } from "./automations";
 import {
   APP_CHANNEL,
   APP_DISPLAY_NAME,
@@ -580,6 +581,8 @@ app
       kill: (id) => (id.startsWith("pid:") ? pids.kill(id) : killTerminal(id)),
       onRunningChanged,
     });
+    // FE-99: after the conversation view, whose engines a run starts on.
+    registerAutomations(devUrl);
     // FE-165: no work until a project's first permission request.
     registerPermissions(devUrl, { pendingPermission });
     registerHandoff(devUrl);
@@ -695,6 +698,7 @@ app
     app.quit();
   });
 app.on("will-quit", () => {
+  stopAutomations();
   void flushPermissions();
   void controlServer?.close();
   controlServer = null;

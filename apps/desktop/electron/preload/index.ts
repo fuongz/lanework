@@ -14,6 +14,11 @@ import {
   laneworkMcpChannels,
 } from "../../shared/auth";
 import {
+  type AutomationsChange,
+  automationsChannels,
+  type DesktopAutomationsApi,
+} from "../../shared/automations";
+import {
   conductorChannels,
   type DesktopConductorsApi,
 } from "../../shared/conductor-sessions";
@@ -256,6 +261,28 @@ const metrics: DesktopMetricsApi = {
   get: () => ipcRenderer.invoke(metricsChannels.get),
   set: (enabled) => ipcRenderer.invoke(metricsChannels.set, enabled),
   reveal: () => ipcRenderer.invoke(metricsChannels.reveal),
+};
+
+/**
+ * Automations (FE-99): agent runs on a schedule. Ids and checked inputs
+ * only; main finds the folder and starts the run.
+ */
+const automations: DesktopAutomationsApi = {
+  list: (project) => ipcRenderer.invoke(automationsChannels.list, project),
+  create: (project, input) =>
+    ipcRenderer.invoke(automationsChannels.create, project, input),
+  update: (id, input) =>
+    ipcRenderer.invoke(automationsChannels.update, id, input),
+  remove: (id) => ipcRenderer.invoke(automationsChannels.remove, id),
+  setEnabled: (id, enabled) =>
+    ipcRenderer.invoke(automationsChannels.setEnabled, id, enabled),
+  runNow: (id) => ipcRenderer.invoke(automationsChannels.runNow, id),
+  runs: (automationId, limit) =>
+    limit === undefined
+      ? ipcRenderer.invoke(automationsChannels.runs, automationId)
+      : ipcRenderer.invoke(automationsChannels.runs, automationId, limit),
+  onChanged: (listener) =>
+    subscribe<AutomationsChange>(automationsChannels.changed, listener),
 };
 
 const storage: DesktopStorageApi = {
@@ -1146,6 +1173,7 @@ const desktop: DesktopApi = {
   attention,
   metrics,
   storage,
+  automations,
   updater,
   handoff,
   readiness,

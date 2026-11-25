@@ -1,5 +1,11 @@
 import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { dirname } from "node:path";
+import {
+  AUTOMATION_RUNS_KEPT,
+  type Automation,
+  type AutomationRun,
+  type AutomationRunStatus,
+} from "../../shared/automations";
 import { LEAD_REF_PATTERN } from "../../shared/orchestration";
 import {
   AGENT_SESSION_LIMIT,
@@ -280,6 +286,92 @@ function pick<T>(value: T | undefined, current: T): T {
 function numberOrNull(value: number | null): number | null {
   return value === null ? null : Number(value);
 }
+
+interface AutomationRow {
+  id: string;
+  project: string;
+  name: string;
+  prompt: string;
+  agent: Automation["agent"];
+  settings: string;
+  workspace: Automation["workspace"];
+  schedule: string;
+  timezone: string;
+  grace_minutes: number;
+  timeout_minutes: number;
+  enabled: number;
+  next_run_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface AutomationRunRow {
+  id: string;
+  automation_id: string;
+  trigger: AutomationRun["trigger"];
+  scheduled_for: string;
+  started_at: string | null;
+  ended_at: string | null;
+  status: AutomationRunStatus;
+  agent: AutomationRun["agent"];
+  conversation: string | null;
+  worktree: string | null;
+  error: string | null;
+  created_at: string;
+}
+
+function toAutomation(row: AutomationRow): Automation {
+  return {
+    id: row.id,
+    project: row.project,
+    name: row.name,
+    prompt: row.prompt,
+    agent: row.agent,
+    settings: JSON.parse(row.settings) as Automation["settings"],
+    workspace: row.workspace,
+    schedule: JSON.parse(row.schedule) as Automation["schedule"],
+    timezone: row.timezone,
+    graceMinutes: Number(row.grace_minutes),
+    timeoutMinutes: Number(row.timeout_minutes),
+    enabled: Boolean(row.enabled),
+    nextRunAt: row.next_run_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toAutomationRun(row: AutomationRunRow): AutomationRun {
+  return {
+    id: row.id,
+    automationId: row.automation_id,
+    trigger: row.trigger,
+    scheduledFor: row.scheduled_for,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    status: row.status,
+    agent: row.agent,
+    conversation: row.conversation,
+    worktree: row.worktree,
+    error: row.error,
+  };
+}
+
+/** The fields of a run {@link SessionStore.updateAutomationRun} may change. */
+export type AutomationRunPatch = Partial<
+  Pick<
+    AutomationRun,
+    "status" | "startedAt" | "endedAt" | "conversation" | "worktree" | "error"
+  >
+>;
+
+const RUN_PATCH_COLUMNS: Record<keyof AutomationRunPatch, string> = {
+  status: "status",
+  startedAt: "started_at",
+  endedAt: "ended_at",
+  conversation: "conversation",
+  worktree: "worktree",
+  error: "error",
+};
 
 function invalid(message: string): never {
   throw new SessionStoreError("invalid", message);
@@ -797,6 +889,165 @@ export class SessionStore {
         ...(archived ? [at, key] : [key]),
       ) > 0
     );
+  }
+
+  // ── Automations (FE-99) ───────────────────────────────────────────────────
+
+  /** A project's automations, by name. */
+  listAutomations(project: string): Automation[] {
+    return this.#all<AutomationRow>(
+      "SELECT * FROM automation WHERE project = ? ORDER BY name COLLATE NOCASE, id",
+      project,
+    ).map(toAutomation);
+  }
+
+  /** Every automation, for the scheduler. */
+  allAutomations(): Automation[] {
+    return this.#all<AutomationRow>("SELECT * FROM automation").map(
+      toAutomation,
+    );
+  }
+
+  getAutomation(id: string): Automation | null {
+    const row = this.#get<AutomationRow>(
+      "SELECT * FROM automation WHERE id = ?",
+      id,
+    );
+    return row ? toAutomation(row) : null;
+  }
+
+  /** Insert `automation`, or replace the row with its id. */
+  saveAutomation(automation: Automation): void {
+    this.#write(() => {
+      this.#run(
+        `INSERT INTO automation (id, project, name, prompt, agent, settings,
+           workspace, schedule, timezone, grace_minutes, timeout_minutes,
+           enabled, next_run_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           project = excluded.project, name = excluded.name,
+           prompt = excluded.prompt, agent = excluded.agent,
+           settings = excluded.settings, workspace = excluded.workspace,
+           schedule = excluded.schedule, timezone = excluded.timezone,
+           grace_minutes = excluded.grace_minutes,
+           timeout_minutes = excluded.timeout_minutes,
+           enabled = excluded.enabled, next_run_at = excluded.next_run_at,
+           updated_at = excluded.updated_at`,
+        automation.id,
+        automation.project,
+        automation.name,
+        automation.prompt,
+        automation.agent,
+        JSON.stringify(automation.settings),
+        automation.workspace,
+        JSON.stringify(automation.schedule),
+        automation.timezone,
+        automation.graceMinutes,
+        automation.timeoutMinutes,
+        automation.enabled ? 1 : 0,
+        automation.nextRunAt,
+        automation.createdAt,
+        automation.updatedAt,
+      );
+    });
+  }
+
+  /** Set only the next slot, leaving `updated_at` alone. */
+  setAutomationNextRun(id: string, nextRunAt: string | null): boolean {
+    return (
+      this.#run(
+        "UPDATE automation SET next_run_at = ? WHERE id = ?",
+        nextRunAt,
+        id,
+      ) > 0
+    );
+  }
+
+  /** Delete it and, by cascade, its runs. */
+  removeAutomation(id: string): boolean {
+    return this.#run("DELETE FROM automation WHERE id = ?", id) > 0;
+  }
+
+  /** Its runs, newest first. */
+  listAutomationRuns(automationId: string, limit = AUTOMATION_RUNS_KEPT) {
+    return this.#all<AutomationRunRow>(
+      "SELECT * FROM automation_run WHERE automation_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+      automationId,
+      Math.max(1, Math.min(limit, AUTOMATION_RUNS_KEPT)),
+    ).map(toAutomationRun);
+  }
+
+  getAutomationRun(id: string): AutomationRun | null {
+    const row = this.#get<AutomationRunRow>(
+      "SELECT * FROM automation_run WHERE id = ?",
+      id,
+    );
+    return row ? toAutomationRun(row) : null;
+  }
+
+  /** Every `queued` or `running` run, oldest first. */
+  activeAutomationRuns(): AutomationRun[] {
+    return this.#all<AutomationRunRow>(
+      "SELECT * FROM automation_run WHERE status IN ('queued', 'running') ORDER BY created_at, id",
+    ).map(toAutomationRun);
+  }
+
+  /**
+   * Add `run`, then drop the automation's runs past
+   * {@link AUTOMATION_RUNS_KEPT}, oldest first, never an active one.
+   */
+  addAutomationRun(run: AutomationRun, createdAt = this.#now()): void {
+    this.#write(() => {
+      this.#run(
+        `INSERT INTO automation_run (id, automation_id, trigger, scheduled_for,
+           started_at, ended_at, status, agent, conversation, worktree, error,
+           created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        run.id,
+        run.automationId,
+        run.trigger,
+        run.scheduledFor,
+        run.startedAt,
+        run.endedAt,
+        run.status,
+        run.agent,
+        run.conversation,
+        run.worktree,
+        run.error,
+        createdAt,
+      );
+      this.#run(
+        `DELETE FROM automation_run WHERE automation_id = ?
+           AND status NOT IN ('queued', 'running')
+           AND id NOT IN (
+             SELECT id FROM automation_run WHERE automation_id = ?
+             ORDER BY created_at DESC, id DESC LIMIT ?
+           )`,
+        run.automationId,
+        run.automationId,
+        AUTOMATION_RUNS_KEPT,
+      );
+    });
+  }
+
+  /**
+   * Change some of a run's fields.
+   *
+   * @returns The run as it is now, or null when there is no such run.
+   */
+  updateAutomationRun(id: string, patch: AutomationRunPatch) {
+    const keys = (Object.keys(patch) as (keyof AutomationRunPatch)[]).filter(
+      (key) => key in RUN_PATCH_COLUMNS && patch[key] !== undefined,
+    );
+    if (keys.length > 0)
+      this.#run(
+        `UPDATE automation_run SET ${keys
+          .map((key) => `${RUN_PATCH_COLUMNS[key]} = ?`)
+          .join(", ")} WHERE id = ?`,
+        ...keys.map((key) => patch[key] ?? null),
+        id,
+      );
+    return this.getAutomationRun(id);
   }
 
   /**

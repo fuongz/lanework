@@ -93,6 +93,50 @@ const MIGRATIONS: readonly string[] = [
   UPDATE agent_session SET launched_user_access = 1
     WHERE launched_by_conductor IS NOT NULL;
   `,
+  // 5: automations and their runs (FE-99). Settings and schedule are JSON:
+  // only main reads them, always whole. Runs go with their automation.
+  `
+  CREATE TABLE automation (
+    id               TEXT PRIMARY KEY,
+    project          TEXT NOT NULL,
+    name             TEXT NOT NULL,
+    prompt           TEXT NOT NULL,
+    agent            TEXT NOT NULL CHECK (agent IN ('claude', 'codex')),
+    settings         TEXT NOT NULL,
+    workspace        TEXT NOT NULL CHECK (workspace IN ('current', 'worktree')),
+    schedule         TEXT NOT NULL,
+    timezone         TEXT NOT NULL,
+    grace_minutes    INTEGER NOT NULL,
+    timeout_minutes  INTEGER NOT NULL,
+    enabled          INTEGER NOT NULL DEFAULT 1,
+    next_run_at      TEXT,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL
+  );
+  CREATE INDEX automation_project ON automation(project, name);
+
+  CREATE TABLE automation_run (
+    id             TEXT PRIMARY KEY,
+    automation_id  TEXT NOT NULL REFERENCES automation(id) ON DELETE CASCADE,
+    trigger        TEXT NOT NULL CHECK (trigger IN ('schedule', 'catch_up', 'manual')),
+    scheduled_for  TEXT NOT NULL,
+    started_at     TEXT,
+    ended_at       TEXT,
+    status         TEXT NOT NULL CHECK (status IN (
+      'queued', 'running', 'succeeded', 'failed', 'timed_out', 'skipped',
+      'nothing_to_report'
+    )),
+    agent          TEXT NOT NULL,
+    conversation   TEXT,
+    worktree       TEXT,
+    error          TEXT,
+    created_at     TEXT NOT NULL
+  );
+  CREATE INDEX automation_run_history
+    ON automation_run(automation_id, created_at DESC);
+  CREATE INDEX automation_run_active
+    ON automation_run(status) WHERE status IN ('queued', 'running');
+  `,
 ];
 
 /** The version a fully migrated database reports. */

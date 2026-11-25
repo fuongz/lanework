@@ -300,7 +300,7 @@ let storeClosed = false;
  * @throws When it cannot be opened (a newer build's file), or once the app
  *   is quitting.
  */
-function sessionStore(): SessionStore {
+export function sessionStore(): SessionStore {
   if (store) return store;
   if (storeClosed) throw new Error("Lanework is quitting.");
   const opened = openSessionStore({ path: sessionStorePath() });

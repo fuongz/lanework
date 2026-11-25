@@ -88,6 +88,7 @@ import {
 import { isAgentSessionId, isAgentSessionIdOf } from "../../../shared/terminal";
 import { controlCliPath } from "../../control/install";
 import { agentHome as agentHomeAt } from "../agent-home";
+import { automationFolderOf, automations } from "../automations";
 import { connectorInventory } from "../connectors/inventory";
 import { belowMinimumNow } from "../harness/minimums";
 import { broadcast, handle, hearInMain, sendTo, windowContents } from "../ipc";
@@ -1522,6 +1523,8 @@ export function registerConversation(
     const shown = threadEvent(event);
     if (shown) stream.publish(shown);
     sessions?.onEvent(event);
+    // FE-99: an automation's run ends when its turn does.
+    automations.onEvent(event);
     if (event.type === "state" && typeof event.conversation === "string")
       void learnConductor(event.project, event.conversation);
     // An OpenCode turn that ended is read in now: the rail must not wait on
@@ -2089,6 +2092,7 @@ export function registerConversation(
         engines.pending(native.project, native.conversation)?.agent ?? "claude",
       folder:
         workerFolderOf(native.project, native.conversation) ??
+        automationFolderOf(native.conversation) ??
         (await folderOf(native.project)),
       request,
     };
@@ -2162,7 +2166,9 @@ export function registerConversation(
     // A worker of an orchestration run (FE-87) keeps its transcript under
     // its own worktree, not the project's folder.
     const folder =
-      workerFolderOf(project, conversation) ?? (await folderOf(project));
+      workerFolderOf(project, conversation) ??
+      automationFolderOf(conversation) ??
+      (await folderOf(project));
     const agent = await agentOf(folder, conversation);
     // A conversation started here whose first line the CLI has not
     // written yet: what its engine holds so far.
@@ -2487,7 +2493,9 @@ export function registerConversation(
       };
     }
     const folder =
-      workerFolderOf(project, conversation) ?? (await folderOf(project));
+      workerFolderOf(project, conversation) ??
+      automationFolderOf(conversation) ??
+      (await folderOf(project));
     const agent = await agentOf(folder, conversation);
     const pending = engines.pending(project, conversation);
     if (pending && !agent) return factsOf(pending.turns);
@@ -2548,7 +2556,9 @@ export function registerConversation(
       const { project, conversation } = conversationOf(args);
       const call = turnRef(args[2]);
       const folder =
-        workerFolderOf(project, conversation) ?? (await folderOf(project));
+        workerFolderOf(project, conversation) ??
+        automationFolderOf(conversation) ??
+        (await folderOf(project));
       // NOTE: In a thread the call is one session's: the newest first (the
       // likeliest), then back. Each is asked of its own transcript.
       const { chain } = await threadOf(project, conversation);
@@ -2594,7 +2604,9 @@ export function registerConversation(
           leads,
         );
       const folder =
-        workerFolderOf(project, conversation) ?? (await folderOf(project));
+        workerFolderOf(project, conversation) ??
+        automationFolderOf(conversation) ??
+        (await folderOf(project));
       const agent = await agentOf(folder, conversation);
       const pending = engines.pending(project, conversation);
       if (pending && !agent) return latestReadyProposal(pending.turns, leads);
