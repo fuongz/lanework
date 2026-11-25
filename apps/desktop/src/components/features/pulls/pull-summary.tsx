@@ -14,12 +14,14 @@ import { MarkdownBody } from "#/components/shared/common/markdown-body";
 import { MergeControl } from "#/components/shared/pulls/merge-control";
 import { Badge } from "#/components/ui/badge";
 import { Skeleton } from "#/components/ui/skeleton";
+import { useProjectKey } from "#/hooks/use-project-key";
 import { shortAge } from "#/lib/relative-time";
 import { cn } from "#/lib/utils";
 import { usePulls } from "#/stores/pulls";
 import type { PullDetail } from "../../../../shared/git";
 import { CommentBox } from "./comment-box";
 import { PullActivityList } from "./pull-activity";
+import { AgentContributionList, useAgentContribution } from "./pull-agents";
 import { PullChecksSection } from "./pull-checks";
 
 /**
@@ -138,6 +140,9 @@ export function PullSummary({ detail }: { detail: PullDetail }) {
   const loading = usePulls((state) => state.activityLoading);
   const error = usePulls((state) => state.activityError);
   const loadActivity = usePulls((state) => state.loadActivity);
+  const slug = usePulls((state) => state.slug);
+  const project = useProjectKey(slug ?? undefined);
+  const contribution = useAgentContribution(project, detail);
 
   useEffect(() => {
     void loadActivity(pull.number);
@@ -221,6 +226,19 @@ export function PullSummary({ detail }: { detail: PullDetail }) {
               same one the board's cards use. */}
           <MarkdownBody source={detail.body} />
         </Section>
+
+        {/* No section while reading or when no agent wrote a file: an empty
+            one would read as "agents wrote none", which a shell edit could
+            contradict (FE-171). */}
+        {slug && contribution.rows && contribution.rows.length > 0 && (
+          <Section title="Agent contribution" count={contribution.rows.length}>
+            <AgentContributionList
+              slug={slug}
+              rows={contribution.rows}
+              partial={contribution.partial}
+            />
+          </Section>
+        )}
 
         {/* A failed read is reported as a failure, in place of the sections
             it would have filled. "No CI checks" and "I could not ask GitHub"
