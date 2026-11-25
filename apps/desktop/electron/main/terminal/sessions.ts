@@ -11,7 +11,9 @@ import { type IPty, spawn as spawnPty } from "@lydell/node-pty";
 import * as serializeModule from "@xterm/addon-serialize";
 import * as headlessModule from "@xterm/headless";
 import {
+  type CardAutonomy,
   type CardBriefMode,
+  cardPrompt,
   clampGeometry,
   isAgentSessionIdOf,
   isBoardId,
@@ -171,7 +173,7 @@ export interface SpawnRequest {
   /** An agent conversation to continue; ignored unless a UUID. */
   resume?: unknown;
   /**
-   * The card a NEW agent tab is for: `{ boardId, card, mode }`.
+   * The card a NEW agent tab is for: `{ boardId, card, mode, autonomy? }`.
    *
    * The board is resolved by main. Ignored unless every part is shaped right,
    * and for a shell or a resume.
@@ -179,24 +181,42 @@ export interface SpawnRequest {
   card?: unknown;
 }
 
+// NOTE: The card prompt lives in `shared/terminal.ts` now, so a chat started
+// for a card (FE-173) words it exactly as a terminal tab does.
+export { cardPrompt };
+
 /**
- * An agent's first prompt for a card it was handed (FE-34/D3).
+ * The CLI flag that starts a NEW conversation in the dial's permission mode
+ * (PD-08), with its leading space; empty when the CLI keeps its own.
  *
- * NOTE: FIXED words around two ids, and the only prompt this app ever types.
- * The renderer chooses the mode and names the card; it never supplies a word
- * of this. Kept free of quotes and `!`, so it reads the same to every shell
- * even before {@link shellQuote} wraps it.
+ * NOTE: FIXED words picked by a value {@link isCardBrief} already checked
+ * against the four modes, never text from the page. Codex has no flag named
+ * after a mode: its sandbox and approval flags are mapped the way
+ * `codexPolicy` in `conversation/codex-engine.ts` maps the composer's modes.
+ * `--full-auto` is gone from codex-cli (0.170 refuses it), so acceptEdits is
+ * spelled out as the two flags it stood for, and auto adds Codex's automatic
+ * review of approvals (`approvalsReviewer: auto_review` there). Manual adds
+ * nothing: a Codex or Claude without a flag already asks. OpenCode takes no
+ * permission flag at launch.
  */
-export function cardPrompt(
-  mode: CardBriefMode,
-  boardId: string,
-  card: string,
+function permissionArgs(
+  kind: TerminalAgent,
+  autonomy: CardAutonomy | undefined,
 ): string {
-  const work =
-    "set_status processing, implement every ticked decision, prove each verify item before ticking it, and call checkpoint after each item you finish. If the card has streams, you are the lead: run its dispatch wave by wave, one sub-agent per stream in its own worktree given its brief as is, then merge each wave, re-run and tick that stream's verify items, checkpoint once per wave, and run the untagged verify items last. Follow the AGENTS.md and CLAUDE.md of this repo.";
-  return mode === "review"
-    ? `Review lanework card ${card} on board ${boardId} with me first: get_review it, ask me about every open decision, and record my answers with review_card. Once it answers ready, work the card end to end: ${work}`
-    : `Work lanework card ${card} on board ${boardId} end to end. get_review it first. If a decision is still open, stop and review it with me before writing any code. Otherwise ${work}`;
+  if (!autonomy) return "";
+  const mode = autonomy.permission;
+  if (kind === "claude") return ` --permission-mode ${mode}`;
+  if (kind !== "codex") return "";
+  switch (mode) {
+    case "manual":
+      return "";
+    case "acceptEdits":
+      return " --sandbox workspace-write --ask-for-approval on-request";
+    case "auto":
+      return " --approve-for-me";
+    case "bypassPermissions":
+      return " --dangerously-bypass-approvals-and-sandbox";
+  }
 }
 
 /** One shell word, whatever it holds: single-quoted, `'` written as `'\''`. */
@@ -209,14 +229,28 @@ function shellQuote(value: string): string {
  *
  * Checked HERE as well as in main: it becomes words on a command line.
  */
-function cardOf(
-  value: unknown,
-): { boardId: string; card: string; mode: CardBriefMode } | null {
+function cardOf(value: unknown): {
+  boardId: string;
+  card: string;
+  mode: CardBriefMode;
+  autonomy?: CardAutonomy;
+} | null {
   if (!isCardBrief(value)) return null;
   const { boardId } = value as { boardId?: unknown };
-  return isBoardId(boardId)
-    ? { boardId, card: value.card, mode: value.mode }
-    : null;
+  if (!isBoardId(boardId)) return null;
+  const card = { boardId, card: value.card, mode: value.mode };
+  // NOTE: Copied field by field, so nothing but the three knobs that
+  // isCardBrief checked can reach the command line.
+  return value.autonomy
+    ? {
+        ...card,
+        autonomy: {
+          permission: value.autonomy.permission,
+          commit: value.autonomy.commit,
+          toReview: value.autonomy.toReview,
+        },
+      }
+    : card;
 }
 
 /** What follows the CLI's name to continue a conversation. */
@@ -392,8 +426,10 @@ export function createSessions(options: SessionsOptions = {}) {
     const card = kind !== "shell" && !resumed ? cardOf(request.card) : null;
     // OpenCode reads a bare word as the folder to start in; its first prompt
     // goes by flag.
+    // PD-08: the dial's permission flag goes before the prompt, which some
+    // CLIs read as their last word.
     const prompt = card
-      ? ` ${kind === "opencode" ? "--prompt " : ""}${shellQuote(cardPrompt(card.mode, card.boardId, card.card))}`
+      ? `${permissionArgs(kind as TerminalAgent, card.autonomy)} ${kind === "opencode" ? "--prompt " : ""}${shellQuote(cardPrompt(card.mode, card.boardId, card.card, card.autonomy))}`
       : "";
     const bridgeArgs =
       kind === "claude"

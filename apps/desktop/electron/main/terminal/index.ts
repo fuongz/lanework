@@ -239,7 +239,23 @@ async function cardFor(
   const { project: known } = await knownProject(project);
   if (!isBoardId(known.id))
     throw new Error("This project has no board to take a card from.");
-  return { boardId: known.id, card: value.card, mode: value.mode };
+  // NOTE: Copied field by field, as `isCardBrief` checked them: the dial's
+  // knobs (PD-08) become a CLI flag and fixed words in the host.
+  const { autonomy } = value;
+  return {
+    boardId: known.id,
+    card: value.card,
+    mode: value.mode,
+    ...(autonomy
+      ? {
+          autonomy: {
+            permission: autonomy.permission,
+            commit: autonomy.commit,
+            toReview: autonomy.toReview,
+          },
+        }
+      : {}),
+  };
 }
 
 /**

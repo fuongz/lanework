@@ -2,6 +2,7 @@ import type { DesktopAgentConfigApi } from "./agent-config";
 import type { DesktopAgentSetupApi } from "./agent-setup";
 import type { DesktopAuthApi, DesktopLaneworkMcpApi } from "./auth";
 import type { DesktopAutomationsApi } from "./automations";
+import type { DesktopAutonomyApi } from "./autonomy";
 import type { DesktopConductorsApi } from "./conductor-sessions";
 import type { DesktopConnectorsApi } from "./connectors";
 import type { DesktopConversationApi } from "./conversation";
@@ -148,6 +149,8 @@ export interface DesktopApi {
   storage: DesktopStorageApi;
   /** Agent runs on a schedule, and their history (FE-99). */
   automations: DesktopAutomationsApi;
+  /** A project's autonomy dial for agents handed a card (PD-08). */
+  autonomy: DesktopAutonomyApi;
   /** Updates from GitHub Releases, and What's New after one (INF-11). */
   updater: DesktopUpdaterApi;
   /** Settings → Agents: the checkpoint hook for Claude Code. */

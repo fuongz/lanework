@@ -34,6 +34,7 @@ import {
   NOTHING_TO_REPORT,
   runPrompt,
 } from "../../../shared/automations";
+import { permissionInFolder } from "../../../shared/autonomy";
 import type {
   ConversationEvent,
   EngineState,
@@ -41,6 +42,7 @@ import type {
 } from "../../../shared/conversation";
 import { AGENT_NAME_MAX } from "../../../shared/terminal";
 import type { SessionStore } from "../../session-store";
+import { trust as projectTrust } from "../agent-setup";
 import { sharedEngines } from "../conversation/engine";
 import type { Outgoing } from "../conversation/queue";
 import { broadcast, handle } from "../ipc";
@@ -398,12 +400,22 @@ async function start(run: Live): Promise<void> {
     store().updateAutomationRun(run.runId, { worktree: tree.path });
   }
   const folder = run.folder;
+  // FE-173/D3: nobody watches a run, so a folder its CLI does not trust runs
+  // Supervised. Read for the project's own folder: a worktree is a copy of
+  // the same repository, and the CLI keeps no trust record for it. A read
+  // that fails counts as untrusted.
+  const trusted = await projectTrust(automation.project)
+    .then((found) => found[agent].trusted)
+    .catch(() => false);
   const out: Outgoing = {
     id: randomUUID(),
     text: runPrompt(automation.prompt),
     attachments: [],
     content: [{ type: "text", text: runPrompt(automation.prompt) }],
-    settings: automation.settings,
+    settings: {
+      ...automation.settings,
+      permission: permissionInFolder(automation.settings.permission, trusted),
+    },
   };
   let engine: EngineState;
   if (agent === "claude") {

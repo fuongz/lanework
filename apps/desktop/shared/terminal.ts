@@ -7,6 +7,8 @@
 // compromised renderer can type into a terminal it was shown, which is what a
 // terminal is for. It cannot start one somewhere else.
 
+import type { Permission } from "./conversation";
+
 /**
  * What a tab is opened as: a plain shell, or a shell with an agent's CLI typed
  * into it (the + menu).
@@ -98,6 +100,42 @@ export interface CardBrief {
   /** The card's task id (`FE-34`), or its uuid when it has none. */
   card: string;
   mode: CardBriefMode;
+  /**
+   * What the autonomy dial (PD-08) allows this agent; absent when the
+   * project's dial is not set. The host turns it into a CLI flag and fixed
+   * words, never words from the page.
+   */
+  autonomy?: CardAutonomy;
+}
+
+/** The dial's knobs a card's agent is started with (PD-08). */
+export interface CardAutonomy {
+  permission: Permission;
+  commit: boolean;
+  toReview: boolean;
+}
+
+/**
+ * The permission modes a card's agent may start in.
+ *
+ * NOTE: Restated, typed against `Permission`, so the pty host's bundle does
+ * not take in all of `conversation.ts` for one list.
+ */
+const CARD_PERMISSIONS = [
+  "manual",
+  "acceptEdits",
+  "auto",
+  "bypassPermissions",
+] as const satisfies readonly Permission[];
+
+function isCardAutonomy(value: unknown): value is CardAutonomy {
+  if (!value || typeof value !== "object") return false;
+  const { permission, commit, toReview } = value as Record<string, unknown>;
+  return (
+    (CARD_PERMISSIONS as readonly unknown[]).includes(permission) &&
+    typeof commit === "boolean" &&
+    typeof toReview === "boolean"
+  );
 }
 
 const TASK_ID = /^[A-Z]{1,6}-\d{1,5}$/;
@@ -121,12 +159,47 @@ export function isBoardId(value: unknown): value is string {
 
 export function isCardBrief(value: unknown): value is CardBrief {
   if (!value || typeof value !== "object") return false;
-  const { card, mode } = value as Record<string, unknown>;
+  const { card, mode, autonomy } = value as Record<string, unknown>;
   return (
     isCardRef(card) &&
     typeof mode === "string" &&
-    (CARD_BRIEFS as readonly string[]).includes(mode)
+    (CARD_BRIEFS as readonly string[]).includes(mode) &&
+    (autonomy === undefined || isCardAutonomy(autonomy))
   );
+}
+
+/**
+ * An agent's first prompt for a card it was handed (FE-34/D3).
+ *
+ * NOTE: FIXED words around two ids. In a terminal tab the host types it, and
+ * the renderer only names the mode and the card; a chat started for a card
+ * (FE-173) sends the same words. Kept free of quotes and `!`, so it reads the
+ * same to every shell before the host quotes it.
+ *
+ * With `autonomy` (PD-08), two fixed sentences follow: whether to commit and
+ * whether to move the card to review. Without it the prompt is exactly what
+ * it was before the dial, so the repo's own rules decide both.
+ */
+export function cardPrompt(
+  mode: CardBriefMode,
+  boardId: string,
+  card: string,
+  autonomy?: CardAutonomy,
+): string {
+  const work =
+    "set_status processing, implement every ticked decision, prove each verify item before ticking it, and call checkpoint after each item you finish. If the card has streams, you are the lead: run its dispatch wave by wave, one sub-agent per stream in its own worktree given its brief as is, then merge each wave, re-run and tick that stream's verify items, checkpoint once per wave, and run the untagged verify items last. Follow the AGENTS.md and CLAUDE.md of this repo.";
+  const prompt =
+    mode === "review"
+      ? `Review lanework card ${card} on board ${boardId} with me first: get_review it, ask me about every open decision, and record my answers with review_card. Once it answers ready, work the card end to end: ${work}`
+      : `Work lanework card ${card} on board ${boardId} end to end. get_review it first. If a decision is still open, stop and review it with me before writing any code. Otherwise ${work}`;
+  if (!autonomy) return prompt;
+  const commit = autonomy.commit
+    ? "When it is verified, commit it locally; never push."
+    : "Do not commit; leave the changes uncommitted for me.";
+  const toReview = autonomy.toReview
+    ? "Once every verify item is proven, move the card to the review lane with set_status."
+    : "Leave the card in processing; do not move it to review.";
+  return `${prompt} ${commit} ${toReview}`;
 }
 
 /**

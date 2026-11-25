@@ -181,7 +181,7 @@ async function trustFolders(slug: string) {
 const NO_TRUST = { trusted: false, own: null, from: null };
 
 /** Whether each CLI trusts the project's folder now, read fresh (FE-101). */
-async function trust(slug: string): Promise<ProjectTrust> {
+export async function trust(slug: string): Promise<ProjectTrust> {
   const at = await trustFolders(slug);
   if (!at) return { folder: null, claude: NO_TRUST, codex: NO_TRUST };
   const home = where();

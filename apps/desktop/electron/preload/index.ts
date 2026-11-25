@@ -19,6 +19,11 @@ import {
   type DesktopAutomationsApi,
 } from "../../shared/automations";
 import {
+  type AutonomyEvent,
+  autonomyChannels,
+  type DesktopAutonomyApi,
+} from "../../shared/autonomy";
+import {
   conductorChannels,
   type DesktopConductorsApi,
 } from "../../shared/conductor-sessions";
@@ -1144,6 +1149,15 @@ const permissions: DesktopPermissionsApi = {
     ),
 };
 
+/** The autonomy dial (PD-08): a project slug and its settings, nothing else. */
+const autonomy: DesktopAutonomyApi = {
+  get: (project) => ipcRenderer.invoke(autonomyChannels.get, project),
+  set: (project, settings) =>
+    ipcRenderer.invoke(autonomyChannels.set, project, settings),
+  onChanged: (listener) =>
+    subscribe<AutonomyEvent>(autonomyChannels.changed, listener),
+};
+
 /**
  * Connectors (FE-166): the MCP servers an agent reaches from a project. A
  * project slug and an agent name only; main finds the folder. `DesktopApi`
@@ -1190,5 +1204,6 @@ const desktop: DesktopApi = {
   fsSearch,
   permissions,
   connectors,
+  autonomy,
 };
 contextBridge.exposeInMainWorld("desktop", desktop);

@@ -24,6 +24,7 @@ import {
   STATUS_LABELS,
   TRIGGER_LABELS,
 } from "#/components/shared/automations/automation-format";
+import { AutomationTrust } from "#/components/shared/automations/automation-trust";
 import {
   EnabledSwitch,
   nextRunText,
@@ -388,6 +389,7 @@ export function AutomationDetail() {
             </p>
           )}
           <Summary automation={automation} now={now} />
+          <AutomationTrust slug={slug} agent={automation.agent} />
           <section
             aria-labelledby="automation-prompt"
             className="flex flex-col gap-2"

@@ -42,6 +42,7 @@ import { installLwk } from "./agent-setup/lwk-install";
 import { ensureControlMcpShim } from "./agent-setup/mcp-entry";
 import { registerAuth } from "./auth";
 import { registerAutomations, stopAutomations } from "./automations";
+import { registerAutonomy } from "./autonomy";
 import {
   APP_CHANNEL,
   APP_DISPLAY_NAME,
@@ -585,6 +586,8 @@ app
     registerAutomations(devUrl);
     // FE-165: no work until a project's first permission request.
     registerPermissions(devUrl, { pendingPermission });
+    // PD-08: no work until a project's first get.
+    registerAutonomy(devUrl);
     registerHandoff(devUrl);
     registerReadiness(devUrl);
     registerMemory(devUrl);

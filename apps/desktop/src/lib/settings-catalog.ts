@@ -2,6 +2,7 @@ import {
   Archive02Icon,
   BatteryEcoChargingIcon,
   CommandLineIcon,
+  DashboardSpeed02Icon,
   DashboardSquare02Icon,
   HardDriveIcon,
   InformationCircleIcon,
@@ -145,6 +146,13 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         icon: Shield01Icon,
         keywords:
           "permissions permission rules rule allow always ask first automatic automatically seeded audit recent bash edit write read tool pattern conductor scope approve deny",
+      },
+      {
+        to: "/settings/autonomy",
+        label: "Autonomy",
+        icon: DashboardSpeed02Icon,
+        keywords:
+          "autonomy dial level ask recommended full overnight custom reset not set permission mode supervised auto-accept edits full access auto approve decisions commit locally move to review lane assign agent card hand off",
       },
       {
         to: "/settings/archived",

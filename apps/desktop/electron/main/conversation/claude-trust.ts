@@ -32,6 +32,30 @@ export function claudeJsonFor(
   return dir ? join(dir, ".claude.json") : claudeJsonPath(home);
 }
 
+/**
+ * The record that decides `paths` (nearest first): the first folder with an
+ * explicit `hasTrustDialogAccepted`, true or false.
+ *
+ * NOTE: Nearest wins, never "any ancestor said yes": with `/` trusted and
+ * `~` not, Claude Code still asks in `~/code/x`, so Lanework must not load
+ * that repo's settings either. The filesystem root never grants trust: a
+ * yes there would trust every folder on the disk.
+ *
+ * @returns The deciding folder and its answer, or null when none has one.
+ */
+function decidingRecord(
+  accepted: (path: string) => boolean | null,
+  paths: readonly string[],
+): { path: string; trusted: boolean } | null {
+  for (const path of paths) {
+    const value = accepted(path);
+    if (value === null) continue;
+    if (value && dirname(path) === path) return null;
+    return { path, trusted: value };
+  }
+  return null;
+}
+
 /** `folder` and every folder above it, nearest first. */
 function ancestors(folder: string): string[] {
   const out: string[] = [];
@@ -59,21 +83,17 @@ export function trustedIn(
   const projects = (claudeJson as { projects?: unknown }).projects;
   if (!projects || typeof projects !== "object") return false;
   const record = projects as Record<string, unknown>;
-  const seen = new Set<string>();
-  for (const path of [...ancestors(folder), ...ancestors(real)]) {
-    if (seen.has(path)) continue;
-    seen.add(path);
-    if (!Object.hasOwn(record, path)) continue;
-    const project = record[path];
-    if (
-      project &&
-      typeof project === "object" &&
-      (project as { hasTrustDialogAccepted?: unknown })
-        .hasTrustDialogAccepted === true
-    )
-      return true;
-  }
-  return false;
+  const accepted = (path: string): boolean | null => {
+    if (!Object.hasOwn(record, path)) return null;
+    const value = (record[path] as { hasTrustDialogAccepted?: unknown } | null)
+      ?.hasTrustDialogAccepted;
+    return typeof value === "boolean" ? value : null;
+  };
+  // The real path first: the folder Claude itself resolves.
+  const decided =
+    decidingRecord(accepted, ancestors(real)) ??
+    decidingRecord(accepted, ancestors(folder));
+  return decided?.trusted === true;
 }
 
 /**
@@ -127,11 +147,13 @@ export function claudeTrustOf(
     return typeof value === "boolean" ? value : null;
   };
   const own = accepted(resolve(real)) ?? accepted(resolve(folder));
-  if (own === true) return { own, from: null };
-  const self = new Set([resolve(folder), resolve(real)]);
-  for (const path of [...ancestors(folder), ...ancestors(real)])
-    if (!self.has(path) && accepted(path) === true) return { own, from: path };
-  return { own, from: null };
+  if (own !== null) return { own, from: null };
+  // No record of its own: the nearest folder above with one decides
+  // (`decidingRecord`), and only a yes there is a `from`.
+  const decided =
+    decidingRecord(accepted, ancestors(real)) ??
+    decidingRecord(accepted, ancestors(folder));
+  return { own, from: decided?.trusted ? decided.path : null };
 }
 
 /** {@link claudeTrustOf}, read fresh from `claudeJson`; any doubt reads as none. */

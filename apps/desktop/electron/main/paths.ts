@@ -154,3 +154,14 @@ export function permissionRulesFile(projectFolder: string): string {
 export function permissionAuditFile(projectFolder: string): string {
   return join(projectFolder, "permissions-audit.json");
 }
+
+/**
+ * A project's autonomy dial (PD-08): `<project folder>/autonomy.json`. No
+ * file means the dial is not set.
+ *
+ * @param projectFolder The project's own folder under {@link projectsDir},
+ *   as for {@link permissionRulesFile}.
+ */
+export function autonomyFile(projectFolder: string): string {
+  return join(projectFolder, "autonomy.json");
+}

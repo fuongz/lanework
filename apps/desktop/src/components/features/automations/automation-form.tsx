@@ -1,4 +1,4 @@
-import { type ReactNode, useId, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import {
   AUTOMATION_DEFAULTS,
   AUTOMATION_PRESETS,
@@ -11,6 +11,7 @@ import {
   checkAutomationInput,
   isTimeZone,
 } from "#/../shared/automations";
+import { effectiveKnobs } from "#/../shared/autonomy";
 import {
   AGENT_LABELS,
   type ComposerSettings,
@@ -25,6 +26,7 @@ import {
   WEEKDAY_LABELS,
   zonedToIso,
 } from "#/components/shared/automations/automation-format";
+import { AutomationTrust } from "#/components/shared/automations/automation-trust";
 import { SegmentedControl } from "#/components/shared/common/segmented-control";
 import {
   ModelMenu,
@@ -44,6 +46,7 @@ import {
 import { Textarea } from "#/components/ui/textarea";
 import { cn } from "#/lib/utils";
 import { useAutomations } from "#/stores/automations";
+import { useProjectAutonomy } from "#/stores/autonomy";
 
 type ScheduleKind = AutomationSchedule["kind"];
 
@@ -398,6 +401,19 @@ export function AutomationForm({
   const [draft, setDraft] = useState<Draft>(() =>
     automation ? draftFrom(automation) : blankDraft(),
   );
+  // A new automation starts in the project's dial permission when it has
+  // one (PD-08), until the menu is used. The dial may land after the open.
+  const slug = useAutomations((state) => state.slug);
+  const dial = useProjectAutonomy(automation ? null : slug);
+  const [permissionPicked, setPermissionPicked] = useState(false);
+  const dialPermission = dial ? effectiveKnobs(dial).permission : null;
+  useEffect(() => {
+    if (automation || permissionPicked || !dialPermission) return;
+    setDraft((current) => ({
+      ...current,
+      settings: { ...current.settings, permission: dialPermission },
+    }));
+  }, [automation, permissionPicked, dialPermission]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const zones = useMemo(() => timeZones(), []);
@@ -519,11 +535,12 @@ export function AutomationForm({
                         <PermissionMenu
                           side="bottom"
                           permission={draft.settings.permission}
-                          onChange={(permission) =>
+                          onChange={(permission) => {
+                            setPermissionPicked(true);
                             update({
                               settings: { ...draft.settings, permission },
-                            })
-                          }
+                            });
+                          }}
                         />
                       ),
                     },
@@ -559,6 +576,11 @@ export function AutomationForm({
                       ),
                     },
                   ],
+                },
+                {
+                  title: "Trust",
+                  hideTitle: true,
+                  content: <AutomationTrust slug={slug} agent={draft.agent} />,
                 },
                 {
                   title: "Schedule",
