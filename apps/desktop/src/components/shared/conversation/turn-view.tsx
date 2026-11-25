@@ -992,6 +992,10 @@ export interface PromptLine {
   reply: string;
   /** The answer's next line, quoted under the first in the hover card. */
   more: string;
+  /** Before the latest compaction: out of the model's context. */
+  compacted?: boolean;
+  /** Folded away in the chat now: a jump unfolds it first. */
+  folded?: boolean;
 }
 
 /** The TOC's lines, one for each prompt and its answer. */

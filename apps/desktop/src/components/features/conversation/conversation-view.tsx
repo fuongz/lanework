@@ -593,8 +593,19 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   const [showDown, setShowDown] = useState(false);
   const anchors = useRef(new Map<string, HTMLElement>());
   const [current, setCurrent] = useState<string | null>(null);
-  // Only the turns drawn: a folded one has no place to jump to.
-  const entries = useMemo(() => promptLines(visible), [visible]);
+  // Every turn the page holds, folded ones too: a compaction folds what came
+  // before it, and the TOC still lists it, marked; a jump unfolds it first.
+  const entries = useMemo(() => {
+    const at = new Map(shown.map((turn, index) => [turn.id, index]));
+    return promptLines(shown).map((entry) => {
+      const index = at.get(entry.id) ?? 0;
+      return {
+        ...entry,
+        compacted: index < compactedBefore,
+        folded: index < firstShown,
+      };
+    });
+  }, [shown, firstShown, compactedBefore]);
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
 
@@ -711,11 +722,34 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     };
   }, [toBottom, locate]);
 
-  const jump = useCallback((turnId: string) => {
-    anchors.current
-      .get(turnId)
-      ?.scrollIntoView({ block: "start", behavior: "smooth" });
-  }, []);
+  /** A folded prompt the TOC jumped to: scrolled to once it is drawn. */
+  const [pendingJump, setPendingJump] = useState<string | null>(null);
+  const jump = useCallback(
+    (turnId: string) => {
+      const node = anchors.current.get(turnId);
+      if (node) {
+        node.scrollIntoView({ block: "start", behavior: "smooth" });
+        return;
+      }
+      // Folded away: unfold as many compactions as reach back to it.
+      const index = shown.findIndex((turn) => turn.id === turnId);
+      if (index < 0) return;
+      let count = revealed;
+      while ((compactions[compactions.length - 1 - count] ?? 0) > index)
+        count++;
+      setUnfolded({ id, count });
+      setPendingJump(turnId);
+    },
+    [shown, compactions, revealed, id],
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `visible` changes once the unfolded turns are drawn.
+  useEffect(() => {
+    if (!pendingJump) return;
+    const node = anchors.current.get(pendingJump);
+    if (!node) return;
+    setPendingJump(null);
+    node.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [pendingJump, visible]);
 
   // ─── Actions ──────────────────────────────────────────────────────────────
   const answer = useCallback(
