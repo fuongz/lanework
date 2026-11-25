@@ -67,6 +67,37 @@ export function parseRepoRef(raw: string): RepoRef | null {
   return { owner, repo };
 }
 
+/** A pull request named by its GitHub URL. */
+export interface PullRef extends RepoRef {
+  number: number;
+}
+
+/** `https://github.com/<owner>/<repo>/pull/<n>`, with anything after it. */
+const PULL_URL =
+  /^https?:\/\/(?:www\.)?github\.com\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)\/pull\/(\d{1,7})(?:[/?#].*)?$/i;
+
+/**
+ * The pull request a GitHub URL names, or null (FE-174).
+ *
+ * NOTE: github.com only, and `/pull/<n>` only: an issue, a commit or a
+ * GitHub Enterprise host stays a plain link.
+ */
+export function parsePullUrl(href: string): PullRef | null {
+  const match = PULL_URL.exec(href.trim());
+  if (!match) return null;
+  const [, owner, repo, number] = match;
+  if (repo === "." || repo === "..") return null;
+  return { owner, repo, number: Number(number) };
+}
+
+/** Whether two refs name the same repository: GitHub ignores case. */
+export function sameRepo(a: RepoRef, b: RepoRef): boolean {
+  return (
+    a.owner.toLowerCase() === b.owner.toLowerCase() &&
+    a.repo.toLowerCase() === b.repo.toLowerCase()
+  );
+}
+
 /**
  * What the GitHub CLI says about this machine.
  *

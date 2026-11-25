@@ -8,6 +8,7 @@
 // stands for. Settings are names picked from the lists below, checked again
 // in main before they become a flag.
 
+import { type PullRef, parsePullUrl } from "./git";
 import type { TeamLead } from "./orchestration";
 import type { AgentCard, SessionLauncher } from "./terminal";
 
@@ -1791,6 +1792,11 @@ export interface ConversationFacts {
    * switched agents, two sessions or more.
    */
   thread?: ThreadPart[];
+  /**
+   * The GitHub pull requests it printed or wrote about, newest first, any
+   * repository's (FE-174): the session details keep the project's own.
+   */
+  pulls?: PullRef[];
 }
 
 /** One session of a thread, as the session details list it (FE-170). */
@@ -1924,9 +1930,61 @@ export function contactsOf(turns: readonly Turn[]): ConversationContacts {
   };
 }
 
+/** Every GitHub pull request URL in a text. */
+const PULL_URLS =
+  /https?:\/\/(?:www\.)?github\.com\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+\/pull\/\d{1,7}\b/gi;
+
+/** Every pull request a text links to, in order, repeats kept. */
+export function pullRefsIn(text: string): PullRef[] {
+  const out: PullRef[] = [];
+  for (const match of text.matchAll(PULL_URLS)) {
+    const ref = parsePullUrl(match[0]);
+    if (ref) out.push(ref);
+  }
+  return out;
+}
+
+/** The most pull requests one conversation's facts carry. */
+const PULLS_MAX = 20;
+
+/**
+ * The pull requests a conversation printed (a command's output, such as
+ * `gh pr create`'s) or its agent wrote about, newest first, once each
+ * (FE-174).
+ *
+ * NOTE: Never the person's own prompts, nor a command's input: a link
+ * pasted or merely named is not one the session made or worked on.
+ */
+export function pullLinksOf(turns: readonly Turn[]): PullRef[] {
+  const found = new Map<string, PullRef>();
+  const take = (text: string) => {
+    for (const ref of pullRefsIn(text)) {
+      const key = `${ref.owner}/${ref.repo}#${ref.number}`.toLowerCase();
+      // Re-set to move it last: the newest mention wins the order.
+      found.delete(key);
+      found.set(key, ref);
+    }
+  };
+  for (const turn of turns) {
+    if (turn.role !== "assistant") continue;
+    for (const block of turn.blocks) {
+      if (block.type === "text") take(block.text);
+      else if (block.type === "tools")
+        for (const call of block.calls)
+          if (call.kind === "command" && !call.error && call.output)
+            take(call.output);
+    }
+  }
+  return [...found.values()].reverse().slice(0, PULLS_MAX);
+}
+
 /** A conversation's facts out of its turns. */
 export function factsOf(turns: readonly Turn[]): ConversationFacts {
-  return { web: webSourcesOf(turns), contacts: contactsOf(turns) };
+  return {
+    web: webSourcesOf(turns),
+    contacts: contactsOf(turns),
+    pulls: pullLinksOf(turns),
+  };
 }
 
 /** The most searches and sources one panel shows. */

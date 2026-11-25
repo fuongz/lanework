@@ -1,8 +1,11 @@
 import { Globe02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useParams } from "@tanstack/react-router";
 import { memo } from "react";
 import { isOpenableUrl, isPreviewUrl } from "#/../shared/conversation";
+import { parsePullUrl } from "#/../shared/git";
 import type { LinkRenderer } from "#/components/shared/common/markdown-body";
+import { PullChip } from "#/components/shared/pulls/pull-card";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -16,6 +19,7 @@ import {
 } from "#/components/ui/tooltip";
 import { cn } from "#/lib/utils";
 import { notify } from "#/stores/notify";
+import { useIsProjectRepo } from "#/stores/project-pulls";
 import { LinkIcon, usePreview } from "./link-icon";
 
 /** A link's host, for a link written as its own URL that main won't preview. */
@@ -152,12 +156,35 @@ const LinkChip = memo(function LinkChip({
   );
 });
 
+/**
+ * A link in the chat, or one of the project's pull requests (FE-174).
+ *
+ * NOTE: A pull request link becomes a chip only once the project's own
+ * repository is known to be the one it names; until then, and for any other
+ * repository, it stays the plain link it always was.
+ */
+const ChatLink = memo(function ChatLink({
+  href,
+  text,
+  live,
+}: {
+  href: string;
+  text: string;
+  live: boolean;
+}) {
+  const { slug } = useParams({ strict: false }) as { slug?: string };
+  const ref = parsePullUrl(href);
+  const ours = useIsProjectRepo(ref ? (slug ?? null) : null, ref);
+  if (ref && slug && ours) return <PullChip slug={slug} number={ref.number} />;
+  return <LinkChip href={href} text={text} live={live} />;
+});
+
 /** The chat's link renderer for {@link MarkdownBody} and {@link LinkedText}. */
 export const chatLink: LinkRenderer = (span) =>
   span.wiki ? (
     span.raw
   ) : (
-    <LinkChip href={span.href} text={span.text} live={false} />
+    <ChatLink href={span.href} text={span.text} live={false} />
   );
 
 /**
@@ -165,4 +192,4 @@ export const chatLink: LinkRenderer = (span) =>
  * preview until the turn closes (FE-79/D3).
  */
 export const liveChatLink: LinkRenderer = (span) =>
-  span.wiki ? span.raw : <LinkChip href={span.href} text={span.text} live />;
+  span.wiki ? span.raw : <ChatLink href={span.href} text={span.text} live />;

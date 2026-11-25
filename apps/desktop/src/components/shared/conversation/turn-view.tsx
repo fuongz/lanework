@@ -69,6 +69,7 @@ import {
 } from "./turn-view.launched-session";
 import { chatLink, liveChatLink } from "./turn-view.link-chip";
 import { PeerTurnView } from "./turn-view.peer";
+import { pullsInCalls, ToolPullCard } from "./turn-view.pull-cards";
 import { SourcesButton, SourcesList } from "./turn-view.sources";
 import { ToolGroup } from "./turn-view.tool-group";
 
@@ -744,6 +745,8 @@ function AssistantView({
           // A conductor's sessions stay in sight under the folded commands
           // that started them.
           const launched = launchedSessions(block.calls);
+          // FE-174: a pull request a command printed, as a card.
+          const pulls = pullsInCalls(block.calls);
           const group = (
             <ToolGroup
               key={key}
@@ -759,7 +762,7 @@ function AssistantView({
               conversation={conversation}
             />
           );
-          if (!launched.length) return group;
+          if (!launched.length && !pulls.length) return group;
           return (
             <div key={key} className="flex min-w-0 flex-col gap-2">
               {group}
@@ -768,6 +771,13 @@ function AssistantView({
                   key={session.sessionId}
                   session={session}
                   slug={slug}
+                />
+              ))}
+              {pulls.map((pull) => (
+                <ToolPullCard
+                  key={`${pull.owner}/${pull.repo}#${pull.number}`}
+                  slug={slug}
+                  pull={pull}
                 />
               ))}
             </div>

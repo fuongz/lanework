@@ -2,7 +2,6 @@ import {
   FilterIcon,
   GitMergeIcon,
   GitPullRequestClosedIcon,
-  GitPullRequestDraftIcon,
   GitPullRequestIcon,
   ListViewIcon,
   PencilEdit02Icon,
@@ -29,6 +28,7 @@ import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import { ListGroupHeader } from "#/components/shared/navigation/list-group-header";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
 import { SourceHeader } from "#/components/shared/navigation/source-tabs";
+import { stateIcon } from "#/components/shared/pulls/pull-state";
 import {
   Empty,
   EmptyDescription,
@@ -68,28 +68,6 @@ const STATUS_LABEL: Record<PullStatus, string> = {
   merged: "Merged",
   closed: "Closed",
 };
-
-/**
- * What a pull request's state looks like.
- *
- * Merged and closed get different marks because they are different outcomes,
- * as GitHub draws them: a shipped change and an abandoned one.
- */
-function stateIcon(pull: PullRequest) {
-  if (pull.state === "merged")
-    return { icon: GitMergeIcon, tone: "text-violet-600 dark:text-violet-400" };
-  if (pull.state === "closed")
-    return {
-      icon: GitPullRequestClosedIcon,
-      tone: "text-rose-600 dark:text-rose-400",
-    };
-  if (pull.draft)
-    return { icon: GitPullRequestDraftIcon, tone: "text-muted-foreground" };
-  return {
-    icon: GitPullRequestIcon,
-    tone: "text-emerald-600 dark:text-emerald-400",
-  };
-}
 
 /** What the pull request list can be filtered on. */
 const PULL_FILTERS = [

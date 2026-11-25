@@ -7,6 +7,7 @@ import {
   GitBranchIcon,
   GitCommitIcon,
   GitForkIcon,
+  GitPullRequestIcon,
   Globe02Icon,
   MessageMultiple01Icon,
   Robot02Icon,
@@ -29,6 +30,7 @@ import type {
   ConversationSubagent,
   ThreadPart,
 } from "#/../shared/conversation";
+import type { PullRef } from "#/../shared/git";
 import {
   type AgentCommit,
   type AgentFiles,
@@ -60,6 +62,7 @@ import {
 import { splitPath } from "#/components/shared/diff/diff-file-header";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
+import { stateIcon, stateLabel } from "#/components/shared/pulls/pull-state";
 import { MARK } from "#/components/shared/repo/file-tree";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import { Badge } from "#/components/ui/badge";
@@ -67,6 +70,7 @@ import { ipcMessage } from "#/lib/ipc-error";
 import { relativeTime } from "#/lib/relative-time";
 import { cn } from "#/lib/utils";
 import { mergeWebSearches, type WebSearch } from "#/lib/web-sources";
+import { useProjectPull, useSessionPulls } from "#/stores/project-pulls";
 import { useWorktree } from "#/stores/worktree";
 import { SourceRows } from "./conductor-sessions.sources";
 import { ThreadRow } from "./conductor-sessions.thread";
@@ -90,6 +94,8 @@ interface Reads {
   contacts: (ConversationContacts & { conversation: string }) | null;
   /** Its thread's sessions, when it switched agents (FE-170). */
   thread: ThreadPart[] | null;
+  /** The pull requests it printed or wrote about, newest first (FE-174). */
+  pulls: PullRef[] | null;
   /** Both reads failed: why. */
   error: string | null;
 }
@@ -154,6 +160,8 @@ function useReads(project: string, slug: string, sources: ReadSource[]) {
               : null,
           thread:
             chat.status === "fulfilled" ? (chat.value.thread ?? null) : null,
+          pulls:
+            chat.status === "fulfilled" ? (chat.value.pulls ?? null) : null,
           error:
             workspace.status === "rejected" && files.status === "rejected"
               ? ipcMessage(workspace.reason, "This session could not be read.")
@@ -205,7 +213,12 @@ function merge(reads: Reads[]) {
   let webPartial = false;
   const peers = new Map<string, ConversationPeer>();
   const subagents: (ConversationSubagent & { conversation: string })[] = [];
+  const pulls = new Map<string, PullRef>();
   for (const read of reads) {
+    for (const pull of read.pulls ?? []) {
+      const key = `${pull.owner}/${pull.repo}#${pull.number}`.toLowerCase();
+      if (!pulls.has(key)) pulls.set(key, pull);
+    }
     for (const peer of read.contacts?.peers ?? []) {
       const known = peers.get(peer.key);
       peers.set(
@@ -255,6 +268,7 @@ function merge(reads: Reads[]) {
       if (!commits.has(commit.sha)) commits.set(commit.sha, commit);
   }
   return {
+    pulls: [...pulls.values()],
     workspaces: [...places.values()].sort((a, b) => b.count - a.count),
     files: {
       files: [...byPath.values()].sort((a, b) =>
@@ -441,7 +455,8 @@ function Facts({
   merged: ReturnType<typeof merge>;
   tasks: ReactNode;
 }) {
-  const { workspaces, files, commits, web, peers, subagents, thread } = merged;
+  const { workspaces, files, commits, web, peers, subagents, thread, pulls } =
+    merged;
   const pages = new Set(
     web.searches.flatMap((search) => search.sources.map((s) => s.url)),
   ).size;
@@ -488,6 +503,11 @@ function Facts({
             ))}
           </Group>
         )}
+        <PullRequestsFacts
+          slug={slug}
+          branches={workspaces.map((workspace) => workspace.branch)}
+          links={pulls}
+        />
       </Section>
     );
   const work =
@@ -538,6 +558,110 @@ function Facts({
  */
 function placeName(workspace: { path: string; linked: boolean }): string {
   return workspace.linked ? folderName(workspace.path) : "main";
+}
+
+/**
+ * The session's pull requests (FE-174/D1a): its branches' and the ones it
+ * printed or wrote about. One shows as a row of its own; more fold into a
+ * Pull requests group, as Changes does. Nothing when it has none.
+ */
+function PullRequestsFacts({
+  slug,
+  branches,
+  links,
+}: {
+  slug: string;
+  branches: (string | null)[];
+  links: PullRef[];
+}) {
+  const numbers = useSessionPulls(slug, branches, links);
+  if (numbers.length === 0) return null;
+  const [only] = numbers;
+  if (numbers.length === 1 && only !== undefined)
+    return <PullRequestRow slug={slug} number={only} />;
+  return (
+    <Group
+      icon={GitPullRequestIcon}
+      label="Pull requests"
+      count={numbers.length}
+    >
+      {numbers.map((number) => (
+        <li key={number}>
+          <PullRequestRow slug={slug} number={number} nested />
+        </li>
+      ))}
+    </Group>
+  );
+}
+
+/**
+ * One of the session's pull requests, a click away from the Pull requests
+ * view: `Pull request ··· #N State` on its own, `#N title State` in the
+ * group.
+ */
+function PullRequestRow({
+  slug,
+  number,
+  nested = false,
+}: {
+  slug: string;
+  number: number;
+  nested?: boolean;
+}) {
+  const navigate = useNavigate();
+  const pull = useProjectPull(slug, number);
+  const mark = pull ? stateIcon(pull) : null;
+  const status = pull ? stateLabel(pull) : null;
+  const title = pull?.title ?? `Pull request #${number}`;
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        void navigate({
+          to: "/w/$slug/issues/pulls/$number",
+          params: { slug, number: String(number) },
+          search: { tab: "all", status: "all" },
+        })
+      }
+      title={`Open #${number} ${title}`}
+      aria-label={`Open pull request #${number}, ${title}${status ? `, ${status}` : ""}`}
+      className={cn(
+        nested ? SUB_ROW : ROW,
+        "hover:bg-foreground/[0.04] text-left",
+      )}
+    >
+      <HugeiconsIcon
+        icon={mark?.icon ?? GitPullRequestIcon}
+        className={cn(mark?.tone ?? QUIET, "size-4 shrink-0")}
+        strokeWidth={1.6}
+        aria-hidden="true"
+      />
+      {nested ? (
+        <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+          <span className={cn(QUIET, "shrink-0 tabular-nums")}>#{number}</span>
+          <span className="min-w-0 truncate">{title}</span>
+        </span>
+      ) : (
+        <span className="shrink-0 font-medium">Pull request</span>
+      )}
+      <span
+        className={cn(
+          QUIET,
+          "flex min-w-0 shrink-0 items-center justify-end gap-1.5 text-right",
+          !nested && "ml-auto",
+        )}
+      >
+        {!nested && <span className="tabular-nums">#{number}</span>}
+        {status && <span className={mark?.tone}>{status}</span>}
+      </span>
+      <HugeiconsIcon
+        icon={ArrowRight01Icon}
+        className={cn(QUIET, "size-3.5 shrink-0")}
+        strokeWidth={1.8}
+        aria-hidden="true"
+      />
+    </button>
+  );
 }
 
 function BranchName({ branch }: { branch: string | null }) {
