@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
+import { withLoginPath } from "./login-path";
 
 /**
  * The one way the app runs `git` in a user's folder (FE-77, D1).
@@ -27,6 +28,9 @@ import { pipeline } from "node:stream/promises";
  *
  * - `execFile`, never `exec`: there is no shell, so a path with a space, a
  *   quote or a `;` is an argument, not syntax.
+ * - The user's login-shell PATH ({@link withLoginPath}): what git starts by
+ *   name (`git-lfs` from a hook or a filter, a hook's `bun`) is found as in
+ *   a terminal, not only on launchd's PATH.
  *
  * NOTE: Windows release blocker (SX-02, D10 deferred). `git` is looked up by
  * name with `cwd` set to the repository. On Windows the current directory is
@@ -102,19 +106,23 @@ export interface GitOptions {
   ok?: number[];
   /** Milliseconds; 15 s when unset. */
   timeout?: number;
-  /** The whole environment; `process.env` when unset. */
+  /**
+   * The whole environment; `process.env` when unset. Its PATH gets the login
+   * shell's in front either way.
+   */
   env?: NodeJS.ProcessEnv;
   /** Bytes of output allowed; {@link MAX_OUTPUT} when unset. */
   maxBuffer?: number;
 }
 
-function exec(
+async function exec(
   flags: readonly string[],
   cwd: string,
   args: string[],
   options: GitOptions,
 ): Promise<GitResult> {
   const ok = options.ok ?? [0];
+  const env = await withLoginPath(options.env ?? process.env);
   return new Promise((resolve, reject) => {
     execFile(
       "git",
@@ -125,7 +133,7 @@ function exec(
         maxBuffer: options.maxBuffer ?? MAX_OUTPUT,
         windowsHide: true,
         encoding: options.encoding ?? "utf8",
-        env: options.env ?? process.env,
+        env,
       },
       (error, stdout, stderr) => {
         if (!error) return resolve({ stdout, code: 0 });
@@ -170,6 +178,7 @@ export async function gitReadToFile(
 ): Promise<void> {
   const child = spawn("git", [...READ_FLAGS, ...args], {
     cwd,
+    env: await withLoginPath(process.env),
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
     signal: AbortSignal.timeout(DEFAULT_TIMEOUT),

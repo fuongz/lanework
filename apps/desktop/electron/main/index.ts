@@ -66,6 +66,7 @@ import { savedLwkMode } from "./conversation/power";
 import { registerDictation } from "./dictation";
 import { registerFileFinder } from "./file-finder";
 import { readLinkedOpenPulls, registerGit } from "./git";
+import { loginPath } from "./git/login-path";
 import { registerHandoff } from "./handoff";
 import { registerHarness } from "./harness";
 import { registerInstructions } from "./instructions";
@@ -538,6 +539,9 @@ app
       allowed(permission),
     );
     registerAppProtocol(join(__dirname, "../../client"));
+    // Ask the login shell for its PATH now, while the window loads, so the
+    // first `git` status does not wait on the user's profile.
+    void loginPath();
     if (devUrl) applyDevCsp(devUrl);
     handle(channels.appInfo, devUrl, (args): AppInfo => {
       if (args.length) throw new Error("This operation takes no arguments");

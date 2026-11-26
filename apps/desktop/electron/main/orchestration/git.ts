@@ -43,6 +43,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { withLoginPath } from "../git/login-path";
 import { MAX_OUTPUT, READ_FLAGS } from "../git/runner";
 import { resolvedPath, within } from "./scopes";
 
@@ -100,12 +101,13 @@ function noDiffDrivers(args: string[]): string[] {
  *
  * @throws With git's last lines when it exits with a code not in `ok`.
  */
-function git(
+async function git(
   cwd: string,
   args: string[],
   ok: number[] = [0],
   timeout = 60_000,
 ): Promise<Run> {
+  const env = await withLoginPath(gitEnv());
   return new Promise((resolve, reject) => {
     execFile(
       "git",
@@ -116,7 +118,7 @@ function git(
         maxBuffer: MAX_OUTPUT,
         windowsHide: true,
         encoding: "buffer",
-        env: gitEnv(),
+        env,
       },
       (error, stdout, stderr) => {
         if (!error) return resolve({ stdout, code: 0 });
