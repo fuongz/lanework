@@ -13,8 +13,12 @@ import {
   DEFAULT_USAGE_FORECAST_SETTINGS,
   type ForecastWindow,
   forecastOf,
+  type HeldForecast,
+  HOLD_MS,
   historyKey,
+  holdForecast,
   readUsageForecastSettings,
+  type UsageForecast,
   type UsageSample,
   WINDOW_MINUTES,
   windowOfMinutes,
@@ -372,5 +376,102 @@ describe("settings and keys", () => {
 
   test("historyKey joins agent and window", () => {
     assert.equal(historyKey("codex", "weekly"), "codex:weekly");
+  });
+});
+
+describe("holdForecast (V5)", () => {
+  const forecast = (resetsAt: number): UsageForecast => ({
+    usedPercent: 50,
+    ratePercentPerHour: 30,
+    exhaustAt: NOW + HOUR,
+    resetsAt,
+    shortByMs: 3 * HOUR,
+  });
+
+  test("a fresh forecast is kept and stamped", () => {
+    const held = holdForecast(null, forecast(NOW + 4 * HOUR), NOW, "five-hour");
+    assert.equal(held?.seenAt, NOW);
+  });
+
+  test("nothing to keep when nothing was shown", () => {
+    assert.equal(holdForecast(null, null, NOW, "five-hour"), null);
+  });
+
+  test("a forecast that stopped holding stays for HOLD_MS, then goes", () => {
+    const first = holdForecast(
+      null,
+      forecast(NOW + 4 * HOUR),
+      NOW,
+      "five-hour",
+    );
+    const hold = HOLD_MS["five-hour"];
+    const soon = NOW + hold - MINUTE;
+    assert.equal(holdForecast(first, null, soon, "five-hour"), first);
+    assert.equal(holdForecast(first, null, NOW + hold, "five-hour"), null);
+  });
+
+  test("a new reading that holds again restarts the wait", () => {
+    const first = holdForecast(
+      null,
+      forecast(NOW + 4 * HOUR),
+      NOW,
+      "five-hour",
+    );
+    const again = holdForecast(
+      first,
+      forecast(NOW + 4 * HOUR),
+      NOW + 15 * MINUTE,
+      "five-hour",
+    );
+    assert.equal(again?.seenAt, NOW + 15 * MINUTE);
+  });
+
+  test("it does not outlive its window", () => {
+    const first = holdForecast(
+      null,
+      forecast(NOW + 5 * MINUTE),
+      NOW,
+      "five-hour",
+    );
+    assert.equal(
+      holdForecast(first, null, NOW + 6 * MINUTE, "five-hour"),
+      null,
+    );
+  });
+
+  /**
+   * Claude polled every 5 minutes in whole percents, a user burning near the
+   * margin (22 %/h, the 5-hour window): without the hold the forecast tips on
+   * and off ten times; with it, it comes on once and stays until the end.
+   */
+  test("a pace near the margin does not flicker between readings", () => {
+    const start = Date.UTC(2026, 10, 28, 8);
+    const resetsAt = start + 5 * HOUR;
+    let samples: UsageSample[] = [];
+    let held: HeldForecast | null = null;
+    let raw: boolean | null = null;
+    let kept: boolean | null = null;
+    let rawFlips = 0;
+    let keptFlips = 0;
+    for (let m = 5; m <= 285; m += 5) {
+      const now = start + m * MINUTE;
+      const used = Math.round((22 * m) / 60 + Math.sin(m / 7) * 1.5);
+      samples = appendSample(
+        samples,
+        { at: now, usedPercent: Math.max(0, used), resetsAt },
+        "five-hour",
+      );
+      const fresh = forecastOf(samples, "five-hour", now, settings);
+      held = holdForecast(held, fresh, now, "five-hour");
+      if (raw !== null && (fresh !== null) !== raw) rawFlips++;
+      if (kept !== null && (held !== null) !== kept) keptFlips++;
+      raw = fresh !== null;
+      kept = held !== null;
+    }
+    assert.ok(
+      rawFlips >= 4,
+      `expected the raw forecast to flicker: ${rawFlips}`,
+    );
+    assert.ok(keptFlips <= 2, `held forecast flipped ${keptFlips} times`);
   });
 });

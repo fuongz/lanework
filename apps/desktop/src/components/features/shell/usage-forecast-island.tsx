@@ -3,7 +3,7 @@ import {
   MultiplicationSignIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { HarnessIcon } from "#/components/shared/agents/harness-island";
 import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/utils";
@@ -23,7 +23,9 @@ import {
   type ForecastAgent,
   type ForecastWindow,
   forecastOf,
+  type HeldForecast,
   historyKey,
+  holdForecast,
   type UsageForecast,
   type UsageHistory,
 } from "../../../../shared/usage-forecast";
@@ -295,14 +297,26 @@ export function UsageForecastIsland() {
   const { history, now } = useUsageHistory(settings.enabled);
   const [quiet, setQuiet] = useState(loadQuiet);
 
+  // NOTE: What each window showed last, kept for `HOLD_MS[window]` once its forecast
+  // stops holding (V5): a pace near the margin tips on and off between two
+  // whole-percent readings, and the island would flicker with it. Written
+  // while rendering, but only from (previous, reading, time), so a second
+  // render of the same reading lands on the same value.
+  const held = useRef<Partial<Record<ForecastKey, HeldForecast | null>>>({});
   const forecasts: Partial<Record<ForecastKey, UsageForecast | null>> = {};
   for (const agent of FORECAST_AGENTS)
     for (const window of FORECAST_WINDOWS) {
       const key = historyKey(agent, window);
-      forecasts[key] =
+      const fresh =
         history && settings.enabled
           ? forecastOf(history[key] ?? [], window, now, settings)
           : null;
+      const keep =
+        history && settings.enabled
+          ? holdForecast(held.current[key] ?? null, fresh, now, window)
+          : null;
+      held.current[key] = keep;
+      forecasts[key] = keep?.forecast ?? null;
     }
 
   // Drop dismissals whose forecast cleared, once there is a reading to judge

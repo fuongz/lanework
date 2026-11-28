@@ -307,3 +307,47 @@ export function forecastOf(
     shortByMs,
   };
 }
+
+/**
+ * How long a forecast that stopped holding stays on the island (FE-181/V5).
+ *
+ * Claude's usage arrives every 5 minutes in whole percents, so a pace near the
+ * margin tips the forecast on and off from one reading to the next. In a
+ * simulation of 22 %/h with noise it stayed off for 25 to 35 minutes between
+ * two ons, so the five-hour window keeps what it showed for 45 minutes. The
+ * weekly window moves slower (its pace is read over a day): 6 hours.
+ */
+export const HOLD_MS: Record<ForecastWindow, number> = {
+  "five-hour": 45 * MINUTE,
+  weekly: 6 * HOUR,
+};
+
+/** A forecast the island is keeping, and when it last held for real. */
+export interface HeldForecast {
+  forecast: UsageForecast;
+  /** Epoch ms of the last reading that produced `forecast`. */
+  seenAt: number;
+}
+
+/**
+ * What the island shows now: the fresh forecast, else the last one for up to
+ * {@link HOLD_MS} while its window has not reset.
+ *
+ * @param held What {@link holdForecast} returned for this window last time.
+ * @param current What {@link forecastOf} says now; null when it does not hold.
+ * @param window The window the forecast is for: it sets how long to hold.
+ * @returns The forecast to keep (pass it back as `held`), or null once the
+ *   forecast has been gone for its {@link HOLD_MS} or its window reset.
+ */
+export function holdForecast(
+  held: HeldForecast | null,
+  current: UsageForecast | null,
+  now: number,
+  window: ForecastWindow,
+): HeldForecast | null {
+  if (current) return { forecast: current, seenAt: now };
+  if (!held) return null;
+  if (now - held.seenAt >= HOLD_MS[window]) return null;
+  if (held.forecast.resetsAt <= now) return null;
+  return held;
+}
