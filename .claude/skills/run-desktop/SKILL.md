@@ -49,6 +49,9 @@ What setup does (skip with `--no-setup`):
 - `--seed-claude <file.jsonl>` copies one Claude transcript into the temp
   agent config under `--folder`, so a real (e.g. long) chat can be opened.
   The original is only read.
+- `--profile <dir> --home <dir>` keep the app's state between runs, to check
+  what survives a restart: set up once, then relaunch with the same two
+  directories and `--no-setup`. Without them every run is a fresh temp profile.
 - `--gh missing` points `LANEWORK_GH_PATH` at nothing; `--gh loggedout` wraps
   the real `gh` with an empty config until the `gh-login` command;
   `--gh offline` answers every call with gh's "error connecting" text.

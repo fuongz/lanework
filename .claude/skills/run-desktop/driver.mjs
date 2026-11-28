@@ -42,8 +42,19 @@ if (!existsSync(join(DESKTOP, "dist"))) {
 }
 await mkdir(shots, { recursive: true });
 
-const profile = await mkdtemp(join(tmpdir(), "run-desktop-profile-"));
-const home = await mkdtemp(join(tmpdir(), "run-desktop-home-"));
+// `--profile <dir>` and `--home <dir>` keep the state between runs (a restart
+// check): the first run sets up as usual, the next one passes `--no-setup`.
+// Default: fresh temp dirs every run.
+const keptProfile = flag("profile", null);
+const keptHome = flag("home", null);
+if (keptProfile) await mkdir(resolve(keptProfile), { recursive: true });
+if (keptHome) await mkdir(resolve(keptHome), { recursive: true });
+const profile = keptProfile
+  ? resolve(keptProfile)
+  : await mkdtemp(join(tmpdir(), "run-desktop-profile-"));
+const home = keptHome
+  ? resolve(keptHome)
+  : await mkdtemp(join(tmpdir(), "run-desktop-home-"));
 // INF-06 (SR-06): the agents' own config lives under the temp profile too. On
 // launch the app files its `lanework` MCP entry (in local mode, a shim into
 // this throwaway store) in ~/.claude.json and the Codex config, and may
