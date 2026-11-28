@@ -860,6 +860,7 @@ function createTerminal(): DesktopTerminalApi {
       subscribe(terminalChannels.agentActivity, listener),
     codexUsage: (project) =>
       ipcRenderer.invoke(terminalChannels.codexUsage, project),
+    usageHistory: () => ipcRenderer.invoke(terminalChannels.usageHistory),
     refreshClaudeUsage: () =>
       ipcRenderer.invoke(terminalChannels.refreshClaudeUsage),
     refreshCodexUsage: (force) =>

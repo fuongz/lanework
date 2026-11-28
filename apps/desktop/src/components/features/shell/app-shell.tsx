@@ -41,6 +41,7 @@ import { IslandHost } from "./island-host";
 import { McpAuthIsland } from "./mcp-auth-island";
 import { NotifyIsland } from "./notify-island";
 import { SessionTabs } from "./session-tabs";
+import { UsageForecastIsland } from "./usage-forecast-island";
 
 const RAIL_DEFAULT_PX = 240;
 /** The rail folded to its icons: one 36px slot and its margins. */
@@ -504,7 +505,7 @@ export function AppShell() {
       {/* The island, fixed at the top centre over the title bar's edge and
           the page, and what it may say: dictation, board notices, an agent
           waiting on the person (FE-97), the Lanework MCP sign-in, `notify()`
-          toasts, a Lanework update and harness updates. Each content registers with a priority
+          toasts, a usage forecast, a Lanework update and harness updates. Each content registers with a priority
           (`ISLAND_PRIORITY`, in that order) and the host shows the highest in
           one capsule that morphs between them. The contents draw nothing.
 
@@ -516,6 +517,7 @@ export function AppShell() {
       <AwaitingIsland />
       <ClaudeAuthIsland />
       <McpAuthIsland />
+      <UsageForecastIsland />
       <UpdateIsland />
       <HarnessIsland />
       <NotifyIsland />

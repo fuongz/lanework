@@ -8,6 +8,7 @@
 // terminal is for. It cannot start one somewhere else.
 
 import type { Permission } from "./conversation";
+import type { UsageHistory } from "./usage-forecast";
 
 /**
  * What a tab is opened as: a plain shell, or a shell with an agent's CLI typed
@@ -1243,6 +1244,8 @@ export const terminalChannels = {
   agentActivity: "terminal:agent-activity",
   /** The Codex account's usage, and its conversations' goals. */
   codexUsage: "terminal:codex-usage",
+  /** The recorded usage readings the forecast island reads (FE-181). */
+  usageHistory: "terminal:usage-history",
   /** Fetch Claude account usage now, past the cache. */
   refreshClaudeUsage: "terminal:refresh-claude-usage",
   /** Ask Codex for the account's limits and resets now. */
@@ -1508,6 +1511,11 @@ export interface DesktopTerminalApi {
    * neither.
    */
   codexUsage: (project: string) => Promise<CodexUsage>;
+  /**
+   * The usage readings main recorded for Claude and Codex, per window
+   * (FE-181). Takes nothing; only percentages and times come back.
+   */
+  usageHistory: () => Promise<UsageHistory>;
   /**
    * Fetches Claude account usage now, skipping the cache: the popover's
    * refresh button.

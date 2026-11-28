@@ -15,6 +15,7 @@ import { create } from "zustand";
  * | `claudeAuth`     | 250      | Claude refused a turn: sign in again.       |
  * | `mcpAuth`        | 200      | An agent lost its Lanework sign-in.         |
  * | `notify`         | 150      | A toast from `notify()`.                    |
+ * | `usageForecast`  | 130      | A quota may run out before it resets.       |
  * | `update`         | 120      | A newer Lanework is out, or ready.          |
  * | `harness`        | 100      | A newer Claude Code or Codex is out.        |
  *
@@ -27,6 +28,7 @@ export const ISLAND_PRIORITY = {
   claudeAuth: 250,
   mcpAuth: 200,
   notify: 150,
+  usageForecast: 130,
   update: 120,
   harness: 100,
 } as const;

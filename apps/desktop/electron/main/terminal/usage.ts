@@ -12,13 +12,19 @@ import { app } from "electron";
 import type { ConversationAgent } from "../../../shared/conversation";
 import {
   type AgentWrite,
+  type ClaudeQuotaWindow,
   type ClaudeUsage,
   type CodexQuota,
+  type CodexQuotaWindow,
   type CodexResetOutcome,
   type CodexUsage,
   type OpenCodeUsage,
   terminalChannels,
 } from "../../../shared/terminal";
+import type {
+  ForecastAgent,
+  UsageHistory,
+} from "../../../shared/usage-forecast";
 import { codexHome } from "../agent-home";
 import { createAgentCli } from "../conversation/claude-cli";
 import type { UsageWindowReading } from "../conversation/usage-limits";
@@ -42,6 +48,7 @@ import {
 import { type CodexDirs, readCodexUsage } from "./codex-usage";
 import { opencodeDataDirOf } from "./opencode-sessions";
 import { createOpencodeUsage } from "./opencode-usage";
+import { recordUsage, usageHistoryNow } from "./usage-history";
 
 // ── OpenCode Go's limits (FE-104/D10) ────────────────────────────────────
 
@@ -160,6 +167,13 @@ function readCodexServer(): Promise<void> {
           : null
         : await readCodexAppServerQuota(await codexServerCli());
       codexServer = { quota, at: Date.now() };
+      if (quota)
+        recordReading(
+          "codex",
+          quota.at,
+          [quota.primary, quota.secondary],
+          [300, 10080],
+        );
     } catch {
       codexServer = { quota: codexServer?.quota ?? null, at: Date.now() };
     }
@@ -177,11 +191,58 @@ function refreshCodexServer(maxAge: number): Promise<void> {
   return readCodexServer();
 }
 
+/** The newest reading each agent recorded, epoch ms: a reading is recorded once. */
+const recordedAt: Record<ForecastAgent, number> = { claude: 0, codex: 0 };
+
+/**
+ * Record a reading in the usage history, once.
+ *
+ * A reading no newer than the last recorded one is a repeat (a cache or a
+ * stale file answered again) and says nothing new.
+ */
+function recordReading(
+  agent: ForecastAgent,
+  at: string | null,
+  windows: (ClaudeQuotaWindow | CodexQuotaWindow | null | undefined)[],
+  fallbackMinutes: number[],
+): void {
+  const time = at ? Date.parse(at) : Number.NaN;
+  if (!Number.isFinite(time) || time <= recordedAt[agent]) return;
+  const readings = windows.flatMap((window, index) =>
+    window
+      ? [
+          {
+            usedPercent: window.usedPercent,
+            windowMinutes: Number.isFinite(window.windowMinutes)
+              ? window.windowMinutes
+              : fallbackMinutes[index],
+            resetsAt: window.resetsAt,
+          },
+        ]
+      : [],
+  );
+  if (readings.length === 0) return;
+  recordedAt[agent] = time;
+  recordUsage(agent, readings, time);
+}
+
 /**
  * The quota to show: Codex's own answer, unless a turn reported newer
  * windows since. The banked resets only Codex's answer has.
  */
 function codexQuotaNow(rollout: CodexQuota | null): CodexQuota | null {
+  const quota = codexQuotaOf(rollout);
+  if (quota)
+    recordReading(
+      "codex",
+      quota.at,
+      [quota.primary, quota.secondary],
+      [300, 10080],
+    );
+  return quota;
+}
+
+function codexQuotaOf(rollout: CodexQuota | null): CodexQuota | null {
   const server = codexServer?.quota ?? null;
   if (!server) return rollout;
   const windows = Boolean(server.primary || server.secondary);
@@ -271,6 +332,12 @@ function pollClaudeOAuth(force = false): void {
   void claudeOAuth()
     .read({ force })
     .then((after) => {
+      recordReading(
+        "claude",
+        after.at,
+        [after.primary, after.secondary],
+        [300, 10080],
+      );
       if (after.at !== before.at || after.error !== before.error)
         notifyClaudeUsage();
     })
@@ -361,6 +428,12 @@ async function claudeUsageNow(force: boolean): Promise<ClaudeUsage> {
         at: null,
         stale: false,
       });
+  recordReading(
+    "claude",
+    windows.at,
+    [windows.primary, windows.secondary],
+    [300, 10080],
+  );
   return {
     ...windows,
     plan: auth.plan,
@@ -497,6 +570,16 @@ export function registerUsage(
           }
         }
       return outcome;
+    },
+  );
+  // NOTE: No arguments: the history is main's own record of readings it
+  // already took (FE-181), and holds no credential.
+  handle(
+    terminalChannels.usageHistory,
+    devUrl,
+    async (args): Promise<UsageHistory> => {
+      if (args.length !== 0) throw new Error("No arguments are accepted");
+      return usageHistoryNow();
     },
   );
   // NOTE: No arguments, and only the safe `ClaudeUsage` comes back (FE-53):

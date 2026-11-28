@@ -12,6 +12,11 @@ import {
   type DictationLocale,
   isDictationLocale,
 } from "../../shared/dictation";
+import {
+  DEFAULT_USAGE_FORECAST_SETTINGS,
+  readUsageForecastSettings,
+  type UsageForecastSettings,
+} from "../../shared/usage-forecast";
 
 /** One installed font, as a picker saves it: the family and one style. */
 export interface FontChoice {
@@ -255,6 +260,9 @@ interface Preferences {
    */
   islandSound: boolean;
   setIslandSound: (value: boolean) => void;
+  /** What the island's usage forecast warns about (FE-181). */
+  usageForecast: UsageForecastSettings;
+  setUsageForecast: (patch: Partial<UsageForecastSettings>) => void;
   /**
    * True once `persist.rehydrate()` has settled.
    *
@@ -362,6 +370,14 @@ export const usePreferences = create<Preferences>()(
         }),
       islandSound: false,
       setIslandSound: (islandSound) => set({ islandSound }),
+      usageForecast: { ...DEFAULT_USAGE_FORECAST_SETTINGS },
+      setUsageForecast: (patch) =>
+        set((state) => ({
+          usageForecast: readUsageForecastSettings({
+            ...state.usageForecast,
+            ...patch,
+          }),
+        })),
       hydrated: false,
     }),
     {
@@ -386,6 +402,7 @@ export const usePreferences = create<Preferences>()(
         modelOrder,
         customModels,
         islandSound,
+        usageForecast,
       }) => ({
         theme,
         accent,
@@ -403,6 +420,7 @@ export const usePreferences = create<Preferences>()(
         modelOrder,
         customModels,
         islandSound,
+        usageForecast,
       }),
       onRehydrateStorage: () => () =>
         usePreferences.setState({ hydrated: true }),
@@ -442,6 +460,8 @@ export const usePreferences = create<Preferences>()(
           customModels: readCustomModels(saved?.customModels),
           // Missing, or anything but true, reads as off.
           islandSound: saved?.islandSound === true,
+          // Missing reads as the defaults, a bad field as its own default.
+          usageForecast: readUsageForecastSettings(saved?.usageForecast),
           // A record without this key belongs to someone who has already used
           // the app; only a machine with nothing saved is new. Otherwise the
           // tour would replay for every install that predates it.

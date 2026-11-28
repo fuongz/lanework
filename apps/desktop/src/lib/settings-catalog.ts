@@ -1,4 +1,5 @@
 import {
+  Analytics01Icon,
   Archive02Icon,
   BatteryEcoChargingIcon,
   CommandLineIcon,
@@ -85,6 +86,13 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         icon: BatteryEcoChargingIcon,
         keywords:
           "power saver battery energy idle end stop chat agent engine keep running heat cpu memory lwk search engine find grep serve on demand always per search",
+      },
+      {
+        to: "/settings/usage",
+        label: "Usage forecast",
+        icon: Analytics01Icon,
+        keywords:
+          "usage quota limit forecast warning island five hour weekly reset margin",
       },
       {
         to: "/settings/storage",
