@@ -44,7 +44,7 @@ function SessionMark({
  * Open and, while its agent runs, Stop: the actions a session has in the
  * panel, on its row and on its details alike.
  *
- * The Agents rail hides these sessions, so their Stop lives here. A second
+ * Stop lives here for a session the user may act on. A second
  * press confirms while it works: a turn is cut off by Stop. None on a
  * session its conductor did not let the user work in: stopping it is the
  * conductor's call, and main refuses it.

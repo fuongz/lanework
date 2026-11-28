@@ -5,11 +5,10 @@
 // shell. Main starts a conversation in the project's checkout, on the
 // conductor's permission mode, on Claude, Codex or OpenCode (`agent`, by
 // default the conductor's own), and names it after the title. The session is
-// private to the conductor (FE-128): it carries `launchedBy` and is hidden
-// from the Agents rail; the user reaches it through the conductor and sees
-// it read-only, unless the conductor lets them work in it (`userAccess` on
-// start, or `sessions.access` later). Unless
-// told otherwise, main tells the conductor once that session's turn ends, in
+// private to the conductor (FE-128): it carries `launchedBy`. The Agents rail
+// still lists it and the user can open it, but sees it read-only, unless the
+// conductor lets them work in it (`userAccess` on start, or `sessions.access`
+// later). Unless told otherwise, main tells the conductor once that session's turn ends, in
 // a hidden turn of its own, so it reviews the result and reports back.
 // Without user access, the session's permission requests wait on the
 // conductor: it is told of each, reads them with `sessions.read` and answers

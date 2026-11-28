@@ -427,7 +427,12 @@ export async function registerAgentSession(
     });
   // A conductor's own session (FE-128), marked before anything reads it in,
   // so the rail never lists it under Agents first.
-  if (launchedBy) sessions.setLaunchedBy(key, launchedBy);
+  if (launchedBy) {
+    sessions.setLaunchedBy(key, launchedBy);
+    // Its conductor's panel and banner list it from the rail: say so now,
+    // not when a transcript read first finds a title.
+    touchRail(project);
+  }
   if (!where) return;
   watchProject(project, where);
   const read = sourceOf(agent, id, file);
@@ -755,6 +760,7 @@ function watchProject(project: string, folder: string): void {
  * - A conversation nothing was typed in yet, registered when Lanework
  *   started it, is left out: the rail shows its tab as new until then. A
  *   conductor's own is kept untitled: its conductor finds it by its row.
+ *   So is a session a conductor started, typed in by `sessions.start`.
  * - The newest {@link AGENT_SESSION_LIMIT} of the rest, every pinned and
  *   conductor's one besides.
  * - `working` is what the last read found, and nothing ages it: one not
@@ -770,10 +776,17 @@ function railOf(listed: AgentSession[], now = Date.now()): AgentSession[] {
   for (const session of listed) {
     // A conductor's own conversation stays untitled until a prompt of it is
     // read for one, but it was typed in: its row is how its conductor finds
-    // it (FE-128).
-    if (!session.cliTitle && session.conductor === null) continue;
-    // A session a conductor started (FE-128) is hidden from Agents: it never
-    // takes a place the user's own sessions would have.
+    // it (FE-128). So is a session a conductor started: its prompt went in
+    // with `sessions.start`, and its panel and banner read it from this list
+    // before its transcript has given it a title.
+    if (
+      !session.cliTitle &&
+      session.conductor === null &&
+      session.launchedBy === undefined
+    )
+      continue;
+    // A session a conductor started (FE-128) never takes a place the user's
+    // own sessions would have.
     const kept =
       session.pinnedAt !== null ||
       session.conductor !== null ||

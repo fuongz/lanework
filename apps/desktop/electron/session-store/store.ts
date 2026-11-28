@@ -835,8 +835,8 @@ export class SessionStore {
 
   /**
    * Note the conductor that started `key` with `sessions.start` (FE-128),
-   * and whether the user may work in it, or clear both. The rail hides such
-   * a conversation from Agents; the conductor's own view lists it.
+   * and whether the user may work in it, or clear both. The rail lists such
+   * a conversation read-only until `userAccess`; the conductor's own view too.
    *
    * @returns False when there is no such row.
    * @throws When `launchedBy` is not a team lead's id and a project.

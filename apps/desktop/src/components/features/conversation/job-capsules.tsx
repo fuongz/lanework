@@ -174,9 +174,8 @@ function Capsule({
  * prompt once done. Hidden when there are none.
  *
  * On a conductor's chat, also the sessions it started (FE-128) while one
- * works or waits, or that ended since the last prompt: the Agents rail hides
- * them, and this keeps them in sight under the conversation, not only in the
- * Sessions panel.
+ * works or waits, or that ended since the last prompt: this keeps them in
+ * sight under the conversation, not only in the Sessions panel.
  */
 export function JobCapsules({
   slug,

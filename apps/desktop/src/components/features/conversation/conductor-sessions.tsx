@@ -28,8 +28,8 @@ import { useConductorSessions } from "./conductor-sessions.list";
 // The conductor's work and the sessions it started (FE-128), docked beside
 // its chat.
 //
-// The sessions are the conductor's own: the Agents rail hides them, so this
-// is where the user finds them. A toggle on the chat's title bar shows or
+// The sessions are the conductor's own: the Agents rail lists them read-only,
+// and this is where the user sees them with their conductor. A toggle on the chat's title bar shows or
 // hides a panel on the right; the chat narrows to make room, never sits
 // under it. The panel opens on an overview of the conductor and every
 // session together; a session's own details are one click in.

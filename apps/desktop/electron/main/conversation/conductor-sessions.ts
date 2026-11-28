@@ -155,8 +155,8 @@ export interface ConductorSessionsDeps {
   /**
    * Make a conversation just started known to Lanework's session store
    * (FE-112), so the rail lists it without a Pull. Before {@link name}.
-   * `launchedBy` marks it the conductor's own (FE-128): the rail hides it
-   * from Agents, and the user sees it read-only without `userAccess`.
+   * `launchedBy` marks it the conductor's own (FE-128): the rail still lists
+   * it, and the user sees it read-only without `userAccess`.
    */
   register: (
     project: string,
