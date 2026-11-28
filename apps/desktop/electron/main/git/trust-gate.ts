@@ -20,12 +20,14 @@ import {
  * scans the folder's own git config and hooks first. A folder with nothing
  * risky reads as before; a risky one is asked about once, through the asker
  * main installs with {@link setTrustAsker}, and the answer is remembered
- * against those exact findings, so a hook added later asks again.
+ * against those exact findings, so a hook added later asks again. The answer
+ * is the repository's, not the folder's (FE-182): every folder of one
+ * repository, a linked worktree included, shares it.
  *
  * - Electron-free: main supplies the native dialog. With no asker installed
  *   (the hook, a unit run) a risky folder is refused, never run.
- * - Answers live in `~/.lanew/repo-trust.json`. Not under `~/.lanew/git/`,
- *   which `removeLegacyStore` deletes at every start.
+ * - Answers live in `~/.lanew/repo-trust.json`, filed by repository. Not
+ *   under `~/.lanew/git/`, which `removeLegacyStore` deletes at every start.
  * - User-initiated writes (commit, push, pull, switch) are not gated here:
  *   the user asked for them, and they keep the user's own hooks.
  */
@@ -142,7 +144,7 @@ export async function trustState(folder: string): Promise<{
   try {
     const scan = await scanRepoTrust(key);
     if (!scan.risky) return { state: "safe", findings: [] };
-    const known = (await load()).get(key);
+    const known = (await load()).lookup(key, scan);
     const state =
       known && known.fingerprint === trustFingerprint(scan.findings)
         ? known.answer === "trusted"
@@ -176,7 +178,7 @@ export async function restrictTrust(folder: string): Promise<boolean> {
   const key = resolve(folder);
   const scan = await scanRepoTrust(key);
   if (!scan.risky) return false;
-  fresh.delete(key);
+  fresh.clear();
   (await load()).set(key, "restricted", scan);
   return true;
 }
@@ -184,6 +186,9 @@ export async function restrictTrust(folder: string): Promise<boolean> {
 /** Forget a folder's answer, so the next automatic read asks again. */
 export async function forgetTrust(folder: string): Promise<void> {
   const key = resolve(folder);
-  fresh.delete(key);
-  (await load()).forget(key);
+  // The answer is the repository's (FE-182), so every folder of it may have a
+  // "run" verdict still fresh.
+  fresh.clear();
+  const scan = await scanRepoTrust(key).catch(() => null);
+  (await load()).forget(key, scan);
 }

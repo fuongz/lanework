@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { readdir, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { gitReadOut } from "./runner";
 
 /**
@@ -198,7 +199,19 @@ export type TrustDecision =
   | { kind: "ask"; scan: RepoTrustScan };
 
 /**
- * Remembered answers by folder, in memory.
+ * Remembered answers, in memory (FE-182).
+ *
+ * What the user answers is the repository's own config and hooks, which live
+ * in its common git dir and are shared by every folder of it (a subfolder, a
+ * linked worktree). So an answer is kept per repository and findings
+ * fingerprint, under `repo:<git dir>#<hash>`: a new folder of a trusted
+ * repository reads without asking, a hook or filter added later asks again,
+ * and a worktree with config of its own asks once without taking the main
+ * checkout's answer from it.
+ *
+ * Answers an earlier version kept by folder path still count: a folder's own
+ * entry, or its repository root's, answers for it when the findings are the
+ * same, and is filed under the repository from then on.
  *
  * Electron-free: the caller owns where answers are kept. Seed it with
  * `initial` and persist from `onChange`, which receives every answer.
@@ -210,33 +223,93 @@ export class TrustStore {
     initial: Record<string, RememberedTrust> = {},
     private readonly onChange?: (all: Record<string, RememberedTrust>) => void,
   ) {
-    for (const [folder, value] of Object.entries(initial))
-      this.answers.set(resolve(folder), value);
+    for (const [key, value] of Object.entries(initial))
+      this.answers.set(key.startsWith(REPO_PREFIX) ? key : resolve(key), value);
   }
 
-  get(folder: string): RememberedTrust | undefined {
-    return this.answers.get(resolve(folder));
+  /** The key one repository's answer for one set of findings is filed under. */
+  private repoKey(scan: RepoTrustScan): string | null {
+    if (!scan.gitDir) return null;
+    const hash = createHash("sha1")
+      .update(trustFingerprint(scan.findings))
+      .digest("hex")
+      .slice(0, 16);
+    return `${REPO_PREFIX}${resolve(scan.gitDir)}#${hash}`;
   }
 
-  /** Remember `answer` for the findings in `scan`. */
+  /**
+   * The folder-path keys an earlier version may have answered under: the
+   * folder itself and the repository's main work tree root.
+   */
+  private legacyKeys(folder: string, scan: RepoTrustScan): string[] {
+    const keys = [resolve(folder)];
+    if (scan.gitDir && basename(scan.gitDir) === ".git")
+      keys.push(resolve(dirname(scan.gitDir)));
+    return [...new Set(keys)];
+  }
+
+  /**
+   * The answer for `folder`'s repository and these findings, or none.
+   *
+   * A match under a folder path is filed under the repository, so the next
+   * lookup (from any folder of it) finds it there.
+   */
+  lookup(folder: string, scan: RepoTrustScan): RememberedTrust | undefined {
+    const key = this.repoKey(scan);
+    const fingerprint = trustFingerprint(scan.findings);
+    if (key) {
+      const known = this.answers.get(key);
+      if (known) return known;
+    }
+    for (const legacy of this.legacyKeys(folder, scan)) {
+      const known = this.answers.get(legacy);
+      if (known && known.fingerprint === fingerprint) {
+        if (key) {
+          this.answers.set(key, known);
+          this.onChange?.(this.toJSON());
+        }
+        return known;
+      }
+    }
+    return undefined;
+  }
+
+  /** Remember `answer` for the findings in `scan`, for the whole repository. */
   set(folder: string, answer: TrustAnswer, scan: RepoTrustScan): void {
-    this.answers.set(resolve(folder), {
+    const key = this.repoKey(scan) ?? resolve(folder);
+    this.answers.set(key, {
       answer,
       fingerprint: trustFingerprint(scan.findings),
     });
     this.onChange?.(this.toJSON());
   }
 
-  forget(folder: string): void {
-    if (this.answers.delete(resolve(folder))) this.onChange?.(this.toJSON());
+  /**
+   * Forget the answer for `folder`'s repository and these findings, and any
+   * a folder path still holds for them, so the next read asks again.
+   *
+   * @param scan The folder's scan; without one only its own folder-path
+   *   entry goes.
+   */
+  forget(folder: string, scan?: RepoTrustScan | null): void {
+    let changed = false;
+    const drop = (key: string | null) => {
+      if (key && this.answers.delete(key)) changed = true;
+    };
+    if (!scan) drop(resolve(folder));
+    else {
+      drop(this.repoKey(scan));
+      for (const legacy of this.legacyKeys(folder, scan)) drop(legacy);
+    }
+    if (changed) this.onChange?.(this.toJSON());
   }
 
   /** Scan `folder` and weigh it against the remembered answer. */
   async decide(folder: string): Promise<TrustDecision> {
     const scan = await scanRepoTrust(folder);
     if (!scan.risky) return { kind: "run" };
-    const known = this.get(folder);
-    if (known && known.fingerprint === trustFingerprint(scan.findings))
+    const known = this.lookup(folder, scan);
+    if (known)
       return known.answer === "trusted"
         ? { kind: "run" }
         : { kind: "restricted" };
@@ -247,3 +320,6 @@ export class TrustStore {
     return Object.fromEntries(this.answers);
   }
 }
+
+/** Marks a key filed under a repository rather than a folder path. */
+const REPO_PREFIX = "repo:";
